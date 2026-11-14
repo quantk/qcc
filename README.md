@@ -12,27 +12,20 @@ opencode, а qcc ведёт параллельные сессии, хранит 
 
 ## Быстрый старт
 
-Всё окружение описано во `flake.nix` (rust с таргетом `wasm32-wasip2`, `wasm-tools`):
+Одна команда, из любого шелла (сама заходит в `nix develop`):
 
 ```sh
-nix develop
-cargo build
-
-./target/debug/qccd &                                   # демон
-./target/debug/qcc plugin list
-./target/debug/qcc thread spawn --provider echo --prompt 'hello' --follow
-./target/debug/qcc thread list
-./target/debug/qcc thread show <thread-id>
+./dev demo      # поднять демон, прогнать несколько echo-тредов, остановить
+./dev           # qccd на переднем плане, данные в ./.dev
+./dev qcc thread spawn --provider echo --prompt 'hello' --follow   # CLI к этому демону
+./dev check     # fmt, clippy -D warnings, все тесты
+./dev clean     # удалить ./.dev
 ```
 
-У каждой команды есть `--json`. Данные лежат в `~/.local/share/qcc` (`QCC_DATA_DIR`), сокет —
-в `$XDG_RUNTIME_DIR/qcc/qccd.sock` (`QCC_SOCKET`).
+Внутри `nix develop` то же доступно как `make run|demo|check|test|clean`.
 
-Проверки, которые должен проходить каждый этап:
-
-```sh
-./scripts/check.sh      # fmt, clippy -D warnings, тесты
-```
+У каждой команды `qcc` есть `--json`. Вне `./dev` данные лежат в `~/.local/share/qcc`
+(`QCC_DATA_DIR`), сокет — в `$XDG_RUNTIME_DIR/qcc/qccd.sock` (`QCC_SOCKET`).
 
 ## Устройство
 

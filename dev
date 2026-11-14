@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# One entry point for trying qcc out locally. Works from any shell: outside the nix
+# dev shell it re-runs itself inside it.
+#
+#   ./dev             build and run qccd in the foreground (data in ./.dev)
+#   ./dev demo        start a daemon, run a few echo threads through it, stop it
+#   ./dev qcc ARGS    run the CLI against the dev daemon, e.g. ./dev qcc thread list
+#   ./dev check       fmt, clippy and all tests
+#   ./dev test [ARGS] cargo test --workspace [ARGS]
+#   ./dev clean       remove ./.dev (the dev daemon's journal and plugins)
+set -euo pipefail
+cd "$(dirname "$0")"
+
+if [[ -z "${IN_NIX_SHELL:-}" ]] && command -v nix >/dev/null; then
+  exec nix develop --command "$0" "$@"
+fi
+
+# The dev daemon keeps everything in the repository, away from ~/.local/share/qcc.
+export QCC_DATA_DIR="$PWD/.dev"
+export QCC_SOCKET="$QCC_DATA_DIR/qccd.sock"
+# This script may itself run inside an agent session; do not adopt its thread.
+unset QCC_THREAD_ID
+
+build() { cargo build --quiet -p qcc-daemon -p qcc-cli; }
+qcc() { ./target/debug/qcc "$@"; }
+
+wait_for_daemon() {
+  for _ in $(seq 100); do
+    qcc daemon status >/dev/null 2>&1 && return 0
+    sleep 0.1
+  done
+  echo "qccd did not start; see $QCC_DATA_DIR/qccd.log" >&2
+  return 1
+}
+
+command="${1:-run}"
+shift || true
+
+case "$command" in
+  run)
+    build
+    echo "qccd: data in $QCC_DATA_DIR — in another terminal: ./dev qcc thread spawn --provider echo --prompt hi --follow" >&2
+    exec ./target/debug/qccd "$@"
+    ;;
+  qcc)
+    build
+    exec ./target/debug/qcc "$@"
+    ;;
+  demo)
+    build
+    mkdir -p "$QCC_DATA_DIR"
+    if qcc daemon status >/dev/null 2>&1; then
+      echo "using the dev daemon that is already running" >&2
+    else
+      ./target/debug/qccd 2>"$QCC_DATA_DIR/qccd.log" &
+      daemon=$!
+      trap 'kill "$daemon" 2>/dev/null; wait "$daemon" 2>/dev/null || true' EXIT
+      wait_for_daemon
+    fi
+    run() { echo; echo "\$ qcc $*"; qcc "$@"; }
+    run plugin list
+    run thread spawn --provider echo --prompt 'hello from qcc' --follow
+    run thread spawn --provider echo --prompt '/tool grep' --follow
+    run thread spawn --provider echo --prompt '/exec echo output of a real process' --follow
+    run thread list
+    ;;
+  check)
+    exec ./scripts/check.sh
+    ;;
+  test)
+    exec cargo test --workspace "$@"
+    ;;
+  clean)
+    if qcc daemon status >/dev/null 2>&1; then
+      echo "the dev daemon is running; stop it first" >&2
+      exit 1
+    fi
+    rm -rf "$QCC_DATA_DIR"
+    ;;
+  *)
+    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    exit 2
+    ;;
+esac

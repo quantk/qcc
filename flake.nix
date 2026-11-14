@@ -40,6 +40,7 @@
             pkgs.sqlite
             pkgs.wasm-tools
             pkgs.git
+            pkgs.gnumake
           ];
 
           # Everything the Tauri desktop app needs on top of the core shell.

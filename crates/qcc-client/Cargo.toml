@@ -1,0 +1,17 @@
+[package]
+name = "qcc-client"
+description = "Async Rust client of the qccd API, used by the CLI and the desktop app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qcc-domain.workspace = true
+qcc-protocol.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "rt", "macros"] }

@@ -22,7 +22,9 @@ qcc-store = { path = "crates/qcc-store" }
 qcc-plugin-sdk = { path = "crates/qcc-plugin-sdk" }
 qcc-plugin-host = { path = "crates/qcc-plugin-host" }
 qcc-plugins-bundle = { path = "crates/qcc-plugins-bundle" }
-qcc-plugin-testkit = { path = "crates/qcc-plugin-testkit" }
+qcc-protocol = { path = "crates/qcc-protocol" }
+qcc-client = { path = "crates/qcc-client" }
+qcc-daemon = { path = "crates/qcc-daemon" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -33,6 +35,9 @@ wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
 tokio = { version = "1", features = ["sync"] }
 toml = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+anyhow = "1"
 rusqlite = { version = "0.42", features = ["bundled"] }
 tempfile = "3"
 uuid = { version = "1", features = ["v7"] }

@@ -1,0 +1,31 @@
+[package]
+name = "qcc-daemon"
+description = "qccd: the daemon that owns threads, the journal and the plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "qccd"
+path = "src/main.rs"
+
+[dependencies]
+qcc-domain.workspace = true
+qcc-plugin-host.workspace = true
+qcc-plugins-bundle.workspace = true
+qcc-protocol.workspace = true
+qcc-runtime.workspace = true
+qcc-store.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["net", "io-util", "rt-multi-thread", "macros", "signal"] }
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true

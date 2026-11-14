@@ -307,11 +307,12 @@ impl Actor {
             Ok(Err(message)) => Err(PluginError::Rejected(message)),
             Err(trap) => {
                 // A trapped instance may hold broken invariants; it is never entered again.
-                let reason = format!("{trap:#}");
+                // The backtrace goes to the log; the timeline gets the cause.
+                let reason = trap.root_cause().to_string();
                 let state = self.store.data_mut();
                 state.processes.clear();
                 state.timers.clear();
-                tracing::error!(plugin = %state.plugin_id, %reason, "plugin crashed");
+                tracing::error!(plugin = %state.plugin_id, error = %format!("{trap:#}"), "plugin crashed");
                 (state.services.on_crash)(&state.plugin_id, &reason);
                 self.crashed = Some(reason.clone());
                 Err(PluginError::Crashed(reason))

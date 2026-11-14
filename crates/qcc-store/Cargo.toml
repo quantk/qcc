@@ -1,0 +1,20 @@
+[package]
+name = "qcc-store"
+description = "SQLite persistence: the append-only event journal and its projections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qcc-domain.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+qcc-runtime.workspace = true
+tempfile.workspace = true

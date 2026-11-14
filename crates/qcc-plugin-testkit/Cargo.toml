@@ -1,0 +1,20 @@
+[package]
+name = "qcc-plugin-testkit"
+description = "Conformance kit for provider bridges: drive a plugin, assemble its deltas, check the timeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qcc-domain.workspace = true
+qcc-plugin-host.workspace = true
+qcc-plugins-bundle.workspace = true
+qcc-runtime.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

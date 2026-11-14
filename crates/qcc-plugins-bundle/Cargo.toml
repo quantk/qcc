@@ -1,0 +1,11 @@
+[package]
+name = "qcc-plugins-bundle"
+description = "The plugins shipped with the daemon, compiled to components at build time"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[lints]
+workspace = true

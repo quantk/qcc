@@ -1,0 +1,11 @@
+id = "provider-echo"
+name = "Echo provider"
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+deltas = true
+kv = true
+timers = true
+process = ["echo"]

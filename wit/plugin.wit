@@ -1,0 +1,371 @@
+/// The qcc plugin contract.
+///
+/// A plugin is a WebAssembly component that exports two functions: `init`, which
+/// declares what the plugin contributes, and `handle`, which receives every event
+/// addressed to it. Each plugin instance is a single-threaded actor: events are
+/// delivered one at a time, and nothing a plugin imports ever blocks on the outside
+/// world. Long-running things (an agent process writing to stdout, a timer) come back
+/// as events.
+///
+/// Every import is gated by a permission the plugin requests in its manifest.
+package qcc:plugin@0.1.0;
+
+/// The vocabulary shared by imports and exports.
+interface types {
+  /// Minted by the daemon; opaque to the plugin, echoed verbatim.
+  type thread-id = string;
+  /// A JSON document encoded as text.
+  type json = string;
+
+  // ----- the delta grammar ------------------------------------------------------
+  //
+  // A provider bridge parses its agent's dialect into these semantic deltas. It never
+  // mints timeline ids and never tracks the timeline: the core's assembler does.
+
+  record token-usage {
+    input-tokens: u64,
+    output-tokens: u64,
+    cached-input-tokens: option<u64>,
+  }
+
+  /// Cumulative session total plus the last request.
+  record usage-snapshot {
+    total: token-usage,
+    last: token-usage,
+    model-context-window: option<u64>,
+  }
+
+  /// Provider-side identity of an item within a session.
+  variant item-key {
+    /// The provider names its items (a tool-call id, a message id).
+    provider(string),
+    /// An anonymous text stream named by the bridge (`assistant`, `thinking-2`).
+    /// Released when the stream closes or a non-text item opens.
+    anonymous(string),
+  }
+
+  enum text-channel { agent-message, reasoning, plan }
+  enum item-status { pending, completed, failed, declined, interrupted }
+  enum turn-status { completed, failed, interrupted }
+
+  record command-item {
+    command: string,
+    cwd: option<string>,
+    output: option<string>,
+    exit-code: option<s32>,
+  }
+
+  record file-change-item {
+    path: string,
+    diff: option<string>,
+  }
+
+  record tool-item {
+    name: string,
+    input: json,
+    output: option<string>,
+  }
+
+  /// A plugin-defined item; `kind` is `<plugin-id>/<name>`.
+  record extension-item {
+    kind: string,
+    payload: json,
+  }
+
+  variant item-shape {
+    agent-message(string),
+    reasoning(string),
+    plan(string),
+    command(command-item),
+    file-change(file-change-item),
+    file-read(string),
+    search(string),
+    tool(tool-item),
+    extension(extension-item),
+  }
+
+  enum option-kind { allow, deny, other }
+
+  record interaction-option {
+    id: string,
+    label: string,
+    kind: option-kind,
+  }
+
+  record approval-request {
+    title: string,
+    detail: option<string>,
+    options: list<interaction-option>,
+  }
+
+  record question-request {
+    question: string,
+    options: list<interaction-option>,
+    allow-text: bool,
+  }
+
+  variant interaction-request {
+    approval(approval-request),
+    question(question-request),
+  }
+
+  variant interaction-resolution {
+    /// The id of the chosen option.
+    selected(string),
+    text(string),
+    /// Nobody answered: the turn settled or the session went away first.
+    cancelled,
+  }
+
+  record turn-boundary {
+    status: turn-status,
+    error: option<string>,
+    /// With no turn open, own one only if submitted input is still waiting for a turn.
+    claim-if-idle: bool,
+  }
+
+  record item-open {
+    key: item-key,
+    shape: item-shape,
+  }
+
+  /// Always carries the full terminal shape.
+  record item-close {
+    key: item-key,
+    shape: item-shape,
+    status: item-status,
+  }
+
+  record text-delta {
+    key: item-key,
+    channel: text-channel,
+    text: string,
+  }
+
+  record text-close {
+    key: item-key,
+    channel: text-channel,
+    /// The provider-final text; absent, the streamed text stands.
+    text: option<string>,
+  }
+
+  record interaction-ask {
+    /// The provider-side handle the resolution comes back with.
+    request-id: string,
+    /// The item the request is about, if any.
+    item: option<item-key>,
+    request: interaction-request,
+  }
+
+  variant delta {
+    /// The provider took a prompt. Items never open a turn; only this does.
+    turn-open,
+    turn-boundary(turn-boundary),
+    item-open(item-open),
+    item-close(item-close),
+    /// Streamed text; opens the item on first sight of the key.
+    item-text-delta(text-delta),
+    item-text-close(text-close),
+    usage(usage-snapshot),
+    interaction-request(interaction-ask),
+    /// A fresh provider session was constructed: provider-native ids start over.
+    session-reset,
+    /// The provider session is gone, with an optional reason.
+    session-ended(option<string>),
+    provider-error(string),
+    provider-warning(string),
+    /// Provider traffic the bridge did not recognise, kept for diagnostics.
+    unhandled(json),
+  }
+
+  // ----- contributions ----------------------------------------------------------
+
+  /// Session-behaviour facts, reported by the code that implements them.
+  record provider-capabilities {
+    /// A session can be resumed from its `provider-session` handle.
+    resume: bool,
+    fork: bool,
+    /// Input sent while a turn is running is fed into that turn.
+    steer: bool,
+  }
+
+  record provider-info {
+    id: string,
+    name: string,
+    capabilities: provider-capabilities,
+  }
+
+  record environment-info {
+    id: string,
+    name: string,
+  }
+
+  variant contribution {
+    provider(provider-info),
+    environment(environment-info),
+  }
+
+  // ----- events -----------------------------------------------------------------
+
+  record session-start {
+    thread: thread-id,
+    /// Working directory of the thread.
+    cwd: string,
+    model: option<string>,
+    /// A `provider-session` handle returned by an earlier start of this thread.
+    resume: option<string>,
+    /// The first user message, if the session starts with one.
+    prompt: option<string>,
+    /// Variables the agent process must see (`QCC_THREAD_ID`, `QCC_SOCKET`).
+    env: list<tuple<string, string>>,
+  }
+
+  record session-started {
+    /// Durable handle that names this provider session across daemon restarts.
+    provider-session: option<string>,
+  }
+
+  record thread-input {
+    thread: thread-id,
+    text: string,
+  }
+
+  record interaction-answer {
+    thread: thread-id,
+    request-id: string,
+    resolution: interaction-resolution,
+  }
+
+  variant provider-request {
+    start(session-start),
+    input(thread-input),
+    /// Interrupt the running turn. The settling deltas must be emitted before returning.
+    interrupt(thread-id),
+    /// Release the session. After returning, the plugin holds nothing for the thread.
+    stop(thread-id),
+    resolve-interaction(interaction-answer),
+    list-models,
+  }
+
+  record provider-call {
+    /// Id of the contributed provider the call is for.
+    provider: string,
+    request: provider-request,
+  }
+
+  record environment-prepare {
+    thread: thread-id,
+    /// The directory the thread was asked to work on.
+    source-dir: string,
+  }
+
+  record environment-remove {
+    thread: thread-id,
+    cwd: string,
+  }
+
+  variant environment-request {
+    prepare(environment-prepare),
+    remove(environment-remove),
+  }
+
+  record environment-call {
+    environment: string,
+    request: environment-request,
+  }
+
+  record process-output {
+    process: u64,
+    data: list<u8>,
+  }
+
+  record process-exit {
+    process: u64,
+    /// Absent when the process was killed by a signal.
+    code: option<s32>,
+  }
+
+  variant event {
+    provider(provider-call),
+    environment(environment-call),
+    process-stdout(process-output),
+    process-stderr(process-output),
+    /// Delivered after all output of the process.
+    process-exit(process-exit),
+    /// A timer started with `timers.start` fired.
+    timer(u64),
+  }
+
+  record model-info {
+    id: string,
+    name: string,
+  }
+
+  variant outcome {
+    done,
+    session-started(session-started),
+    models(list<model-info>),
+    /// The working directory prepared for the thread.
+    environment-ready(string),
+  }
+}
+
+/// Always available.
+interface log {
+  enum level { debug, info, warn, error }
+  log: func(level: level, message: string);
+}
+
+/// Permission `deltas`. Hand deltas to the core's assembler.
+interface deltas {
+  use types.{thread-id, delta};
+  emit: func(thread: thread-id, deltas: list<delta>) -> result<_, string>;
+}
+
+/// Permission `kv`. A private key-value store that survives restarts.
+interface kv {
+  get: func(key: string) -> result<option<list<u8>>, string>;
+  put: func(key: string, value: list<u8>) -> result<_, string>;
+  remove: func(key: string) -> result<_, string>;
+  keys: func(prefix: string) -> result<list<string>, string>;
+}
+
+/// Permission `timers`.
+interface timers {
+  /// Fire a `timer` event once after `delay-ms`. Returns the timer id.
+  start: func(delay-ms: u64) -> result<u64, string>;
+  cancel: func(timer: u64);
+}
+
+/// Permission `process`, which lists the executables the plugin may run.
+interface process {
+  record spawn-options {
+    program: string,
+    args: list<string>,
+    /// Added to a minimal base environment; the daemon's own is not inherited.
+    env: list<tuple<string, string>>,
+    cwd: option<string>,
+  }
+
+  /// Start a process. Its output and exit arrive as events carrying the returned id.
+  spawn: func(options: spawn-options) -> result<u64, string>;
+  write-stdin: func(process: u64, data: list<u8>) -> result<_, string>;
+  close-stdin: func(process: u64) -> result<_, string>;
+  kill: func(process: u64) -> result<_, string>;
+}
+
+world plugin {
+  import log;
+  import deltas;
+  import kv;
+  import timers;
+  import process;
+
+  use types.{contribution, event, outcome};
+
+  /// Called once after instantiation. Declares what the plugin contributes.
+  export init: func() -> result<list<contribution>, string>;
+
+  /// Called for every event addressed to the plugin, one at a time.
+  export handle: func(event: event) -> result<outcome, string>;
+}

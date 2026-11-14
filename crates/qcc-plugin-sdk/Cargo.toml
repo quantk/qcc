@@ -1,0 +1,13 @@
+[package]
+name = "qcc-plugin-sdk"
+description = "Guest side of the qcc plugin contract: traits with defaults and the export macro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+wit-bindgen.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

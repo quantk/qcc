@@ -1,0 +1,17 @@
+[package]
+name = "provider-echo"
+description = "The smallest provider: echoes prompts back. An example for plugin authors and the daemon's test provider"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+qcc-plugin-sdk.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

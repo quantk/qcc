@@ -1,0 +1,24 @@
+[package]
+name = "qcc-plugin-host"
+description = "Runs plugin components: wasmtime, WIT bindings, permissions and the per-plugin actor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+qcc-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+wasmtime.workspace = true
+wasmtime-wasi.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

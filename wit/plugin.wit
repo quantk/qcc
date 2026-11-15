@@ -173,6 +173,9 @@ interface types {
     state: mcp-state,
     /// Why it failed, in the agent's words.
     error: option<string>,
+    /// The thread keeps it off, but the agent cannot turn this one off (a server
+    /// a Codex plugin brings rather than its configuration).
+    fixed: bool,
   }
 
   variant delta {

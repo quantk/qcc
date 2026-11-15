@@ -207,6 +207,9 @@ struct Session {
     /// An environment the thread moves into once its session is released: prepared
     /// earlier, the old session's last deltas would be taken for the new one's.
     prepare_after_release: Option<ThreadEnvironment>,
+    /// The thread's MCP servers changed and its provider takes that only in a new
+    /// session: release this one as soon as no turn runs.
+    release_when_idle: bool,
 }
 
 struct Subscriber {
@@ -341,6 +344,8 @@ impl Core {
                 break;
             }
             self.handle(command);
+            // Before the queue: a message waiting for the turn goes to the new session.
+            self.release_idle();
             self.drain_queues();
             self.settle_waits();
             if let Some(error) = self.fatal.take() {

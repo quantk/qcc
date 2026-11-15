@@ -70,6 +70,8 @@ pub struct Bridge {
     /// Of those, the ones the configuration has: only a known server can be turned
     /// off, an override for another one fails the whole thread.
     mcp_off: Vec<String>,
+    /// The thread wants these off, but they are not in the configuration.
+    mcp_fixed: HashSet<String>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -174,6 +176,7 @@ impl Bridge {
             mcp_servers: Vec::new(),
             mcp_disabled: Vec::new(),
             mcp_off: Vec::new(),
+            mcp_fixed: HashSet::new(),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -387,12 +390,13 @@ impl Bridge {
                             name: name.clone(),
                             state: McpState::Disabled,
                             error: None,
+                            fixed: false,
                         }));
                         self.mcp_off.push(name);
                     } else {
-                        output.deltas.push(Delta::ProviderWarning(format!(
-                            "Codex has no MCP server {name} in its configuration to turn off"
-                        )));
+                        // A server a plugin or app brings: Codex reports it, and the
+                        // status says it cannot be turned off.
+                        self.mcp_fixed.insert(name);
                     }
                 }
                 let request = self.thread_request();
@@ -538,7 +542,8 @@ impl Bridge {
                 None => None,
             };
             let name = str_field(params, "name").to_owned();
-            output.deltas.push(Delta::McpStatus(McpStatus { name, state, error }));
+            let fixed = self.mcp_fixed.contains(&name);
+            output.deltas.push(Delta::McpStatus(McpStatus { name, state, error, fixed }));
             return;
         }
         let turn = match params.get("turnId").and_then(Value::as_str) {
@@ -795,7 +800,8 @@ mod tests {
             [Delta::McpStatus(McpStatus {
                 name: "docs".into(),
                 state: McpState::Starting,
-                error: None
+                error: None,
+                fixed: false,
             })]
         );
         assert_eq!(
@@ -803,7 +809,8 @@ mod tests {
             [Delta::McpStatus(McpStatus {
                 name: "docs".into(),
                 state: McpState::Failed,
-                error: Some("MCP startup failed".into())
+                error: Some("MCP startup failed".into()),
+                fixed: false,
             })]
         );
         assert!(bridge.on_line(&status("docs", "brand-new", Value::Null)).deltas.is_empty());
@@ -826,8 +833,16 @@ mod tests {
         );
         assert!(matches!(
             &started.deltas[..],
-            [Delta::McpStatus(McpStatus { name, state: McpState::Disabled, .. }), Delta::ProviderWarning(w)]
-                if name == "playwright" && w.contains("codex_apps")
+            [Delta::McpStatus(McpStatus { name, state: McpState::Disabled, .. })] if name == "playwright"
+        ));
+        // Not in the configuration: it runs, and its status says it cannot be turned off.
+        let apps = notify(
+            "mcpServer/startupStatus/updated",
+            json!({"threadId": "th", "name": "codex_apps", "status": "ready"}),
+        );
+        assert!(matches!(
+            &bridge.on_line(&apps).deltas[..],
+            [Delta::McpStatus(McpStatus { fixed: true, state: McpState::Ready, .. })]
         ));
 
         // Nothing to turn off: no detour through the configuration.

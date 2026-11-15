@@ -130,6 +130,12 @@ describe("a thread's servers", () => {
       { name: "blender", off: false, ours: false, pending: false, pendingOn: true },
       { name: "docs", off: true, ours: true, pending: false, pendingOn: false },
     ]);
+    // One the agent cannot turn off does not wait for anything.
+    const fixed = threadMcpRows(
+      { ...thread("c", "codex", [{ name: "computer-use", state: "ready", fixed: true }]), mcp_disabled: ["computer-use"] },
+      {},
+    );
+    expect(fixed.map((row) => [row.off, row.pending])).toEqual([[true, false]]);
     // Turned back on before a session took it: still listed, as qcc's.
     const again = threadMcpRows({ ...thread("b", "codex", []), mcp_disabled: [] }, settings);
     expect(again.map((row) => [row.name, row.off, row.status])).toEqual([["docs", false, undefined]]);

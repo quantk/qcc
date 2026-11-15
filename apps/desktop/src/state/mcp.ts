@@ -215,7 +215,7 @@ export function threadMcpRows(thread: Thread, settings: Settings | undefined): T
     ours: status.name in ours,
     // Only turning off can wait: a server off in the agent's own settings is reported
     // off too, and that is not the thread's doing.
-    pending: off.has(status.name) && status.state !== "disabled",
+    pending: off.has(status.name) && status.state !== "disabled" && !status.fixed,
     pendingOn: !off.has(status.name) && status.state === "disabled",
   }));
   const listed = (name: string) => rows.some((row) => row.name === name);

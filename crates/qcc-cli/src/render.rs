@@ -153,12 +153,14 @@ pub fn mcp_servers(thread: &Thread) -> String {
             .as_deref()
             .map(|error| format!(": {}", clip(error, 160)))
             .unwrap_or_default();
-        let pending =
-            if thread.mcp_disabled.contains(&server.name) && server.state != McpState::Disabled {
-                " (kept off; the session has not taken it yet)"
-            } else {
-                ""
-            };
+        let kept_off = thread.mcp_disabled.contains(&server.name);
+        let pending = if kept_off && server.fixed {
+            " (kept off, but the agent cannot turn it off)"
+        } else if kept_off && server.state != McpState::Disabled {
+            " (kept off; the session has not taken it yet)"
+        } else {
+            ""
+        };
         add(&server.name, &format!("{state}{error}{pending}"));
     }
     for name in &thread.mcp_disabled {

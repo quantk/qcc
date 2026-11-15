@@ -101,7 +101,7 @@ fn mcp_servers_are_kept_whole_and_forgotten_with_the_session() {
     let engine = supervisor.engine(&"t1".into()).unwrap();
     journal.extend(engine.session_started(None, false, 2));
     let status = |name: &str, state: McpState| Delta::McpStatus {
-        server: McpServerStatus { name: name.into(), state, error: None },
+        server: McpServerStatus { name: name.into(), state, error: None, fixed: false },
     };
 
     let events = engine.apply_deltas(

@@ -466,6 +466,33 @@ impl Core {
         }
     }
 
+    /// Release the sessions that wait for their turn to end to take a change.
+    pub(super) fn release_idle(&mut self) {
+        let waiting: Vec<ThreadId> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| {
+                session.release_when_idle && !session.starting && !session.stopping
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in waiting {
+            let Ok(engine) = self.supervisor.engine(&id) else { continue };
+            if engine.busy() {
+                continue;
+            }
+            let live = engine.session_live();
+            let Some(session) = self.sessions.get_mut(&id) else { continue };
+            session.release_when_idle = false;
+            if live {
+                session.stopping = true;
+                self.call_provider(&id, Action::Release, None, |thread| ProviderRequest::Stop {
+                    thread,
+                });
+            }
+        }
+    }
+
     /// Deliver queued messages of every thread that has become free. One message per
     /// thread: the next one waits for the turn this one starts.
     pub(super) fn drain_queues(&mut self) {
@@ -512,14 +539,8 @@ impl Core {
             .host
             .provider(&thread.provider)
             .is_some_and(|(_, info)| info.capabilities.mcp_toggle);
-        if !toggle {
-            return self.reconfigure(&thread_id, "its MCP servers", |engine, now| {
-                engine.set_mcp_disabled(disabled, now)
-            });
-        }
-        // The running session takes the switch at once, even in the middle of a turn.
         self.check_open(&thread_id)?;
-        if self.in_transition(&thread_id) {
+        if toggle && self.in_transition(&thread_id) {
             return Err(RpcError::new(
                 codes::THREAD_BUSY,
                 "the provider session is starting or stopping; try again",
@@ -531,10 +552,15 @@ impl Core {
         let events = engine.set_mcp_disabled(disabled, now_ms());
         let changed = !events.is_empty();
         self.commit(events);
-        if changed && live {
+        if changed && toggle && live {
+            // The running session takes the switch at once, even mid-turn.
             self.call_provider(&thread_id, Action::SwitchMcp, None, |thread| {
                 ProviderRequest::SetMcpServer { thread, name: server, enabled }
             });
+        } else if changed && (live || self.in_transition(&thread_id)) {
+            // Another provider takes it in a new session, which the next message
+            // resumes; a running turn is let finish first.
+            self.sessions.entry(thread_id.clone()).or_default().release_when_idle = true;
         }
         let thread = self.supervisor.thread(&thread_id).cloned();
         thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))

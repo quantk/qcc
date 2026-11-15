@@ -170,8 +170,8 @@ method!(
     /// Turn an MCP server on or off for one thread, by name: one qcc gives agents or
     /// one of the agent's own configuration. The threads it starts are not affected.
     /// A provider that declared `mcp_toggle` switches it in the running session at
-    /// once; for another the change is refused while a turn runs, and an attached
-    /// session is released so that the next message resumes it with the change.
+    /// once; for another the session is released as soon as no turn runs, so that
+    /// the next message resumes it with the change.
     ThreadSetMcp, "thread.set_mcp", ThreadSetMcpParams => ThreadResult
 );
 

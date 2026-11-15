@@ -12,8 +12,6 @@ export function ThreadMcp({ thread, provider }: { thread: Thread; provider: Prov
   const settings = useApp((state) => state.settings?.settings);
   const rows = threadMcpRows(thread, settings);
   const live = provider?.capabilities.mcp_toggle ?? false;
-  // A provider that cannot switch a running session starts a new one, which waits for the turn.
-  const blocked = !live && thread.status === "active";
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-3 overflow-auto px-6 py-5">
@@ -22,7 +20,7 @@ export function ThreadMcp({ thread, provider }: { thread: Thread; provider: Prov
         concerns this thread alone, not the threads it starts.{" "}
         {live
           ? "It takes effect at once."
-          : "The agent's session starts again with the change and goes on where it was; not while a turn runs."}
+          : "The agent's session starts again with the change, after the running turn if there is one, and goes on where it was."}
       </p>
       <ul className="flex flex-col divide-y rounded-lg border">
         {rows.map((row) => (
@@ -48,14 +46,19 @@ export function ThreadMcp({ thread, provider }: { thread: Thread; provider: Prov
               )}
               <Switch
                 aria-label={`Use ${row.name} in this thread`}
-                title={blocked ? "Wait for the turn to end" : row.off ? "Off in this thread" : "On in this thread"}
+                title={row.off ? "Off in this thread" : "On in this thread"}
                 checked={!row.off}
-                disabled={blocked}
                 onCheckedChange={(on) => void store().setThreadMcp(thread.id, row.name, on)}
               />
             </div>
             {row.pending && (
               <p className="text-xs text-muted-foreground">Kept off in this thread; the session has not taken the change yet.</p>
+            )}
+            {row.off && row.status?.fixed && (
+              <p className="text-xs text-muted-foreground">
+                The agent cannot turn this one off for a thread: it comes with one of its plugins or apps, not its MCP
+                configuration. Turn it off in the agent itself.
+              </p>
             )}
             {row.pendingOn && !live && (
               <p className="text-xs text-muted-foreground">On again from the thread's next session.</p>

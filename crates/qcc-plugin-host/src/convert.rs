@@ -164,6 +164,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                     wit::McpState::Disabled => McpState::Disabled,
                 },
                 error: status.error,
+                fixed: status.fixed,
             },
         },
         wit::Delta::ProviderError(message) => Delta::ProviderError { message },

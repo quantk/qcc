@@ -207,6 +207,12 @@ impl Core {
             return;
         }
         let session = std::mem::take(session);
+        // A change that came while the session started is not in it.
+        if session.release_when_idle
+            && let Some(next) = self.sessions.get_mut(&id)
+        {
+            next.release_when_idle = true;
+        }
         match result {
             Ok(Outcome::SessionStarted { provider_session }) => {
                 if let Ok(engine) = self.supervisor.engine(&id) {

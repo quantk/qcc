@@ -6,8 +6,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    Delta, EventPayload, ModelInfo, Project, ProviderId, ThreadEnvironment, ThreadEvent, ThreadId,
-    ThreadStatus, UserInput,
+    AgentSkill, Delta, EventPayload, ModelInfo, Project, ProviderId, ThreadEnvironment,
+    ThreadEvent, ThreadId, ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -176,6 +176,11 @@ pub(crate) enum Command {
         result: Result<Vec<ModelInfo>, String>,
         responder: Responder,
     },
+    SkillsListed {
+        provider: ProviderId,
+        result: Result<Vec<AgentSkill>, String>,
+        responder: Responder,
+    },
     /// A `thread.wait` ran out of time.
     WaitTimedOut {
         waiter: u64,
@@ -259,6 +264,8 @@ pub(crate) struct Core {
     programs: ProgramPaths,
     /// What each provider said it offers, until asked to look again.
     models: HashMap<ProviderId, Vec<ModelInfo>>,
+    /// The skills each provider's agent said it finds by itself, until asked again.
+    agent_skills: HashMap<ProviderId, Vec<AgentSkill>>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
     cli_dir: Option<PathBuf>,
     /// Set when the journal cannot be written. The daemon stops rather than let
@@ -341,6 +348,7 @@ impl Core {
             watches: Vec::new(),
             skills,
             models: HashMap::new(),
+            agent_skills: HashMap::new(),
             projects,
             settings,
             programs,
@@ -425,6 +433,9 @@ impl Core {
             }
             Command::ModelsListed { provider, result, responder } => {
                 self.models_listed(provider, result, responder);
+            }
+            Command::SkillsListed { provider, result, responder } => {
+                self.skills_listed(provider, result, responder);
             }
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {

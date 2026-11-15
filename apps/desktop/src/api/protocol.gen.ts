@@ -3,6 +3,16 @@
 /**  What kind of thing an agent last did. Mirrors the item shapes. */
 export type ActivityKind = "agentMessage" | "reasoning" | "plan" | "command" | "fileChange" | "fileRead" | "search" | "tool" | "extension";
 
+/**  A skill an agent finds by itself (its own folders, its plugins), as it reports it. */
+export type AgentSkill = {
+	name: string,
+	description: string,
+	/**  Where the agent has it from, in its own words. */
+	source?: string | null,
+	/**  Its `SKILL.md`, when the agent says. */
+	path?: string | null,
+};
+
 /**  How a file differs from what an environment started from. */
 export type ChangeKind = "added" | "modified" | "deleted" | 
 /**  New and not yet known to version control. */
@@ -414,6 +424,8 @@ export type ProviderCapabilities = {
 	mcp_toggle?: boolean,
 	/**  The session's context can be compacted when the user asks. */
 	compact?: boolean,
+	/**  The provider can tell which skills its agent finds by itself. */
+	list_skills?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -446,6 +458,16 @@ export type ProviderSettings = {
 	env?: { [key in string]: string },
 	/**  Left out where the app offers agents to pick from. */
 	hidden?: boolean,
+};
+
+export type ProviderSkillsParams = {
+	provider: ProviderId,
+	refresh?: boolean,
+};
+
+export type ProviderSkillsResult = {
+	/**  By name. Empty when the agent cannot tell. */
+	skills: AgentSkill[],
 };
 
 export type RpcError = {
@@ -1082,6 +1104,7 @@ export type Methods = {
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
 	"provider.models": { params: ProviderModelsParams; result: ProviderModelsResult },
+	"provider.skills": { params: ProviderSkillsParams; result: ProviderSkillsResult },
 	"settings.get": { params: Empty; result: SettingsResult },
 	"settings.set": { params: SettingsSetParams; result: SettingsResult },
 	"command.list": { params: Empty; result: CommandListResult },

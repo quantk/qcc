@@ -2,9 +2,10 @@
 //! crate.
 
 use qcc_domain::{
-    CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionResolution,
-    McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo, SettingField, SkillInfo,
-    SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry, UiViewInfo, UserInput,
+    AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo,
+    InteractionResolution, McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
+    SettingField, SkillInfo, SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry, UiViewInfo,
+    UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +72,7 @@ pub enum ProviderRequest {
         resolution: InteractionResolution,
     },
     ListModels,
+    ListSkills,
     /// Only for providers that declared `compact`, while no turn runs.
     Compact {
         thread: ThreadId,
@@ -208,6 +210,7 @@ pub enum Outcome {
         provider_session: Option<String>,
     },
     Models(Vec<ModelInfo>),
+    Skills(Vec<AgentSkill>),
     EnvironmentReady {
         cwd: String,
     },

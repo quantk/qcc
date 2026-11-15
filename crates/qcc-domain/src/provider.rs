@@ -74,6 +74,9 @@ pub struct ProviderCapabilities {
     /// The session's context can be compacted when the user asks.
     #[serde(default)]
     pub compact: bool,
+    /// The provider can tell which skills its agent finds by itself.
+    #[serde(default)]
+    pub list_skills: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -137,6 +140,19 @@ pub struct ModelInfo {
     /// The level the model runs at when none is chosen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_effort: Option<String>,
+}
+
+/// A skill an agent finds by itself (its own folders, its plugins), as it reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AgentSkill {
+    pub name: String,
+    pub description: String,
+    /// Where the agent has it from, in its own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Its `SKILL.md`, when the agent says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 /// How the work of an environment goes back to the directory it was made from.

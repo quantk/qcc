@@ -409,6 +409,7 @@ impl Provider for Echo {
                 ],
                 mcp_toggle: true,
                 compact: true,
+                list_skills: true,
             },
         }
     }
@@ -560,6 +561,16 @@ impl Provider for Echo {
             default_effort: Some("low".into()),
         };
         Ok(Reply::Now(vec![model("echo-1", "Echo 1", true), model("echo-2", "Echo 2", false)]))
+    }
+
+    /// One skill of its "own", as a real agent finds them in its folders.
+    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
+        Ok(Reply::Now(vec![AgentSkill {
+            name: "echo-own".into(),
+            description: "A skill the agent finds by itself.".into(),
+            source: Some("user".into()),
+            path: Some("/echo/skills/echo-own/SKILL.md".into()),
+        }]))
     }
 }
 

@@ -20,8 +20,8 @@ use clap::{Args, Parser, Subcommand};
 use qcc_client::Client;
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Empty, InteractionResolve,
-    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, SettingsGet,
-    SettingsSet, SettingsSetParams,
+    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, ProviderSkills,
+    ProviderSkillsParams, SettingsGet, SettingsSet, SettingsSetParams,
 };
 use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
@@ -140,6 +140,14 @@ enum PluginCommand {
 enum ProviderCommand {
     /// The models a provider's agent offers, for `thread spawn --model`.
     Models {
+        provider: String,
+        /// Ask the agent again instead of using what the daemon remembers.
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// The skills a provider's agent finds by itself (its own folders, its plugins),
+    /// as the agent reports them. qcc shows them; the agent's configuration decides.
+    Skills {
         provider: String,
         /// Ask the agent again instead of using what the daemon remembers.
         #[arg(long)]
@@ -309,6 +317,24 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             } else {
                 for plugin in &result.plugins {
                     out(render::plugin(plugin));
+                }
+            }
+        }
+
+        Command::Provider(ProviderCommand::Skills { provider, refresh }) => {
+            let params = ProviderSkillsParams { provider: ProviderId::new(provider), refresh };
+            let result = client.call::<ProviderSkills>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else if result.skills.is_empty() {
+                out("the agent reports no skills of its own");
+            } else {
+                for skill in &result.skills {
+                    let source =
+                        skill.source.as_deref().map(|s| format!("  ({s})")).unwrap_or_default();
+                    out(format!("{}{source}", skill.name));
+                    let about = skill.path.as_deref().unwrap_or(&skill.description);
+                    out(format!("    {about}"));
                 }
             }
         }

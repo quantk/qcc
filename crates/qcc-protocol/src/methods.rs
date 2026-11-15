@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
+    AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
     InteractionResolution, McpTransport, ModelInfo, PermissionMode, Project, ProjectId, ProviderId,
     ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
 };
@@ -698,6 +698,26 @@ pub struct ProviderModelsParams {
     pub provider: ProviderId,
     #[serde(default)]
     pub refresh: bool,
+}
+
+method!(
+    /// The skills a provider's agent finds by itself (its own folders, its
+    /// plugins), as the agent reports them. Shown, not switched. The first call asks
+    /// the agent; the answer is kept until `refresh` asks again.
+    ProviderSkills, "provider.skills", ProviderSkillsParams => ProviderSkillsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderSkillsParams {
+    pub provider: ProviderId,
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderSkillsResult {
+    /// By name. Empty when the agent cannot tell.
+    pub skills: Vec<AgentSkill>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

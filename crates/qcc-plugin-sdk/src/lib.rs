@@ -73,11 +73,11 @@ pub use bindings::qcc::plugin::types;
 pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
 
 use types::{
-    CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDeliver,
-    EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove,
-    EnvironmentRequest, Event, InteractionAnswer, McpSwitch, ModelInfo, Outcome, ProviderInfo,
-    ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo,
-    SkillRef, ThreadInput, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    AgentSkill, CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges,
+    EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery,
+    EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, McpSwitch, ModelInfo, Outcome,
+    ProviderInfo, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
+    SkillInfo, SkillRef, ThreadInput, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -167,6 +167,12 @@ pub trait Provider {
     /// the answer may come later: return [`Reply::Later`] and answer with
     /// [`Outcome::Models`] through [`completions::complete`] (see [`stdio::Probes`]).
     fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        Ok(Reply::Now(Vec::new()))
+    }
+
+    /// The skills the agent finds by itself (its own folders, its plugins). Like
+    /// [`Provider::models`], usually answered later, with [`Outcome::Skills`].
+    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
         Ok(Reply::Now(Vec::new()))
     }
 }
@@ -477,6 +483,9 @@ pub mod __private {
                     }
                     ProviderRequest::ListModels => {
                         provider.models().map(|r| reply(r, Outcome::Models))
+                    }
+                    ProviderRequest::ListSkills => {
+                        provider.skills().map(|r| reply(r, Outcome::Skills))
                     }
                     ProviderRequest::SetMcpServer(switch) => {
                         provider.set_mcp_server(switch).map(done)

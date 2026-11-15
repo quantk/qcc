@@ -7,14 +7,14 @@ use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandList, CommandRun, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
     PluginList, ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate,
-    ProviderModels, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadChanges,
-    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams,
-    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename, ThreadReset,
-    ThreadResult, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
-    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
-    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams,
+    ProviderModels, ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive,
+    ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet,
+    ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename,
+    ThreadReset, ThreadResult, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode,
+    ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
+    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
+    UiRenderItem, UiRenderItemParams, UiRenderParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -201,6 +201,10 @@ impl Core {
             PluginList::NAME => responder.reply(Ok(self.plugin_list())),
             ProviderModels::NAME => match params::<ProviderModels>(raw) {
                 Ok(p) => self.provider_models(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ProviderSkills::NAME => match params::<ProviderSkills>(raw) {
+                Ok(p) => self.provider_skills(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             CommandList::NAME => responder.reply(Ok(self.command_list())),

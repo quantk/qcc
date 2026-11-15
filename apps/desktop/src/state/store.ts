@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 
 import { type Api, ApiError, type DaemonState, type Notification, codes } from "../api/api";
 import type {
+  AgentSkill,
   CommandRunParams,
   CommandRunResult,
   DeliverMode,
@@ -77,6 +78,7 @@ function readShowExamples(): boolean {
 
 /** What a provider said it offers. Asked once per provider and connection. */
 export type ModelList = { loading: boolean; models: readonly ModelInfo[]; error: string | null };
+export type AgentSkillList = { loading: boolean; skills: readonly AgentSkill[]; error: string | null };
 
 export type AppState = {
   daemon: DaemonState;
@@ -110,6 +112,8 @@ export type AppState = {
   collapsed: ReadonlySet<ThreadId>;
   /** The skills plugins offer; whether one is off is in the settings. */
   skills: readonly SkillStatus[];
+  /** The skills each agent finds by itself, as it reported them. */
+  agentSkills: Readonly<Record<ProviderId, AgentSkillList>>;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -139,6 +143,7 @@ export class AppStore {
     history: startHistory,
     collapsed: readCollapsed(),
     skills: [],
+    agentSkills: {},
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -194,7 +199,7 @@ export class AppStore {
       // have other plugins.
       this.watch = null;
       this.live = null;
-      this.set({ models: {} });
+      this.set({ models: {}, agentSkills: {} });
     }
   }
 
@@ -356,6 +361,20 @@ export class AppStore {
       put({ loading: false, models, error: null });
     } catch (error) {
       put({ loading: false, models: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  /** Ask the agent which skills it finds by itself, unless that is known or underway. */
+  loadAgentSkills = async (provider: ProviderId, refresh = false) => {
+    const known = this.state.agentSkills[provider];
+    if (known?.loading || (known && !refresh && !known.error)) return;
+    const put = (list: AgentSkillList) => this.set({ agentSkills: { ...this.state.agentSkills, [provider]: list } });
+    put({ loading: true, skills: known?.skills ?? [], error: null });
+    try {
+      const { skills } = await this.api.call("provider.skills", { provider, refresh });
+      put({ loading: false, skills, error: null });
+    } catch (error) {
+      put({ loading: false, skills: [], error: error instanceof Error ? error.message : String(error) });
     }
   };
 

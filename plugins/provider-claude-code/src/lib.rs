@@ -6,6 +6,7 @@
 
 pub mod bridge;
 pub mod models;
+pub mod skills;
 
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::stdio::{Probes, Sessions};
@@ -37,6 +38,7 @@ impl Provider for ClaudeCode {
                 ],
                 mcp_toggle: true,
                 compact: true,
+                list_skills: true,
             },
         }
     }
@@ -175,6 +177,18 @@ impl Provider for ClaudeCode {
         };
         let token =
             self.probes.start(&options, &[models::request()], Box::new(models::ModelsProbe))?;
+        Ok(Reply::Later(token))
+    }
+
+    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
+        let options = process::SpawnOptions {
+            program: PROGRAM.into(),
+            args: models::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
+            env: Vec::new(),
+            cwd: None,
+        };
+        let token =
+            self.probes.start(&options, &skills::requests(), Box::new(skills::SkillsProbe))?;
         Ok(Reply::Later(token))
     }
 }

@@ -26,10 +26,10 @@ pub use interaction::{InteractionOption, InteractionRequest, InteractionResoluti
 pub use item::{Item, ItemShape, ItemStatus};
 pub use project::{Project, project_of};
 pub use provider::{
-    ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, EnvironmentChanges,
-    EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport, ModelInfo, PermissionMode,
-    ProviderCapabilities, ProviderInfo, SettingField, SettingKind, SkillInfo, SkillRef,
-    UiPlacement, UiScope, UiViewInfo,
+    AgentSkill, ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode,
+    EnvironmentChanges, EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport,
+    ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SettingField, SettingKind,
+    SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
 };
 pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,

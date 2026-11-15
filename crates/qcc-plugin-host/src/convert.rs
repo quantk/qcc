@@ -1,5 +1,6 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
+use qcc_domain::{AgentSkill, Compaction, SettingField, SettingKind};
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
@@ -8,7 +9,6 @@ use qcc_domain::{
     ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
     UiViewInfo, UsageSnapshot, UserInput,
 };
-use qcc_domain::{Compaction, SettingField, SettingKind};
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
@@ -191,6 +191,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 steer: p.capabilities.steer,
                 mcp_toggle: p.capabilities.mcp_toggle,
                 compact: p.capabilities.compact,
+                list_skills: p.capabilities.list_skills,
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -352,6 +353,17 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                 })
                 .collect(),
         ),
+        wit::Outcome::Skills(skills) => Outcome::Skills(
+            skills
+                .into_iter()
+                .map(|s| AgentSkill {
+                    name: s.name,
+                    description: s.description,
+                    source: s.source,
+                    path: s.path,
+                })
+                .collect(),
+        ),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
         wit::Outcome::UiTree(tree) => Outcome::UiTree(tree),
         wit::Outcome::EnvironmentChanges(changes) => {
@@ -471,6 +483,7 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                     })
                 }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
+                ProviderRequest::ListSkills => wit::ProviderRequest::ListSkills,
             },
         }),
         PluginRequest::Ui(request) => wit::Event::Ui(match request {

@@ -1977,6 +1977,13 @@ fn skills_are_switched_for_all_threads_and_for_one() {
     assert!(!last(&asked).contains("echo-demo"));
     assert!(daemon.qcc(&["skill", "list"]).stdout.contains("(on request, off)"));
     assert!(daemon.qcc(&["skill", "enable", "echo-demo"]).ok);
+
+    // The skills an agent finds by itself are shown, as it reports them.
+    let own = daemon.qcc(&["provider", "skills", "echo", "--json"]).json();
+    assert_eq!(own["skills"][0]["name"], "echo-own");
+    assert_eq!(own["skills"][0]["source"], "user");
+    let shown = daemon.qcc(&["provider", "skills", "echo"]).stdout;
+    assert!(shown.contains("echo-own  (user)"), "{shown}");
     let settings = daemon.qcc(&["settings", "show", "--json"]).json();
     assert!(settings.get("skills").is_none(), "{settings}");
 }

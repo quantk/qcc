@@ -1,15 +1,15 @@
 //! What plugins offer besides sessions: models, the `threads` import, commands and UI.
 
-use qcc_domain::{ModelInfo, ProviderId, ThreadId};
+use qcc_domain::{AgentSkill, ModelInfo, ProviderId, ThreadId};
 use qcc_plugin_host::{
     Contribution, Outcome, PluginRequest, ProviderRequest, ThreadsAnswer, ThreadsCall, UiRequest,
 };
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, Empty, PluginInfo,
-    PluginListResult, PluginPermissions, ProviderModelsParams, ProviderModelsResult, SendMode,
-    ThreadSendParams, ThreadSpawnParams, UiContributionsResult, UiItemContribution, UiTreeResult,
-    UiViewContribution,
+    PluginListResult, PluginPermissions, ProviderModelsParams, ProviderModelsResult,
+    ProviderSkillsParams, ProviderSkillsResult, SendMode, ThreadSendParams, ThreadSpawnParams,
+    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
@@ -99,6 +99,57 @@ impl Core {
             };
             let _ = commands.send(Command::ModelsListed { provider, result, responder });
         });
+    }
+
+    pub(super) fn provider_skills(&mut self, p: ProviderSkillsParams, responder: Responder) {
+        let ProviderSkillsParams { provider, refresh } = p;
+        if !refresh && let Some(skills) = self.agent_skills.get(&provider) {
+            return responder.reply(Ok(ProviderSkillsResult { skills: skills.clone() }));
+        }
+        let Some((plugin, _)) = self.host.provider(&provider) else {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::PROVIDER_NOT_FOUND,
+                format!("no plugin provides {:?}", provider.as_str()),
+            )));
+        };
+        let plugin = plugin.clone();
+        let commands = self.commands.clone();
+        tokio::spawn(async move {
+            let request = PluginRequest::Provider {
+                provider: provider.clone(),
+                request: ProviderRequest::ListSkills,
+            };
+            let result = match tokio::time::timeout(MODELS_TIMEOUT, plugin.call(request)).await {
+                Ok(Ok(Outcome::Skills(mut skills))) => {
+                    skills.sort_by(|a, b| a.name.cmp(&b.name));
+                    Ok(skills)
+                }
+                Ok(Ok(other)) => Err(format!("the provider answered with {other:?}")),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(_) => Err(format!(
+                    "the provider did not list its skills within {} s",
+                    MODELS_TIMEOUT.as_secs()
+                )),
+            };
+            let _ = commands.send(Command::SkillsListed { provider, result, responder });
+        });
+    }
+
+    pub(super) fn skills_listed(
+        &mut self,
+        provider: ProviderId,
+        result: Result<Vec<AgentSkill>, String>,
+        responder: Responder,
+    ) {
+        match result {
+            Ok(skills) => {
+                self.agent_skills.insert(provider, skills.clone());
+                responder.reply(Ok(ProviderSkillsResult { skills }));
+            }
+            Err(message) => {
+                responder.reply::<Empty>(Err(RpcError::new(codes::PLUGIN_ERROR, message)));
+            }
+        }
     }
 
     pub(super) fn models_listed(

@@ -242,6 +242,8 @@ interface types {
     mcp-toggle: bool,
     /// The provider compacts the session's context when asked (`compact`).
     compact: bool,
+    /// The provider can tell which skills its agent finds by itself (`list-skills`).
+    list-skills: bool,
   }
 
   record provider-info {
@@ -515,6 +517,9 @@ interface types {
     /// The models the agent offers. Usually answered `deferred`: asking the agent
     /// means running it.
     list-models,
+    /// The skills the agent finds by itself (its own folders, its plugins), as it
+    /// reports them. Answered with `skills`, usually `deferred`.
+    list-skills,
     /// Turn an MCP server of the running session on or off. Sent only to a provider
     /// that declared `mcp-toggle`.
     set-mcp-server(mcp-switch),
@@ -708,10 +713,21 @@ interface types {
     default-effort: option<string>,
   }
 
+  /// A skill an agent finds by itself, not one qcc gives it.
+  record agent-skill {
+    name: string,
+    description: string,
+    /// Where the agent has it from, in its own words (`user`, a plugin, a folder).
+    source: option<string>,
+    /// Its `SKILL.md`, when the agent says.
+    path: option<string>,
+  }
+
   variant outcome {
     done,
     session-started(session-started),
     models(list<model-info>),
+    skills(list<agent-skill>),
     /// The working directory prepared for the thread.
     environment-ready(string),
     environment-changes(environment-changes),

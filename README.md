@@ -351,6 +351,13 @@ qcc thread spawn --skill echo-demo --without-skill qcc-orchestration --prompt "�
 qcc thread skills <thread-id> --on echo-demo --off qcc-orchestration
 ```
 
+**Свои skill'ы агентов** (из `~/.claude/skills`, `~/.agents/skills`, их плагинов) qcc только
+показывает: `qcc provider skills claude-code [--refresh]` и раздел «The agents' own» на экране
+«Skills». Список спрашивается у самого агента, без запроса к модели: Claude Code — `reload_skills`
+в stream-json, Codex — `skills/list` в app-server. opencode списка надёжно не отдаёт (в ACP skill'ы
+смешаны с командами, а `opencode debug skill` теряет вывод в pipe), поэтому для него сказано «does
+not say». Включать и выключать их — дело конфигурации самого агента.
+
 Включённый в треде skill идущая сессия узнаёт сразу, заметкой к следующему сообщению. Выключенный
 пропадает со следующей сессией треда: то, что агент уже прочитал, забрать нельзя. Выбор треда
 потомкам не передаётся. В приложении — экран «Skills» с переключателем для всех и вкладка «Skills»

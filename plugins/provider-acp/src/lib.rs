@@ -79,6 +79,9 @@ impl Provider for AcpProvider {
                 mcp_toggle: false,
                 // ACP has no way to ask for it.
                 compact: false,
+                // The protocol's command list mixes skills with commands, and
+                // `opencode debug skill` loses output written into a pipe.
+                list_skills: false,
             },
         }
     }

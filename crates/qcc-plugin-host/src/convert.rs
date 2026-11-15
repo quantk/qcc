@@ -161,6 +161,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                     wit::McpState::Ready => McpState::Ready,
                     wit::McpState::Failed => McpState::Failed,
                     wit::McpState::NeedsAuth => McpState::NeedsAuth,
+                    wit::McpState::Disabled => McpState::Disabled,
                 },
                 error: status.error,
             },
@@ -180,6 +181,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 resume: p.capabilities.resume,
                 fork: p.capabilities.fork,
                 steer: p.capabilities.steer,
+                mcp_toggle: p.capabilities.mcp_toggle,
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -370,6 +372,7 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
             .collect(),
         extra_dirs: start.extra_dirs,
         mcp_servers: start.mcp_servers.into_iter().map(mcp_server).collect(),
+        mcp_disabled: start.mcp_disabled,
     }
 }
 
@@ -411,6 +414,13 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),
+                ProviderRequest::SetMcpServer { thread, name, enabled } => {
+                    wit::ProviderRequest::SetMcpServer(wit::McpSwitch {
+                        thread: thread.0,
+                        name,
+                        enabled,
+                    })
+                }
                 ProviderRequest::ResolveInteraction { thread, request_id, resolution: r } => {
                     wit::ProviderRequest::ResolveInteraction(wit::InteractionAnswer {
                         thread: thread.0,

@@ -25,6 +25,8 @@ use serde_json::{Value, json};
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Call {
     Initialize,
+    /// `config/read`: which MCP servers the user's configuration has, to turn some off.
+    Config,
     /// `thread/start` or `thread/resume`.
     Thread,
     TurnStart,
@@ -63,6 +65,11 @@ pub struct Bridge {
     instructions: Option<String>,
     writable_roots: Vec<String>,
     mcp_servers: Vec<McpServer>,
+    /// MCP servers of the user's configuration the thread keeps off.
+    mcp_disabled: Vec<String>,
+    /// Of those, the ones the configuration has: only a known server can be turned
+    /// off, an override for another one fails the whole thread.
+    mcp_off: Vec<String>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -165,6 +172,8 @@ impl Bridge {
             instructions: None,
             writable_roots: Vec::new(),
             mcp_servers: Vec::new(),
+            mcp_disabled: Vec::new(),
+            mcp_off: Vec::new(),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -191,6 +200,12 @@ impl Bridge {
     /// config override with `thread/start` and `thread/resume`.
     pub fn set_mcp_servers(&mut self, servers: Vec<McpServer>) {
         self.mcp_servers = servers;
+    }
+
+    /// MCP servers of the user's Codex configuration to keep off in this thread.
+    /// Codex reads its configuration first to learn which of them it has.
+    pub fn set_mcp_disabled(&mut self, names: Vec<String>) {
+        self.mcp_disabled = names;
     }
 
     /// The user sent a message. It goes out as soon as the agent can take it.
@@ -351,6 +366,28 @@ impl Bridge {
         match (call, result) {
             (Call::Initialize, Ok(_)) => {
                 output.writes.push(self.peer.notify("initialized", Value::Null));
+                let request = if self.mcp_disabled.is_empty() {
+                    self.thread_request()
+                } else {
+                    self.peer.request("config/read", json!({"cwd": self.cwd}), Call::Config)
+                };
+                output.writes.push(request);
+            }
+            (Call::Config, result) => {
+                let configured = match &result {
+                    Ok(result) => result["config"]["mcp_servers"].as_object().cloned(),
+                    Err(_) => None,
+                }
+                .unwrap_or_default();
+                for name in std::mem::take(&mut self.mcp_disabled) {
+                    if configured.contains_key(&name) {
+                        self.mcp_off.push(name);
+                    } else {
+                        output.deltas.push(Delta::ProviderWarning(format!(
+                            "Codex has no MCP server {name} in its configuration to turn off"
+                        )));
+                    }
+                }
                 let request = self.thread_request();
                 output.writes.push(request);
             }
@@ -449,8 +486,12 @@ impl Bridge {
                 json!({"writable_roots": self.writable_roots}),
             );
         }
-        if !self.mcp_servers.is_empty() {
-            config.insert("mcp_servers".into(), mcp_servers(&self.mcp_servers));
+        let mut servers = mcp_servers(&self.mcp_servers);
+        for name in &self.mcp_off {
+            servers.insert(name.clone(), json!({"enabled": false}));
+        }
+        if !servers.is_empty() {
+            config.insert("mcp_servers".into(), Value::Object(servers));
         }
         if !config.is_empty() {
             params["config"] = Value::Object(config);
@@ -654,7 +695,7 @@ impl LineBridge for Bridge {
 
 /// The `mcp_servers` table of Codex's configuration for qcc's servers. Codex
 /// merges it into the user's own.
-fn mcp_servers(servers: &[McpServer]) -> Value {
+fn mcp_servers(servers: &[McpServer]) -> serde_json::Map<String, Value> {
     let pairs = |pairs: &[(String, String)]| -> serde_json::Map<String, Value> {
         pairs.iter().map(|(name, value)| (name.clone(), json!(value))).collect()
     };
@@ -672,7 +713,7 @@ fn mcp_servers(servers: &[McpServer]) -> Value {
             (server.name.clone(), config)
         })
         .collect();
-    Value::Object(servers)
+    servers
 }
 
 #[cfg(test)]
@@ -759,6 +800,33 @@ mod tests {
             })]
         );
         assert!(bridge.on_line(&status("docs", "brand-new", Value::Null)).deltas.is_empty());
+    }
+
+    #[test]
+    fn mcp_servers_of_the_configuration_are_turned_off_if_it_has_them() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        bridge.set_mcp_disabled(vec!["playwright".into(), "codex_apps".into()]);
+        let initialized = bridge.on_line(r#"{"id":1,"result":{}}"#);
+        assert_eq!(methods(&initialized), ["initialized", "config/read"]);
+        let config = json!({"id": 2, "result": {"config": {"mcp_servers": {
+            "playwright": {"command": "npx"}, "blender": {"command": "uvx"}}}}});
+        let started = bridge.on_line(&config.to_string());
+        assert_eq!(methods(&started), ["thread/start"]);
+        let start: Value = serde_json::from_str(&started.writes[0]).unwrap();
+        assert_eq!(
+            start["params"]["config"],
+            json!({"mcp_servers": {"playwright": {"enabled": false}}})
+        );
+        assert!(
+            matches!(&started.deltas[..], [Delta::ProviderWarning(w)] if w.contains("codex_apps"))
+        );
+
+        // Nothing to turn off: no detour through the configuration.
+        let (mut plain, _) = Bridge::new("/work".into(), None, None, None);
+        assert_eq!(
+            methods(&plain.on_line(r#"{"id":1,"result":{}}"#)),
+            ["initialized", "thread/start"]
+        );
     }
 
     #[test]

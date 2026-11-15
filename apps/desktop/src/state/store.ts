@@ -527,6 +527,15 @@ export class AppStore {
     if (done) this.set({ projects: this.state.projects.filter((project) => project.id !== id) });
   }
 
+  /** Turn an MCP server on or off for this thread alone. Resolves to whether the daemon took it. */
+  async setThreadMcp(threadId: ThreadId, server: string, enabled: boolean): Promise<boolean> {
+    const result = await this.attempt(() =>
+      this.api.call("thread.set_mcp", { thread_id: threadId, server, enabled }),
+    );
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
   /** Place a thread under another, or let it stand on its own. */
   async setParent(threadId: ThreadId, parent: ThreadId | null) {
     const result = await this.attempt(() =>

@@ -43,6 +43,7 @@ fn declares_its_provider_and_its_ui() {
             fork: false,
             steer: true,
             permission_modes: PermissionMode::ALL.to_vec(),
+            mcp_toggle: true,
         }
     );
     assert_eq!(harness.handle().id(), "provider-echo");

@@ -164,6 +164,8 @@ interface types {
     failed,
     /// The server wants the user to sign in, in the agent itself.
     needs-auth,
+    /// Turned off for this session.
+    disabled,
   }
 
   record mcp-status {
@@ -224,6 +226,9 @@ interface types {
     /// The permission modes the provider can enforce. A thread is never started in
     /// a mode its provider did not list.
     permission-modes: list<permission-mode>,
+    /// The provider turns MCP servers of a running session on and off
+    /// (`set-mcp-server`). Without it, a thread's change waits for its next session.
+    mcp-toggle: bool,
   }
 
   record provider-info {
@@ -403,11 +408,22 @@ interface types {
     /// MCP servers the user set up in qcc. The bridge adds them to those the
     /// agent's own configuration names, the way its agent takes them.
     mcp-servers: list<mcp-server>,
+    /// MCP servers the thread keeps off, by name: servers of the agent's own
+    /// configuration, and for a provider that declared `mcp-toggle` also some of
+    /// `mcp-servers`, which it must start off. A name the agent does not know is
+    /// skipped.
+    mcp-disabled: list<string>,
   }
 
   record session-started {
     /// Durable handle that names this provider session across daemon restarts.
     provider-session: option<string>,
+  }
+
+  record mcp-switch {
+    thread: thread-id,
+    name: string,
+    enabled: bool,
   }
 
   record thread-input {
@@ -436,6 +452,9 @@ interface types {
     /// The models the agent offers. Usually answered `deferred`: asking the agent
     /// means running it.
     list-models,
+    /// Turn an MCP server of the running session on or off. Sent only to a provider
+    /// that declared `mcp-toggle`.
+    set-mcp-server(mcp-switch),
   }
 
   record provider-call {

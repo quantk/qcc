@@ -282,6 +282,16 @@ impl ThreadEngine {
         self.emit(payloads, now)
     }
 
+    /// Keep these MCP servers off in the thread's sessions from now on.
+    pub fn set_mcp_disabled(&mut self, mut disabled: Vec<String>, now: u64) -> Vec<ThreadEvent> {
+        disabled.sort();
+        disabled.dedup();
+        if disabled == self.thread.mcp_disabled {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::McpDisabledChanged { disabled }], now)
+    }
+
     /// Record the user's answer. Returns the provider-side request id the resolution
     /// has to be delivered with.
     pub fn resolve_interaction(

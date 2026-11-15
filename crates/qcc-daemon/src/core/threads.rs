@@ -10,8 +10,8 @@ use qcc_protocol::methods::{
     Delivery, Empty, InteractionResolveParams, SendMode, StopMode, ThreadDeliverParams,
     ThreadDeliverResult, ThreadEventsParams, ThreadEventsResult, ThreadIsolateParams,
     ThreadRenameParams, ThreadResult, ThreadSendParams, ThreadSendResult, ThreadSetAgentParams,
-    ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams, ThreadSpawnParams,
-    ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
+    ThreadSetMcpParams, ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams,
+    ThreadSpawnParams, ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
 };
 use qcc_runtime::NewThread;
 
@@ -490,6 +490,54 @@ impl Core {
                 self.deliver(&id, text);
             }
         }
+    }
+
+    pub(super) fn thread_set_mcp(
+        &mut self,
+        p: ThreadSetMcpParams,
+    ) -> Result<ThreadResult, RpcError> {
+        let ThreadSetMcpParams { thread_id, server, enabled } = p;
+        if server.trim().is_empty() {
+            return Err(RpcError::new(codes::INVALID_PARAMS, "name the MCP server"));
+        }
+        let thread =
+            self.supervisor.thread(&thread_id).ok_or_else(|| thread_not_found(&thread_id))?;
+        let mut disabled = thread.mcp_disabled.clone();
+        if enabled {
+            disabled.retain(|name| name != &server);
+        } else {
+            disabled.push(server.clone());
+        }
+        let toggle = self
+            .host
+            .provider(&thread.provider)
+            .is_some_and(|(_, info)| info.capabilities.mcp_toggle);
+        if !toggle {
+            return self.reconfigure(&thread_id, "its MCP servers", |engine, now| {
+                engine.set_mcp_disabled(disabled, now)
+            });
+        }
+        // The running session takes the switch at once, even in the middle of a turn.
+        self.check_open(&thread_id)?;
+        if self.in_transition(&thread_id) {
+            return Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "the provider session is starting or stopping; try again",
+            ));
+        }
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        let live = engine.session_live();
+        let events = engine.set_mcp_disabled(disabled, now_ms());
+        let changed = !events.is_empty();
+        self.commit(events);
+        if changed && live {
+            self.call_provider(&thread_id, Action::SwitchMcp, None, |thread| {
+                ProviderRequest::SetMcpServer { thread, name: server, enabled }
+            });
+        }
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
     }
 
     pub(super) fn thread_set_mode(

@@ -134,6 +134,22 @@ fn mcp_servers_are_kept_whole_and_forgotten_with_the_session() {
 }
 
 #[test]
+fn mcp_servers_kept_off_are_a_sorted_list() {
+    let mut supervisor = supervisor();
+    let mut journal = supervisor.create(new_thread("t1"), 1).unwrap();
+    let engine = supervisor.engine(&"t1".into()).unwrap();
+    let names = |names: &[&str]| names.iter().map(|name| (*name).to_owned()).collect::<Vec<_>>();
+    let events = engine.set_mcp_disabled(names(&["web", "docs", "web"]), 2);
+    assert_eq!(types(&events), ["thread/mcp-disabled"]);
+    journal.extend(events);
+    assert_eq!(engine.thread().mcp_disabled, ["docs", "web"]);
+    assert!(engine.set_mcp_disabled(names(&["docs", "web"]), 3).is_empty());
+    journal.extend(engine.set_mcp_disabled(Vec::new(), 4));
+    assert!(engine.thread().mcp_disabled.is_empty());
+    assert_projection(&journal, &engine.thread().clone());
+}
+
+#[test]
 fn failed_session_settles_open_work_and_recovers_on_next_start() {
     let mut supervisor = supervisor();
     let mut journal = supervisor.create(new_thread("t1"), 1).unwrap();

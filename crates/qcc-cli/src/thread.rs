@@ -11,9 +11,10 @@ use qcc_client::protocol::methods::{
     ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams,
     ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename,
     ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
-    ThreadSetMode, ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
-    ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
-    ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
+    ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams, ThreadSetParent,
+    ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
+    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
+    ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -80,6 +81,18 @@ pub(crate) enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// The MCP servers of a thread's session and the ones it keeps off; with --off
+    /// and --on, turn servers off or on for this thread alone (not the threads it
+    /// starts). Names are those `qcc thread show` lists or `qcc mcp list` sets up.
+    Mcp {
+        thread: String,
+        /// Keep this server off in the thread. Repeatable.
+        #[arg(long = "off", value_name = "NAME")]
+        off: Vec<String>,
+        /// Turn this server on again. Repeatable.
+        #[arg(long = "on", value_name = "NAME")]
+        on: Vec<String>,
+    },
     /// Name a thread.
     Rename { thread: String, title: String },
     /// Bring what a thread did in its worktree back to the directory it was made
@@ -294,6 +307,29 @@ pub(crate) async fn run(
                 .await?;
             if json {
                 print_json(&result)?;
+            }
+        }
+
+        ThreadCommand::Mcp { thread, off, on } => {
+            let thread_id = ThreadId::new(thread);
+            let mut thread = client
+                .call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() })
+                .await?
+                .thread;
+            let switches = off.into_iter().map(|name| (name, false));
+            for (server, enabled) in switches.chain(on.into_iter().map(|name| (name, true))) {
+                let params = ThreadSetMcpParams { thread_id: thread_id.clone(), server, enabled };
+                thread = client.call::<ThreadSetMcp>(params).await?.thread;
+            }
+            if json {
+                print_json(&serde_json::json!({
+                    "mcp_servers": thread.mcp_servers,
+                    "mcp_disabled": thread.mcp_disabled,
+                }))?;
+            } else if thread.mcp_servers.is_empty() && thread.mcp_disabled.is_empty() {
+                out("no MCP servers reported, none kept off");
+            } else {
+                out(render::mcp_servers(&thread));
             }
         }
 

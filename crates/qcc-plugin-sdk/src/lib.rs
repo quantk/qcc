@@ -19,6 +19,7 @@
 //!                 fork: false,
 //!                 steer: false,
 //!                 permission_modes: vec![],
+//!                 mcp_toggle: false,
 //!             },
 //!         }
 //!     }
@@ -74,7 +75,7 @@ pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timer
 use types::{
     CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDeliver,
     EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove,
-    EnvironmentRequest, Event, InteractionAnswer, ModelInfo, Outcome, ProviderInfo,
+    EnvironmentRequest, Event, InteractionAnswer, McpSwitch, ModelInfo, Outcome, ProviderInfo,
     ProviderRequest, SessionStart, SessionStarted, SettledThread, SkillInfo, SkillRef, ThreadInput,
     UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
@@ -144,6 +145,13 @@ pub trait Provider {
     /// The user answered an `interaction-request` this provider emitted.
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
         Err(format!("no interaction {:?} is pending", answer.request_id))
+    }
+
+    /// Turn an MCP server of the running session on or off. Called only if the
+    /// provider declared the `mcp_toggle` capability.
+    fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
+        let _ = switch;
+        Err("this provider cannot turn MCP servers of a running session on and off".into())
     }
 
     /// The models the agent offers. Asking the agent usually means running it, so
@@ -428,6 +436,9 @@ pub mod __private {
                     }
                     ProviderRequest::ListModels => {
                         provider.models().map(|r| reply(r, Outcome::Models))
+                    }
+                    ProviderRequest::SetMcpServer(switch) => {
+                        provider.set_mcp_server(switch).map(done)
                     }
                 }
             }

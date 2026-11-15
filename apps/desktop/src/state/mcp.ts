@@ -9,6 +9,7 @@ export const mcpStateLabel: Record<McpState, string> = {
   ready: "Ready",
   failed: "Failed",
   "needs-auth": "Needs sign-in",
+  disabled: "Off",
 };
 
 /** The servers set up in qcc, by name. */
@@ -176,7 +177,44 @@ export function agentOwnMcpServers(threads: readonly Thread[], settings: Setting
     .map(([name, seen]) => ({ name, providers: [...seen].sort(), usage: mcpUsage(threads, name) }));
 }
 
-/** The servers of a thread that need the user: failed, or waiting for a sign-in. */
+/** The servers of a thread that need the user: failed, or waiting for a sign-in. One it keeps off does not. */
 export function mcpTrouble(thread: Thread): McpServerStatus[] {
-  return (thread.mcp_servers ?? []).filter((server) => server.state === "failed" || server.state === "needs-auth");
+  const off = thread.mcp_disabled ?? [];
+  return (thread.mcp_servers ?? []).filter(
+    (server) => (server.state === "failed" || server.state === "needs-auth") && !off.includes(server.name),
+  );
+}
+
+/** One server on a thread's MCP tab. */
+export type ThreadMcpRow = {
+  name: string;
+  /** What the session reports; absent for a server it was started without. */
+  status: McpServerStatus | undefined;
+  /** The thread keeps it off. */
+  off: boolean;
+  /** Set up in qcc rather than in the agent's own configuration. */
+  ours: boolean;
+  /** The thread keeps it off but the session still runs it: it has not taken the change yet. */
+  pending: boolean;
+};
+
+/** The servers the session reports, then those the thread keeps off that it does not. */
+export function threadMcpRows(thread: Thread, settings: Settings | undefined): ThreadMcpRow[] {
+  const ours = settings?.mcp_servers ?? {};
+  const off = new Set(thread.mcp_disabled ?? []);
+  const reported = thread.mcp_servers ?? [];
+  const rows: ThreadMcpRow[] = reported.map((status) => ({
+    name: status.name,
+    status,
+    off: off.has(status.name),
+    ours: status.name in ours,
+    // Only turning off can wait: a server off in the agent's own settings is reported
+    // off too, and that is not the thread's doing.
+    pending: off.has(status.name) && status.state !== "disabled",
+  }));
+  for (const name of [...off].sort()) {
+    if (reported.some((status) => status.name === name)) continue;
+    rows.push({ name, status: undefined, off: true, ours: name in ours, pending: false });
+  }
+  return rows;
 }

@@ -65,6 +65,7 @@ impl Supervisor {
             queued_inputs: 0,
             pending_interactions: Vec::new(),
             mcp_servers: Vec::new(),
+            mcp_disabled: Vec::new(),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

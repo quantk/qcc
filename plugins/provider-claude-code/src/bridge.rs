@@ -23,6 +23,8 @@ use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
 const MCP_QUERY: &str = "qcc-mcp-";
+/// The prefix of the ids of our requests that turn a server on or off.
+const MCP_SWITCH: &str = "qcc-switch-";
 /// How often, and for how long, servers still connecting are asked after.
 const MCP_POLL_MS: u64 = 1000;
 const MCP_POLLS: u32 = 30;
@@ -50,6 +52,9 @@ pub struct Bridge {
     mcp_queries: u32,
     /// How many times in a row the agent said a server was still connecting.
     mcp_polls: u32,
+    /// Switches sent and not yet answered, by request id: the server and whether it
+    /// was being turned on.
+    mcp_switches: HashMap<String, (String, bool)>,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -158,6 +163,7 @@ impl Bridge {
             interrupts: 0,
             mcp_queries: 0,
             mcp_polls: 0,
+            mcp_switches: HashMap::new(),
         }
     }
 
@@ -457,7 +463,28 @@ impl Bridge {
         .to_string()
     }
 
+    /// Turn an MCP server of the session on or off, then ask how the servers are.
+    pub fn switch_mcp(&mut self, name: &str, enabled: bool) -> Output {
+        self.mcp_queries += 1;
+        let request_id = format!("{MCP_SWITCH}{}", self.mcp_queries);
+        let switch = json!({"type": "control_request", "request_id": request_id,
+            "request": {"subtype": "mcp_toggle", "serverName": name, "enabled": enabled}});
+        self.mcp_switches.insert(request_id, (name.to_owned(), enabled));
+        self.mcp_polls = 0;
+        Output { writes: vec![switch.to_string(), self.mcp_status_request()], ..Output::default() }
+    }
+
     fn control_response(&mut self, response: &Value, output: &mut Output) {
+        if let Some((name, enabled)) = self.mcp_switches.remove(str_field(response, "request_id")) {
+            if str_field(response, "subtype") != "success" {
+                let verb = if enabled { "on" } else { "off" };
+                let reason = str_field(response, "error");
+                output.deltas.push(Delta::ProviderWarning(format!(
+                    "Claude Code could not turn the MCP server {name} {verb}: {reason}"
+                )));
+            }
+            return;
+        }
         // An agent too old to tell answers with an error; it is not asked again.
         if !str_field(response, "request_id").starts_with(MCP_QUERY)
             || str_field(response, "subtype") != "success"
@@ -472,7 +499,7 @@ impl Bridge {
                 "connected" => McpState::Ready,
                 "failed" => McpState::Failed,
                 "needs-auth" => McpState::NeedsAuth,
-                // Turned off in the agent's own settings: not part of the session.
+                "disabled" => McpState::Disabled,
                 _ => continue,
             };
             connecting |= state == McpState::Starting;
@@ -869,7 +896,8 @@ mod tests {
             &id,
             json!([{"name": "docs", "status": "pending"},
                    {"name": "off", "status": "disabled"},
-                   {"name": "web", "status": "failed", "error": "ENOENT"}]),
+                   {"name": "web", "status": "failed", "error": "ENOENT"},
+                   {"name": "odd", "status": "brand-new"}]),
         ));
         assert_eq!(
             pending.deltas,
@@ -877,6 +905,11 @@ mod tests {
                 Delta::McpStatus(McpStatus {
                     name: "docs".into(),
                     state: McpState::Starting,
+                    error: None
+                }),
+                Delta::McpStatus(McpStatus {
+                    name: "off".into(),
+                    state: McpState::Disabled,
                     error: None
                 }),
                 Delta::McpStatus(McpStatus {
@@ -903,5 +936,33 @@ mod tests {
         bridge.prompt("x");
         let done = bridge.on_line(&result(json!({})));
         assert!(done.writes.iter().any(|line| line.contains("mcp_status")));
+    }
+
+    #[test]
+    fn mcp_servers_are_switched_in_the_running_session() {
+        let mut bridge = Bridge::new(None);
+        let switched = bridge.switch_mcp("playwright", false);
+        let requests: Vec<Value> =
+            switched.writes.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(
+            requests[0]["request"],
+            json!({"subtype": "mcp_toggle", "serverName": "playwright", "enabled": false})
+        );
+        assert_eq!(requests[1]["request"]["subtype"], "mcp_status");
+
+        let id = requests[0]["request_id"].as_str().unwrap();
+        let done = json!({"type": "control_response",
+                          "response": {"subtype": "success", "request_id": id}});
+        assert_eq!(bridge.on_line(&done.to_string()), Output::default());
+
+        let again = bridge.switch_mcp("nope", true);
+        let id = serde_json::from_str::<Value>(&again.writes[0]).unwrap()["request_id"].clone();
+        let refused = json!({"type": "control_response", "response": {"subtype": "error",
+                             "request_id": id, "error": "Server not found: nope"}});
+        let warned = bridge.on_line(&refused.to_string());
+        assert!(
+            matches!(&warned.deltas[..], [Delta::ProviderWarning(w)] if w.contains("nope on: Server not found")),
+            "{warned:?}"
+        );
     }
 }

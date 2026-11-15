@@ -19,7 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { openMcpServer } from "./open";
 import { McpStateMark } from "./McpState";
 
-const ORDER: McpState[] = ["failed", "needs-auth", "starting", "ready"];
+const ORDER: McpState[] = ["failed", "needs-auth", "starting", "ready", "disabled"];
 
 /** The servers set up in qcc, and those agents bring from their own configuration. */
 export function McpView() {

@@ -75,6 +75,8 @@ impl Provider for AcpProvider {
                     PermissionMode::AcceptEdits,
                     PermissionMode::Full,
                 ],
+                // ACP has no way to turn a server off; qcc's are left out instead.
+                mcp_toggle: false,
             },
         }
     }

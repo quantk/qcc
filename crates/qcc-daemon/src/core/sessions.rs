@@ -52,6 +52,8 @@ impl Core {
             return;
         };
         let extra_dirs = self.extra_dirs(&thread);
+        let (mcp_servers, mcp_disabled) =
+            self.session_mcp(&thread.mcp_disabled, info.capabilities.mcp_toggle);
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
         let prompt = match prompt {
@@ -70,7 +72,8 @@ impl Core {
                 env: self.session_env(id),
                 skills: self.skills.clone(),
                 extra_dirs,
-                mcp_servers: self.mcp_servers(),
+                mcp_servers,
+                mcp_disabled,
             }),
         };
         self.sessions.entry(id.clone()).or_default().starting = true;
@@ -81,17 +84,34 @@ impl Core {
         });
     }
 
-    /// The MCP servers the user set up and did not turn off.
-    fn mcp_servers(&self) -> Vec<McpServer> {
-        self.settings
+    /// The MCP servers a session gets, and those of them or of the agent's own
+    /// configuration it keeps off.
+    ///
+    /// A provider that switches servers of a running session gets every server the
+    /// user did not turn off, the thread's choice among them included, so that one
+    /// can be switched on later without a new session. Another one is given only
+    /// the servers the thread wants.
+    fn session_mcp(&self, disabled: &[String], toggle: bool) -> (Vec<McpServer>, Vec<String>) {
+        let servers: Vec<McpServer> = self
+            .settings
             .mcp_servers
             .iter()
-            .filter(|(_, server)| !server.disabled)
+            .filter(|(name, server)| !server.disabled && (toggle || !disabled.contains(name)))
             .map(|(name, server)| McpServer {
                 name: name.clone(),
                 transport: server.transport.clone(),
             })
-            .collect()
+            .collect();
+        // A qcc server the session does not get is not the agent's to turn off.
+        let disabled = disabled
+            .iter()
+            .filter(|name| {
+                !self.settings.mcp_servers.contains_key(*name)
+                    || servers.iter().any(|server| &&server.name == name)
+            })
+            .cloned()
+            .collect();
+        (servers, disabled)
     }
 
     /// The folders of the thread's project other than the one it works in. A thread
@@ -278,7 +298,7 @@ impl Core {
             session.stopping = false;
         }
         match action {
-            Action::Input | Action::Steer | Action::Resolve => {}
+            Action::Input | Action::Steer | Action::Resolve | Action::SwitchMcp => {}
             Action::Interrupt => {
                 // The backstop: a bridge that settled its own turn makes this a no-op.
                 if let Ok(engine) = self.supervisor.engine(&id) {

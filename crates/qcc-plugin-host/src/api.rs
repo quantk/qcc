@@ -35,6 +35,8 @@ pub struct SessionStart {
     pub extra_dirs: Vec<String>,
     /// MCP servers to add to the agent's own.
     pub mcp_servers: Vec<McpServer>,
+    /// MCP servers the thread keeps off, by name.
+    pub mcp_disabled: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,12 @@ pub enum ProviderRequest {
     },
     Stop {
         thread: ThreadId,
+    },
+    /// Only for providers that declared `mcp_toggle`.
+    SetMcpServer {
+        thread: ThreadId,
+        name: String,
+        enabled: bool,
     },
     ResolveInteraction {
         thread: ThreadId,

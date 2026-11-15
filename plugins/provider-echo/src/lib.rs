@@ -22,7 +22,8 @@
 //! A message steered into a running `/slow` turn is appended to what it streams.
 //!
 //! Each MCP server it is given is reported ready at once, or failed when its
-//! command or URL contains `fail`.
+//! command or URL contains `fail`, or off when the thread keeps it off. It turns
+//! servers on and off in a running session (`mcp-toggle`).
 //!
 //! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
 //! `/card` items, both built from the fixed set of UI nodes.
@@ -45,6 +46,20 @@ struct Echo {
     sessions: HashMap<String, Session>,
 }
 
+/// How a server the session was given is doing while it is on.
+fn mcp_on_status(server: &McpServer) -> McpStatus {
+    let target = match &server.transport {
+        McpTransport::Stdio(stdio) => &stdio.command,
+        McpTransport::Http(http) => &http.url,
+    };
+    let failed = target.contains("fail");
+    McpStatus {
+        name: server.name.clone(),
+        state: if failed { McpState::Failed } else { McpState::Ready },
+        error: failed.then(|| format!("echo was told to fail {target}")),
+    }
+}
+
 #[derive(Default)]
 struct Session {
     input_tokens: u64,
@@ -56,6 +71,8 @@ struct Session {
     skills: Option<String>,
     /// The MCP servers it was given, one line each.
     mcp_servers: Vec<String>,
+    /// How each of them is doing while on.
+    mcp_on: Vec<McpStatus>,
 }
 
 /// What the running turn is waiting for.
@@ -353,6 +370,7 @@ impl Provider for Echo {
                     PermissionMode::Auto,
                     PermissionMode::Full,
                 ],
+                mcp_toggle: true,
             },
         }
     }
@@ -375,20 +393,19 @@ impl Provider for Echo {
         };
         self.sessions.insert(start.thread.clone(), session);
         // Every server it is given connects at once, but one whose command or URL
-        // says `fail` fails: what a test needs to see both.
+        // says `fail` fails: what a test needs to see both. One the thread keeps off
+        // is reported off.
+        let mcp_on: Vec<McpStatus> = start.mcp_servers.iter().map(mcp_on_status).collect();
         let mut reset = vec![Delta::SessionReset];
-        reset.extend(start.mcp_servers.iter().map(|server| {
-            let target = match &server.transport {
-                McpTransport::Stdio(stdio) => &stdio.command,
-                McpTransport::Http(http) => &http.url,
-            };
-            let failed = target.contains("fail");
-            Delta::McpStatus(McpStatus {
-                name: server.name.clone(),
-                state: if failed { McpState::Failed } else { McpState::Ready },
-                error: failed.then(|| format!("echo was told to fail {target}")),
-            })
+        reset.extend(mcp_on.iter().map(|on| {
+            let mut status = on.clone();
+            if start.mcp_disabled.contains(&status.name) {
+                status.state = McpState::Disabled;
+                status.error = None;
+            }
+            Delta::McpStatus(status)
         }));
+        self.sessions.get_mut(&start.thread).expect("just inserted").mcp_on = mcp_on;
         deltas::emit(&start.thread, &reset)?;
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt)?;
@@ -400,6 +417,21 @@ impl Provider for Echo {
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
         self.run(&input.thread, &input.text)
+    }
+
+    fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
+        let session = self.sessions.get(&switch.thread).ok_or("the session was not started")?;
+        let on = session
+            .mcp_on
+            .iter()
+            .find(|status| status.name == switch.name)
+            .ok_or_else(|| format!("no MCP server {:?} in this session", switch.name))?;
+        let status = if switch.enabled {
+            on.clone()
+        } else {
+            McpStatus { name: on.name.clone(), state: McpState::Disabled, error: None }
+        };
+        deltas::emit(&switch.thread, &[Delta::McpStatus(status)])
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {

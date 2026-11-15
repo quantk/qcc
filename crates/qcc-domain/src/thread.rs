@@ -209,6 +209,10 @@ pub struct Thread {
     /// order they were first reported. Empty until it says and for agents that do not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerStatus>,
+    /// MCP servers this thread keeps off, by name, sorted: its sessions start without
+    /// them. Not passed on to the threads it starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_disabled: Vec<String>,
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -319,6 +323,7 @@ impl Thread {
             }
             EventPayload::EnvironmentRemoved => self.set_environment(EnvironmentState::Removed),
             EventPayload::McpServersChanged { servers } => self.mcp_servers.clone_from(servers),
+            EventPayload::McpDisabledChanged { disabled } => self.mcp_disabled.clone_from(disabled),
             EventPayload::ThreadArchived => self.archived = true,
             _ => {}
         }
@@ -356,6 +361,7 @@ mod tests {
             queued_inputs: 0,
             pending_interactions: Vec::new(),
             mcp_servers: Vec::new(),
+            mcp_disabled: Vec::new(),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

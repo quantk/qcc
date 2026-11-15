@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { McpServerStatus, Settings, Thread } from "../api/protocol.gen";
 import {
   agentOwnMcpServers,
+  threadMcpRows,
   draftOf,
   joinArgs,
   mcpNameProblem,
@@ -106,6 +107,28 @@ describe("statuses", () => {
 
   it("pick out the servers that need the user", () => {
     expect(mcpTrouble(threads[0] as Thread).map((server) => server.name)).toEqual(["playwright"]);
+    expect(mcpTrouble({ ...(threads[0] as Thread), mcp_disabled: ["playwright"] })).toEqual([]);
     expect(mcpTrouble(thread("d", "codex", [{ name: "x", state: "needs-auth" }]))).toHaveLength(1);
+  });
+});
+
+describe("a thread's servers", () => {
+  it("list what the session reports, then what it keeps off, and what waits for the next session", () => {
+    const settings: Settings = { mcp_servers: { docs: { transport: { type: "stdio", command: "npx" } } } };
+    const rows = threadMcpRows(
+      {
+        ...thread("a", "codex", [
+          { name: "playwright", state: "ready" },
+          { name: "blender", state: "disabled" },
+        ]),
+        mcp_disabled: ["docs", "playwright"],
+      },
+      settings,
+    );
+    expect(rows.map(({ name, off, ours, pending }) => ({ name, off, ours, pending }))).toEqual([
+      { name: "playwright", off: true, ours: false, pending: true },
+      { name: "blender", off: false, ours: false, pending: false },
+      { name: "docs", off: true, ours: true, pending: false },
+    ]);
   });
 });

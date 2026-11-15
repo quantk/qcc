@@ -17,8 +17,8 @@ export const mcpModule: UiModule = {
       id: "mcp",
       title: "MCP",
       order: 30,
-      when: ({ thread }) => (thread.mcp_servers ?? []).length > 0,
-      render: ({ thread }) => <ThreadMcp thread={thread} />,
+      when: ({ thread }) => (thread.mcp_servers ?? []).length > 0 || (thread.mcp_disabled ?? []).length > 0,
+      render: ({ thread, provider }) => <ThreadMcp thread={thread} provider={provider} />,
     });
     registry.command({ id: "mcp.add", title: "Add an MCP server", enabled: connected, run: () => openMcpServer() });
     registry.command({ id: "mcp.open", title: "MCP servers", run: () => store().openView(MCP_VIEW) });

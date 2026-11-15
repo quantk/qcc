@@ -66,6 +66,8 @@ pub(crate) enum Action {
     Resolve,
     Interrupt,
     Release,
+    /// Turn an MCP server of the running session on or off.
+    SwitchMcp,
     /// Release, as the first step of archiving the thread.
     Archive {
         force: bool,

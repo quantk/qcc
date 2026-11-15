@@ -41,6 +41,7 @@ fn generate() -> String {
         .method::<ThreadSend>()
         .method::<ThreadUnqueue>()
         .method::<ThreadSetMode>()
+        .method::<ThreadSetMcp>()
         .method::<ThreadSetAgent>()
         .method::<ThreadSetProject>()
         .method::<ThreadSetParent>()

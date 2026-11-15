@@ -9,10 +9,10 @@ use qcc_protocol::methods::{
     ProviderModels, SettingsGet, SettingsSet, ThreadArchive, ThreadChanges, ThreadDeliver,
     ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
     ThreadListParams, ThreadListResult, ThreadRename, ThreadResult, ThreadSend, ThreadSetAgent,
-    ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSpawn, ThreadStop, ThreadUnqueue,
-    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
-    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
-    UiRenderItem, UiRenderItemParams, UiRenderParams,
+    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSpawn, ThreadStop,
+    ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
+    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
+    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -36,6 +36,10 @@ impl Core {
             }
             ThreadSend::NAME => {
                 let result = params::<ThreadSend>(raw).and_then(|p| self.thread_send(p));
+                responder.reply(result);
+            }
+            ThreadSetMcp::NAME => {
+                let result = params::<ThreadSetMcp>(raw).and_then(|p| self.thread_set_mcp(p));
                 responder.reply(result);
             }
             ThreadSetMode::NAME => {

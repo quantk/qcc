@@ -410,6 +410,41 @@ fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
     assert!(shown.contains("docs ready"), "{shown}");
     assert!(shown.contains("broken failed: echo was told to fail"), "{shown}");
 
+    // A switch reaches the running session a moment after the call returns.
+    let state_of = |thread: &str, index: usize, state: &str| {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let found = daemon.thread(thread)["mcp_servers"][index]["state"].clone();
+            if found == state {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{thread}: server {index} is {found}, not {state}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    // One thread turns a server off for itself, in its running session.
+    let off = daemon.qcc(&["thread", "mcp", &probe, "--off", "docs", "--json"]);
+    assert!(off.ok, "{}", off.stderr);
+    assert_eq!(off.json()["mcp_disabled"], serde_json::json!(["docs"]));
+    state_of(&probe, 1, "disabled");
+    let shown = daemon.qcc(&["thread", "mcp", &probe]).stdout;
+    assert!(shown.contains("docs off"), "{shown}");
+    // Its next session starts without it; other threads and its children keep it.
+    let other = daemon.spawn("/mcp");
+    told(&other);
+    assert_eq!(daemon.thread(&other)["mcp_servers"][1]["state"], "ready");
+    let child = daemon.qcc(&["thread", "spawn", "--parent", &probe, "--prompt", "hi", "--json"]);
+    assert!(child.ok, "{}", child.stderr);
+    assert!(child.json()["thread"].get("mcp_disabled").is_none());
+    assert!(daemon.qcc(&["thread", "stop", &probe, "--release"]).ok);
+    assert!(daemon.qcc(&["thread", "send", &probe, "/mcp"]).ok);
+    told(&probe);
+    state_of(&probe, 1, "disabled");
+    let on = daemon.qcc(&["thread", "mcp", &probe, "--on", "docs", "--json"]);
+    assert!(on.ok, "{}", on.stderr);
+    state_of(&probe, 1, "ready");
+
     // What could not work is refused.
     let refused = daemon.qcc(&["mcp", "add", "my docs", "--", "npx"]);
     assert!(!refused.ok);

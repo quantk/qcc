@@ -67,6 +67,10 @@ pub struct ProviderCapabilities {
     /// The permission modes the provider can enforce.
     #[serde(default)]
     pub permission_modes: Vec<PermissionMode>,
+    /// MCP servers of a running session can be turned on and off. Without it, a
+    /// thread's change waits for its next session.
+    #[serde(default)]
+    pub mcp_toggle: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -258,6 +262,8 @@ pub enum McpState {
     Failed,
     /// The server wants the user to sign in, in the agent itself.
     NeedsAuth,
+    /// Turned off for this session.
+    Disabled,
 }
 
 #[cfg(test)]

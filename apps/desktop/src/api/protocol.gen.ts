@@ -156,7 +156,9 @@ queue_id?: string | null } |
  *  The MCP servers of the session and how each is doing: the whole list, which
  *  replaces the one before. Empty when a new session starts.
  */
-{ type: "mcp/servers"; servers: McpServerStatus[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
+{ type: "mcp/servers"; servers: McpServerStatus[] } | 
+/**  The MCP servers the thread keeps off: the whole list, sorted. */
+{ type: "thread/mcp-disabled"; disabled: string[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
 
 /**  Minted by the delta assembler for every `interaction.request`. */
 export type InteractionId = string;
@@ -220,7 +222,9 @@ export type McpState =
 /**  The agent is still connecting. */
 "starting" | "ready" | "failed" | 
 /**  The server wants the user to sign in, in the agent itself. */
-"needs-auth";
+"needs-auth" | 
+/**  Turned off for this session. */
+"disabled";
 
 /**  How an agent reaches an MCP server. */
 export type McpTransport = 
@@ -365,6 +369,11 @@ export type ProviderCapabilities = {
 	steer: boolean,
 	/**  The permission modes the provider can enforce. */
 	permission_modes?: PermissionMode[],
+	/**
+	 *  MCP servers of a running session can be turned on and off. Without it, a
+	 *  thread's change waits for its next session.
+	 */
+	mcp_toggle?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -498,6 +507,11 @@ export type Thread = {
 	 *  order they were first reported. Empty until it says and for agents that do not.
 	 */
 	mcp_servers?: McpServerStatus[],
+	/**
+	 *  MCP servers this thread keeps off, by name, sorted: its sessions start without
+	 *  them. Not passed on to the threads it starts.
+	 */
+	mcp_disabled?: string[],
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**
@@ -643,6 +657,12 @@ export type ThreadSetAgentParams = {
 	provider: ProviderId,
 	/**  Absent: the agent's default model. */
 	model?: string | null,
+};
+
+export type ThreadSetMcpParams = {
+	thread_id: ThreadId,
+	server: string,
+	enabled: boolean,
 };
 
 export type ThreadSetModeParams = {
@@ -872,6 +892,7 @@ export type Methods = {
 	"thread.send": { params: ThreadSendParams; result: ThreadSendResult },
 	"thread.unqueue": { params: ThreadUnqueueParams; result: ThreadUnqueueResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
+	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },
 	"thread.set_parent": { params: ThreadSetParentParams; result: ThreadResult },

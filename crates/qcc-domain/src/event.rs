@@ -158,6 +158,10 @@ pub enum EventPayload {
     #[serde(rename = "mcp/servers")]
     McpServersChanged { servers: Vec<McpServerStatus> },
 
+    /// The MCP servers the thread keeps off: the whole list, sorted.
+    #[serde(rename = "thread/mcp-disabled")]
+    McpDisabledChanged { disabled: Vec<String> },
+
     #[serde(rename = "interaction/requested")]
     InteractionRequested {
         interaction_id: InteractionId,

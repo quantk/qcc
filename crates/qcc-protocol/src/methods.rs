@@ -167,6 +167,22 @@ pub struct ThreadSetModeParams {
 }
 
 method!(
+    /// Turn an MCP server on or off for one thread, by name: one qcc gives agents or
+    /// one of the agent's own configuration. The threads it starts are not affected.
+    /// A provider that declared `mcp_toggle` switches it in the running session at
+    /// once; for another the change is refused while a turn runs, and an attached
+    /// session is released so that the next message resumes it with the change.
+    ThreadSetMcp, "thread.set_mcp", ThreadSetMcpParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadSetMcpParams {
+    pub thread_id: ThreadId,
+    pub server: String,
+    pub enabled: bool,
+}
+
+method!(
     /// Go on with another agent or another model. Refused while a turn runs. An
     /// attached session is released; with the same provider the next message resumes
     /// it with the new model, with another provider a new session starts and is told

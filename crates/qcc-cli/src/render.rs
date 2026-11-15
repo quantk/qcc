@@ -123,13 +123,29 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(parent) = &thread.parent {
         lines.push(format!("parent    {parent}"));
     }
-    for (index, server) in thread.mcp_servers.iter().enumerate() {
-        let label = if index == 0 { "mcp" } else { "" };
+    let mcp = mcp_servers(thread);
+    if !mcp.is_empty() {
+        lines.extend(mcp.lines().map(str::to_owned));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+/// The MCP servers of the thread's session, then those it keeps off that the
+/// session does not report. Empty when there are none.
+pub fn mcp_servers(thread: &Thread) -> String {
+    let mut lines = Vec::new();
+    let mut add = |name: &str, state: &str| {
+        let label = if lines.is_empty() { "mcp" } else { "" };
+        lines.push(format!("{label:<9} {name} {state}"));
+    };
+    for server in &thread.mcp_servers {
         let state = match server.state {
             McpState::Starting => "starting",
             McpState::Ready => "ready",
             McpState::Failed => "failed",
             McpState::NeedsAuth => "needs auth",
+            McpState::Disabled => "off",
         };
         // Agents put whole transport dumps here; the first words say enough.
         let error = server
@@ -137,9 +153,19 @@ pub fn thread_details(thread: &Thread) -> String {
             .as_deref()
             .map(|error| format!(": {}", clip(error, 160)))
             .unwrap_or_default();
-        lines.push(format!("{label:<9} {} {state}{error}", server.name));
+        let pending =
+            if thread.mcp_disabled.contains(&server.name) && server.state != McpState::Disabled {
+                " (kept off; the session has not taken it yet)"
+            } else {
+                ""
+            };
+        add(&server.name, &format!("{state}{error}{pending}"));
     }
-    lines.push(String::new());
+    for name in &thread.mcp_disabled {
+        if !thread.mcp_servers.iter().any(|server| &server.name == name) {
+            add(name, "off");
+        }
+    }
     lines.join("\n")
 }
 
@@ -336,6 +362,10 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::ProjectChanged { project } => match project {
             Some(project) => format!("(project {project})"),
             None => "(no project)".to_owned(),
+        },
+        EventPayload::McpDisabledChanged { disabled } => match disabled.is_empty() {
+            true => "(every MCP server on)".to_owned(),
+            false => format!("(MCP servers off: {})", disabled.join(", ")),
         },
         EventPayload::ParentChanged { parent } => match parent {
             Some(parent) => format!("(moved under {parent})"),

@@ -1,4 +1,4 @@
-import { CircleAlertIcon, CircleCheckIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
+import { CircleAlertIcon, CircleCheckIcon, CircleOffIcon, KeyRoundIcon, LoaderCircleIcon } from "lucide-react";
 
 import type { McpState } from "../../api/protocol.gen";
 import { mcpStateLabel } from "../../state/mcp";
@@ -8,6 +8,7 @@ const icons: Record<McpState, React.ReactNode> = {
   ready: <CircleCheckIcon className="size-3.5 text-(--green)" />,
   failed: <CircleAlertIcon className="size-3.5 text-destructive" />,
   "needs-auth": <KeyRoundIcon className="size-3.5 text-(--blue)" />,
+  disabled: <CircleOffIcon className="size-3.5 text-muted-foreground" />,
 };
 
 /** How a server is doing, as an icon and, unless `bare`, a word. */

@@ -108,6 +108,7 @@ impl HarnessBuilder {
             activity: None,
             turn_started_at: None,
             last_turn_status: None,
+            last_turn_at: None,
             environment: None,
             archived: false,
             handover: false,

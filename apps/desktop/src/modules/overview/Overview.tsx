@@ -9,16 +9,23 @@ import {
   findProvider,
   folderOf,
 } from "../../state/selectors";
+import { isUnread } from "../../state/reads";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt } from "../../ui/kit";
 import { baseName, elapsed, plural, relativeTime } from "../../util/format";
 import { useNow } from "../../util/useNow";
 
-type Lane = { id: string; title: string; hint: string; shows: Attention[] };
+type Lane = { id: string; title: string; hint: string; shows: Attention[]; unread?: boolean };
 
 // Ordered by how much each lane wants from the user.
 const LANES: Lane[] = [
-  { id: "needs-you", title: "Needs you", hint: "Waiting for an answer, or failed", shows: ["waiting", "failed"] },
+  {
+    id: "needs-you",
+    title: "Needs you",
+    hint: "Waiting for an answer, failed, or replied since you last looked",
+    shows: ["waiting", "failed"],
+    unread: true,
+  },
   { id: "working", title: "Working", hint: "A turn is running", shows: ["active"] },
   { id: "idle", title: "Idle", hint: "Finished their last turn", shows: ["idle"] },
 ];
@@ -29,6 +36,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
   const parent = useApp((state) => (thread.parent ? state.threads[thread.parent] : undefined));
   const project = useApp((state) => state.projects.find((candidate) => candidate.id === thread.project));
+  const unread = useApp((state) => isUnread(thread, state.seen));
   const activity = activityText(thread);
   const technical = thread.activity && !["agentMessage", "reasoning", "plan"].includes(thread.activity.kind);
   const open = () => store().select(thread.id);
@@ -64,6 +72,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
         )}
         {(thread.queued_inputs ?? 0) > 0 && <span>{plural(thread.queued_inputs ?? 0, "message")} queued</span>}
       </div>
+      {unread && attention === "idle" && <div className="text-xs font-semibold text-(--blue)">New reply</div>}
       {attention === "failed" && <div className="agent-failed">{thread.status === "failed" ? "The session failed" : "The last turn failed"} — open the thread to see why</div>}
       {activity && <div className={`agent-activity${technical ? " technical" : ""}`}>{activity}</div>}
       {(thread.pending_interactions ?? []).map((pending) => (
@@ -80,10 +89,20 @@ export function Overview() {
   const anyWorking = live.some((thread) => thread.status === "active");
   const now = useNow(anyWorking ? 1000 : 30_000);
 
+  const seen = useApp((state) => state.seen);
+  // A thread with an unread reply is in "Needs you", not also among the idle.
+  const laneOf = (thread: Thread) => {
+    const attention = attentionOf(thread);
+    if (attention === "idle" && isUnread(thread, seen)) return "unread";
+    return attention;
+  };
   const lanes = LANES.map((lane) => ({
     ...lane,
     threads: live
-      .filter((thread) => lane.shows.includes(attentionOf(thread)))
+      .filter((thread) => {
+        const where = laneOf(thread);
+        return where === "unread" ? Boolean(lane.unread) : lane.shows.includes(where);
+      })
       .sort((a, b) => b.updated_at - a.updated_at),
   }));
 

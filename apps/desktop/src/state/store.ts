@@ -23,10 +23,35 @@ import type {
   ThreadId,
   ThreadSpawnParams,
 } from "../api/protocol.gen";
+import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { visiblePlugins } from "./selectors";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
+const SEEN = "qcc.seen";
+
+/** Null when nothing was ever recorded: the first run of the app. */
+function readSeen(): Seen | null {
+  try {
+    const text = globalThis.localStorage?.getItem(SEEN);
+    return text ? (JSON.parse(text) as Seen) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSeen(seen: Seen) {
+  try {
+    globalThis.localStorage?.setItem(SEEN, JSON.stringify(seen));
+  } catch {
+    // Not remembered past this window; it still works until it closes.
+  }
+}
+
+/** Whether the user can be looking at the window right now. */
+function windowInView(): boolean {
+  return typeof document === "undefined" || (document.visibilityState === "visible" && document.hasFocus());
+}
 
 function readShowExamples(): boolean {
   try {
@@ -63,6 +88,8 @@ export type AppState = {
   projects: readonly Project[];
   /** The daemon's settings and where its programs are. Null until read. */
   settings: SettingsResult | null;
+  /** How far the user has seen each thread; see `reads.ts`. */
+  seen: Seen;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -88,7 +115,10 @@ export class AppStore {
     models: {},
     projects: [],
     settings: null,
+    seen: readSeen() ?? {},
   };
+  /** No record existed when the app started: the first listing counts as seen. */
+  private firstRun = readSeen() === null;
   private listeners = new Set<() => void>();
   private notifying = false;
   private nextSubscription = 1;
@@ -120,7 +150,11 @@ export class AppStore {
 
   /** Start mirroring the daemon. Returns a function that stops it. */
   start(): () => void {
+    // Coming back to the window shows the thread that was left open.
+    const onFocus = () => this.seeSelected();
+    globalThis.addEventListener?.("focus", onFocus);
     const stops = [
+      () => globalThis.removeEventListener?.("focus", onFocus),
       this.api.onDaemonState((state) => this.daemonChanged(state)),
       this.api.onNotification((notification) => this.notified(notification)),
     ];
@@ -186,7 +220,34 @@ export class AppStore {
       if (!known || known.last_seq <= thread.last_seq) next[thread.id] = thread;
     }
     this.set({ threads: next });
+    if (this.firstRun) {
+      this.firstRun = false;
+      this.setSeen(seenEverything(Object.values(next)));
+    }
+    this.seeSelected();
   }
+
+  /** The thread on screen is seen, as far as it has got, while the window is in view. */
+  seeSelected = () => {
+    const thread = this.state.selected ? this.state.threads[this.state.selected] : undefined;
+    if (thread && windowInView()) this.setSeen(markSeen(this.state.seen, thread));
+  };
+
+  private setSeen(seen: Seen) {
+    if (seen === this.state.seen) return;
+    this.set({ seen });
+    saveSeen(seen);
+  }
+
+  markUnread = (threadId: ThreadId) => {
+    const thread = this.state.threads[threadId];
+    if (thread) this.setSeen(markUnseen(this.state.seen, thread));
+  };
+
+  markRead = (threadId: ThreadId) => {
+    const thread = this.state.threads[threadId];
+    if (thread) this.setSeen(markSeen(this.state.seen, thread));
+  };
 
   private fold(threadId: ThreadId, events: readonly ThreadEvent[]) {
     if (events.length === 0) return;
@@ -287,6 +348,7 @@ export class AppStore {
   select = (threadId: ThreadId | null) => {
     if (threadId === this.state.selected) return;
     this.set({ selected: threadId, loading: false });
+    this.seeSelected();
     if (threadId === null) this.unfollow();
     else if (this.state.daemon.status === "connected") void this.follow(threadId);
   };

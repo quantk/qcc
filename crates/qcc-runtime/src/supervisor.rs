@@ -67,6 +67,7 @@ impl Supervisor {
             activity: None,
             turn_started_at: None,
             last_turn_status: None,
+            last_turn_at: None,
             archived: false,
             handover: false,
         };

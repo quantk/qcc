@@ -2,6 +2,7 @@ import { FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { activityText, attentionLabel, attentionOf, findProvider, threadGroups, threadTree } from "../state/selectors";
+import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
 import { NEW_THREAD, openNewThread } from "../modules/new-thread";
 import { openProject } from "../modules/projects";
@@ -16,6 +17,7 @@ export function Sidebar() {
   const threads = useApp((state) => state.threads);
   const plugins = useApp((state) => state.allPlugins);
   const projects = useApp((state) => state.projects);
+  const seen = useApp((state) => state.seen);
   const selected = useApp((state) => state.selected);
   const connected = useApp((state) => state.daemon.status === "connected");
   const views = useUi((snapshot) => snapshot.views);
@@ -111,6 +113,7 @@ export function Sidebar() {
             {group.kind === "project" && group.threads.length === 0 && <p className="hint">No threads yet.</p>}
             {threadTree(group.threads).map(({ thread, depth, children }) => {
               const attention = attentionOf(thread);
+              const unread = isUnread(thread, seen);
               const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
               return (
                 <button
@@ -121,11 +124,13 @@ export function Sidebar() {
                   onClick={() => store().select(thread.id)}
                 >
                   <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-                  <span className="thread-title">{thread.title ?? "New thread"}</span>
+                  <span className={`thread-title${unread ? " font-semibold" : ""}`}>{thread.title ?? "New thread"}</span>
                   <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
                   <span className="thread-meta">
                     {attention === "waiting"
                       ? "Needs your answer"
+                      : unread && attention === "idle"
+                        ? "New reply"
                       : attention === "failed"
                         ? "Failed"
                         : attention === "active" && thread.activity

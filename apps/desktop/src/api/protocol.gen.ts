@@ -429,6 +429,11 @@ export type Thread = {
 	turn_started_at?: number | null,
 	/**  How the latest turn ended. Absent while one runs and before the first. */
 	last_turn_status?: TurnStatus | null,
+	/**
+	 *  When the latest turn ended, in milliseconds since the Unix epoch: what a
+	 *  client compares with what the user has seen.
+	 */
+	last_turn_at?: number | null,
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**

@@ -197,6 +197,10 @@ pub struct Thread {
     /// How the latest turn ended. Absent while one runs and before the first.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_status: Option<TurnStatus>,
+    /// When the latest turn ended, in milliseconds since the Unix epoch: what a
+    /// client compares with what the user has seen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_turn_at: Option<u64>,
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -271,6 +275,7 @@ impl Thread {
             EventPayload::TurnCompleted { status, .. } => {
                 self.turn_started_at = None;
                 self.last_turn_status = Some(*status);
+                self.last_turn_at = Some(event.ts);
             }
             EventPayload::ItemStarted { item, .. } | EventPayload::ItemCompleted { item, .. } => {
                 self.activity = Some(ThreadActivity::of(item));
@@ -326,6 +331,7 @@ mod tests {
             activity: None,
             turn_started_at: None,
             last_turn_status: None,
+            last_turn_at: None,
             archived: false,
             handover: false,
         }
@@ -413,6 +419,7 @@ mod tests {
         );
         assert_eq!(thread.turn_started_at, None);
         assert_eq!(thread.last_turn_status, Some(TurnStatus::Failed));
+        assert_eq!(thread.last_turn_at, Some(thread.updated_at));
     }
 
     #[test]

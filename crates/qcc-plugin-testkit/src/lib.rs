@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use qcc_domain::{
-    Delta, EventPayload, InteractionId, InteractionResolution, ProviderId, Thread, ThreadEvent,
-    ThreadId, ThreadStatus,
+    Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, ProviderId, Thread,
+    ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
 };
 use qcc_plugin_host::services::{KvStore, ProcessBackend};
 use qcc_plugin_host::{
@@ -26,7 +26,7 @@ use qcc_plugin_host::{
 };
 use qcc_runtime::{GrammarViolation, SequentialMint, ThreadEngine, Timeline};
 
-pub use scripted::{ScriptStep, ScriptedProcesses};
+pub use scripted::{ScriptStep, ScriptedProcesses, message_key, script_from_recording};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -82,16 +82,10 @@ impl HarnessBuilder {
         }
 
         let mut host = PluginHost::new().expect("wasm engine");
-        let plugin = host
-            .load(self.manifest, &self.wasm, &self.grant, services)
-            .expect("plugin loads");
+        let plugin =
+            host.load(self.manifest, &self.wasm, &self.grant, services).expect("plugin loads");
         let provider = self.provider.unwrap_or_else(|| {
-            host.providers()
-                .next()
-                .expect("the plugin contributes a provider")
-                .1
-                .id
-                .clone()
+            host.providers().next().expect("the plugin contributes a provider").1.id.clone()
         });
 
         let thread_id = ThreadId::new("thread-1");
@@ -120,6 +114,7 @@ impl HarnessBuilder {
             violations: Vec::new(),
             crash,
             foreign_deltas: 0,
+            model: None,
         }
     }
 }
@@ -137,6 +132,7 @@ pub struct Harness {
     violations: Vec<GrammarViolation>,
     crash: Arc<Mutex<Option<String>>>,
     foreign_deltas: usize,
+    model: Option<String>,
 }
 
 impl Harness {
@@ -181,6 +177,11 @@ impl Harness {
         self.crash.lock().unwrap().clone()
     }
 
+    /// The model the next session start asks for.
+    pub fn set_model(&mut self, model: Option<&str>) {
+        self.model = model.map(str::to_owned);
+    }
+
     /// Start a session, optionally with a first prompt, the way the daemon does.
     pub fn start(&mut self, prompt: Option<&str>) -> Result<(), PluginError> {
         self.start_with(prompt, None)
@@ -205,7 +206,7 @@ impl Harness {
         let outcome = self.call(ProviderRequest::Start(SessionStart {
             thread: self.thread_id.clone(),
             cwd: "/work".into(),
-            model: None,
+            model: self.model.clone(),
             resume,
             prompt: prompt.map(str::to_owned),
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
@@ -230,10 +231,7 @@ impl Harness {
         let events = self.engine.submit_input(text.to_owned(), 0);
         self.events.extend(events);
         let thread = self.thread_id.clone();
-        self.call(ProviderRequest::Input {
-            thread,
-            text: text.to_owned(),
-        })?;
+        self.call(ProviderRequest::Input { thread, text: text.to_owned() })?;
         self.pump();
         Ok(())
     }
@@ -254,20 +252,14 @@ impl Harness {
 
     /// Answer the oldest pending interaction.
     pub fn resolve(&mut self, resolution: InteractionResolution) -> Result<(), PluginError> {
-        let interaction_id = self
-            .pending_interaction()
-            .expect("an interaction is pending");
+        let interaction_id = self.pending_interaction().expect("an interaction is pending");
         let (request_id, events) = self
             .engine
             .resolve_interaction(interaction_id, resolution.clone(), 0)
             .expect("pending interaction");
         self.events.extend(events);
         let thread = self.thread_id.clone();
-        self.call(ProviderRequest::ResolveInteraction {
-            thread,
-            request_id,
-            resolution,
-        })?;
+        self.call(ProviderRequest::ResolveInteraction { thread, request_id, resolution })?;
         self.pump();
         Ok(())
     }
@@ -283,10 +275,8 @@ impl Harness {
 
     /// Send any provider request to the plugin.
     pub fn call(&mut self, request: ProviderRequest) -> Result<Outcome, PluginError> {
-        self.plugin.call_blocking(PluginRequest::Provider {
-            provider: self.provider.clone(),
-            request,
-        })
+        self.plugin
+            .call_blocking(PluginRequest::Provider { provider: self.provider.clone(), request })
     }
 
     /// Assemble every delta the plugin has emitted so far.
@@ -323,11 +313,41 @@ impl Harness {
         });
     }
 
-    pub fn count(&self, matches: impl Fn(&EventPayload) -> bool) -> usize {
+    /// Text of every settled agent message, in order.
+    pub fn agent_messages(&self) -> Vec<String> {
+        self.completed_items()
+            .into_iter()
+            .filter_map(|item| match item.shape {
+                ItemShape::AgentMessage { text } => Some(text),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every settled item, in order.
+    pub fn completed_items(&self) -> Vec<Item> {
         self.events
             .iter()
-            .filter(|event| matches(&event.payload))
-            .count()
+            .filter_map(|event| match &event.payload {
+                EventPayload::ItemCompleted { item, .. } => Some(item.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How each settled turn ended, in order.
+    pub fn turn_statuses(&self) -> Vec<(TurnStatus, Option<String>)> {
+        self.events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                EventPayload::TurnCompleted { status, error, .. } => Some((*status, error.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn count(&self, matches: impl Fn(&EventPayload) -> bool) -> usize {
+        self.events.iter().filter(|event| matches(&event.payload)).count()
     }
 
     fn apply(&mut self, thread: ThreadId, deltas: Vec<Delta>) {
@@ -358,28 +378,17 @@ impl Harness {
                 broken.push(format!("timeline: event {}: {violation}", index + 1));
             }
             if event.seq != index as u64 + 1 {
-                broken.push(format!(
-                    "timeline: event {} has seq {}",
-                    index + 1,
-                    event.seq
-                ));
+                broken.push(format!("timeline: event {} has seq {}", index + 1, event.seq));
             }
         }
         if let Some(turn) = timeline.open_turn() {
-            broken.push(format!(
-                "settled: turn {turn} never reached a terminal state"
-            ));
+            broken.push(format!("settled: turn {turn} never reached a terminal state"));
         }
         for interaction in timeline.pending_interactions() {
-            broken.push(format!(
-                "settled: interaction {interaction} is still pending"
-            ));
+            broken.push(format!("settled: interaction {interaction} is still pending"));
         }
         if self.foreign_deltas > 0 {
-            broken.push(format!(
-                "scoped: {} delta(s) for an unknown thread",
-                self.foreign_deltas
-            ));
+            broken.push(format!("scoped: {} delta(s) for an unknown thread", self.foreign_deltas));
         }
         broken
     }
@@ -416,16 +425,10 @@ impl Harness {
             return;
         }
         let expected = std::fs::read_to_string(path).unwrap_or_else(|error| {
-            panic!(
-                "{}: {error}; record it with QCC_UPDATE_GOLDEN=1",
-                path.display()
-            )
+            panic!("{}: {error}; record it with QCC_UPDATE_GOLDEN=1", path.display())
         });
         if expected != actual {
-            let line = expected
-                .lines()
-                .zip(actual.lines())
-                .position(|(e, a)| e != a);
+            let line = expected.lines().zip(actual.lines()).position(|(e, a)| e != a);
             let line = line.unwrap_or(expected.lines().count().min(actual.lines().count()));
             panic!(
                 "timeline differs from {} at line {}:\n  expected: {}\n  actual:   {}\n\

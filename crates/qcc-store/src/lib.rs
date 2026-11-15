@@ -18,11 +18,7 @@ pub enum StoreError {
     #[error("corrupt record: {0}")]
     Corrupt(#[from] serde_json::Error),
     #[error("thread {thread}: event seq {got} does not follow {last}")]
-    OutOfOrder {
-        thread: ThreadId,
-        last: u64,
-        got: u64,
-    },
+    OutOfOrder { thread: ThreadId, last: u64, got: u64 },
     #[error("thread {0}: the first event must be thread/created")]
     MissingThread(ThreadId),
     #[error("database schema version {found} is newer than this build supports ({supported})")]
@@ -68,10 +64,7 @@ impl Store {
         let version: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         let supported = MIGRATIONS.len() as u32;
         if version > supported {
-            return Err(StoreError::SchemaTooNew {
-                found: version,
-                supported,
-            });
+            return Err(StoreError::SchemaTooNew { found: version, supported });
         }
         for (index, migration) in MIGRATIONS.iter().enumerate().skip(version as usize) {
             let tx = conn.transaction()?;
@@ -79,9 +72,7 @@ impl Store {
             tx.pragma_update(None, "user_version", index as u32 + 1)?;
             tx.commit()?;
         }
-        Ok(Self {
-            conn: Mutex::new(conn),
-        })
+        Ok(Self { conn: Mutex::new(conn) })
     }
 
     /// Append events and update the projections atomically: either the whole batch
@@ -95,9 +86,7 @@ impl Store {
         // Events of one thread are contiguous in practice; cache the last projection.
         let mut current: Option<Thread> = None;
         for event in events {
-            if current
-                .as_ref()
-                .is_some_and(|thread| thread.id != event.thread_id)
+            if current.as_ref().is_some_and(|thread| thread.id != event.thread_id)
                 && let Some(thread) = current.take()
             {
                 save_thread(&tx, &thread)?;
@@ -168,11 +157,7 @@ impl Store {
             "SELECT seq, ts, payload FROM events WHERE thread_id = ?1 AND seq > ?2 ORDER BY seq",
         )?;
         let rows = statement.query_map(params![id.as_str(), after as i64], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, String>(2)?,
-            ))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
         })?;
         let mut events = Vec::new();
         for row in rows {
@@ -190,19 +175,13 @@ impl Store {
     fn lock(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave a transaction half-applied:
         // rusqlite rolls back on drop.
-        self.conn
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.conn.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 }
 
 fn load_thread(tx: &Transaction<'_>, id: &ThreadId) -> Result<Option<Thread>> {
     let data: Option<String> = tx
-        .query_row(
-            "SELECT data FROM threads WHERE id = ?1",
-            [id.as_str()],
-            |row| row.get(0),
-        )
+        .query_row("SELECT data FROM threads WHERE id = ?1", [id.as_str()], |row| row.get(0))
         .optional()?;
     Ok(match data {
         Some(data) => Some(serde_json::from_str(&data)?),
@@ -213,11 +192,7 @@ fn load_thread(tx: &Transaction<'_>, id: &ThreadId) -> Result<Option<Thread>> {
 fn insert_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
     tx.execute(
         "INSERT INTO threads (id, created_at, data) VALUES (?1, ?2, ?3)",
-        params![
-            thread.id.as_str(),
-            thread.created_at as i64,
-            serde_json::to_string(thread)?
-        ],
+        params![thread.id.as_str(), thread.created_at as i64, serde_json::to_string(thread)?],
     )?;
     Ok(())
 }
@@ -290,27 +265,16 @@ mod tests {
         }
 
         let threads = store.threads().unwrap();
-        assert_eq!(
-            threads.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
-            ["a", "b"]
-        );
+        assert_eq!(threads.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
         for thread in &threads {
-            assert_eq!(
-                Some(thread),
-                supervisor.thread(&thread.id),
-                "projection drifted"
-            );
+            assert_eq!(Some(thread), supervisor.thread(&thread.id), "projection drifted");
             assert_eq!(store.thread(&thread.id).unwrap().as_ref(), Some(thread));
         }
         assert_eq!(threads[0].status, ThreadStatus::Idle);
         assert_eq!(threads[1].status, ThreadStatus::Active);
         assert_eq!(threads[1].title.as_deref(), Some("hello from b"));
 
-        let a: Vec<_> = journal
-            .iter()
-            .filter(|e| e.thread_id.as_str() == "a")
-            .cloned()
-            .collect();
+        let a: Vec<_> = journal.iter().filter(|e| e.thread_id.as_str() == "a").cloned().collect();
         assert_eq!(store.events(&"a".into(), 0).unwrap(), a);
         assert_eq!(store.events(&"a".into(), 4).unwrap(), a[4..]);
         assert_eq!(store.events(&"a".into(), 999).unwrap(), vec![]);
@@ -322,35 +286,18 @@ mod tests {
         let store = Store::open_in_memory().unwrap();
         let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
         let journal = scenario(&mut supervisor);
-        let a: Vec<_> = journal
-            .iter()
-            .filter(|e| e.thread_id.as_str() == "a")
-            .cloned()
-            .collect();
+        let a: Vec<_> = journal.iter().filter(|e| e.thread_id.as_str() == "a").cloned().collect();
 
-        assert!(matches!(
-            store.append(&a[1..]),
-            Err(StoreError::MissingThread(_))
-        ));
+        assert!(matches!(store.append(&a[1..]), Err(StoreError::MissingThread(_))));
 
         let mut gap = a.clone();
         gap.remove(2);
-        assert!(matches!(
-            store.append(&gap),
-            Err(StoreError::OutOfOrder {
-                last: 2,
-                got: 4,
-                ..
-            })
-        ));
+        assert!(matches!(store.append(&gap), Err(StoreError::OutOfOrder { last: 2, got: 4, .. })));
         // Nothing of the rejected batch was kept.
         assert_eq!(store.threads().unwrap(), vec![]);
 
         store.append(&a).unwrap();
-        assert!(matches!(
-            store.append(&a[a.len() - 1..]),
-            Err(StoreError::OutOfOrder { .. })
-        ));
+        assert!(matches!(store.append(&a[a.len() - 1..]), Err(StoreError::OutOfOrder { .. })));
         assert_eq!(store.events(&"a".into(), 0).unwrap().len(), a.len());
     }
 
@@ -364,10 +311,7 @@ mod tests {
 
         let store = Store::open(&path).unwrap();
         assert_eq!(store.threads().unwrap().len(), 2);
-        assert_eq!(
-            store.thread(&"b".into()).unwrap().as_ref(),
-            supervisor.thread(&"b".into())
-        );
+        assert_eq!(store.thread(&"b".into()).unwrap().as_ref(), supervisor.thread(&"b".into()));
         assert_eq!(store.events(&"b".into(), 0).unwrap().len(), 7);
     }
 }

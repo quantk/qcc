@@ -38,10 +38,7 @@ fn text(text: &str) -> Delta {
 
 /// Replaying the journal must rebuild the projection the engine holds.
 fn assert_projection(journal: &[ThreadEvent], thread: &Thread) {
-    let EventPayload::ThreadCreated {
-        thread: mut replayed,
-    } = journal[0].payload.clone()
-    else {
+    let EventPayload::ThreadCreated { thread: mut replayed } = journal[0].payload.clone() else {
         panic!("the first event must be thread/created");
     };
     for event in journal {
@@ -74,28 +71,16 @@ fn a_turn_drives_status_and_projection() {
     let events = engine.apply_deltas([Delta::TurnOpen, text("ok")], 130);
     assert_eq!(
         types(&events),
-        [
-            "turn/started",
-            "item/started",
-            "item/text/delta",
-            "thread/status"
-        ]
+        ["turn/started", "item/started", "item/text/delta", "thread/status"]
     );
     assert_eq!(engine.thread().status, ThreadStatus::Active);
     journal.extend(events);
 
     let events = engine.apply_deltas(
-        [Delta::TurnBoundary {
-            status: TurnStatus::Completed,
-            error: None,
-            claim_if_idle: false,
-        }],
+        [Delta::TurnBoundary { status: TurnStatus::Completed, error: None, claim_if_idle: false }],
         140,
     );
-    assert_eq!(
-        types(&events),
-        ["item/completed", "turn/completed", "thread/status"]
-    );
+    assert_eq!(types(&events), ["item/completed", "turn/completed", "thread/status"]);
     journal.extend(events);
 
     let thread = engine.thread().clone();
@@ -117,12 +102,7 @@ fn failed_session_settles_open_work_and_recovers_on_next_start() {
     let events = engine.session_failed("agent crashed".into(), 4);
     assert_eq!(
         types(&events),
-        [
-            "provider/error",
-            "item/completed",
-            "turn/completed",
-            "thread/status"
-        ]
+        ["provider/error", "item/completed", "turn/completed", "thread/status"]
     );
     assert!(matches!(
         &events[2].payload,
@@ -164,12 +144,9 @@ fn interaction_roundtrip() {
         panic!("expected interaction/requested, got {:?}", events[1]);
     };
 
-    let resolution = InteractionResolution::Text {
-        text: "that one".into(),
-    };
-    let (request_id, events) = engine
-        .resolve_interaction(interaction_id.clone(), resolution.clone(), 4)
-        .unwrap();
+    let resolution = InteractionResolution::Text { text: "that one".into() };
+    let (request_id, events) =
+        engine.resolve_interaction(interaction_id.clone(), resolution.clone(), 4).unwrap();
     assert_eq!(request_id, "p1");
     assert_eq!(types(&events), ["interaction/resolved"]);
     assert_eq!(
@@ -191,10 +168,7 @@ fn force_settle_is_a_noop_when_the_bridge_settled_itself() {
     );
     assert_eq!(engine.force_settle(5), vec![]);
 
-    assert_eq!(
-        types(&engine.session_released(Some("stopped".into()), 6)),
-        ["session/ended"]
-    );
+    assert_eq!(types(&engine.session_released(Some("stopped".into()), 6)), ["session/ended"]);
     assert!(!engine.session_live());
     assert_eq!(engine.session_released(None, 7), vec![]);
 }
@@ -238,12 +212,7 @@ fn restart_settles_what_the_dead_session_left_open() {
     let events = second.recover(persisted, journal.iter().map(|e| &e.payload), 50);
     assert_eq!(
         types(&events),
-        [
-            "interaction/resolved",
-            "item/completed",
-            "turn/completed",
-            "thread/status"
-        ]
+        ["interaction/resolved", "item/completed", "turn/completed", "thread/status"]
     );
     assert_eq!(events[0].seq, journal.last().unwrap().seq + 1);
     journal.extend(events);

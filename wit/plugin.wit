@@ -168,6 +168,9 @@ interface types {
     item-text-close(text-close),
     usage(usage-snapshot),
     interaction-request(interaction-ask),
+    /// The durable handle of this provider session, for a bridge that learns it only
+    /// after `start` returned. Equivalent to returning it from `start`.
+    session-identity(string),
     /// A fresh provider session was constructed: provider-native ids start over.
     session-reset,
     /// The provider session is gone, with an optional reason.

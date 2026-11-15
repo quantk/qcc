@@ -30,10 +30,7 @@ pub struct Supervisor {
 impl Supervisor {
     /// `mint` makes the id source of each thread's assembler.
     pub fn new(mint: impl Fn() -> Box<dyn IdMint> + Send + 'static) -> Self {
-        Self {
-            engines: HashMap::new(),
-            mint: Box::new(mint),
-        }
+        Self { engines: HashMap::new(), mint: Box::new(mint) }
     }
 
     pub fn create(
@@ -84,8 +81,6 @@ impl Supervisor {
     }
 
     pub fn engine(&mut self, id: &ThreadId) -> Result<&mut ThreadEngine, SupervisorError> {
-        self.engines
-            .get_mut(id)
-            .ok_or_else(|| SupervisorError::UnknownThread(id.clone()))
+        self.engines.get_mut(id).ok_or_else(|| SupervisorError::UnknownThread(id.clone()))
     }
 }

@@ -19,21 +19,11 @@ pub struct Request {
 
 impl Request {
     pub fn new(id: u64, method: &str, params: Value) -> Self {
-        Self {
-            jsonrpc: VERSION.into(),
-            id: Some(id.into()),
-            method: method.into(),
-            params,
-        }
+        Self { jsonrpc: VERSION.into(), id: Some(id.into()), method: method.into(), params }
     }
 
     pub fn notification(method: &str, params: Value) -> Self {
-        Self {
-            jsonrpc: VERSION.into(),
-            id: None,
-            method: method.into(),
-            params,
-        }
+        Self { jsonrpc: VERSION.into(), id: None, method: method.into(), params }
     }
 }
 
@@ -49,21 +39,11 @@ pub struct Response {
 
 impl Response {
     pub fn ok(id: Value, result: Value) -> Self {
-        Self {
-            jsonrpc: VERSION.into(),
-            id,
-            result: Some(result),
-            error: None,
-        }
+        Self { jsonrpc: VERSION.into(), id, result: Some(result), error: None }
     }
 
     pub fn err(id: Value, error: RpcError) -> Self {
-        Self {
-            jsonrpc: VERSION.into(),
-            id,
-            result: None,
-            error: Some(error),
-        }
+        Self { jsonrpc: VERSION.into(), id, result: None, error: Some(error) }
     }
 }
 
@@ -77,11 +57,7 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: i32, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            data: None,
-        }
+        Self { code, message: message.into(), data: None }
     }
 }
 

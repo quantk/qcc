@@ -32,9 +32,7 @@ impl ThreadEngine {
         thread.last_seq = 0;
         thread.created_at = now;
         thread.updated_at = now;
-        let created = EventPayload::ThreadCreated {
-            thread: thread.clone(),
-        };
+        let created = EventPayload::ThreadCreated { thread: thread.clone() };
         let mut engine = Self {
             thread,
             assembler: DeltaAssembler::new(mint),
@@ -102,13 +100,7 @@ impl ThreadEngine {
     ) -> Vec<ThreadEvent> {
         self.session_live = true;
         self.failed = false;
-        self.emit(
-            vec![EventPayload::SessionStarted {
-                provider_session,
-                resumed,
-            }],
-            now,
-        )
+        self.emit(vec![EventPayload::SessionStarted { provider_session, resumed }], now)
     }
 
     /// The provider session could not start or died: record why, settle open work as
@@ -116,11 +108,8 @@ impl ThreadEngine {
     pub fn session_failed(&mut self, message: String, now: u64) -> Vec<ThreadEvent> {
         self.session_live = false;
         self.failed = true;
-        let mut payloads = vec![EventPayload::ProviderError {
-            message: message.clone(),
-        }];
-        self.assembler
-            .settle(TurnStatus::Failed, Some(message), &mut payloads);
+        let mut payloads = vec![EventPayload::ProviderError { message: message.clone() }];
+        self.assembler.settle(TurnStatus::Failed, Some(message), &mut payloads);
         self.emit(payloads, now)
     }
 
@@ -133,10 +122,7 @@ impl ThreadEngine {
         for delta in deltas {
             payloads.extend(self.assembler.apply(delta));
         }
-        if payloads
-            .iter()
-            .any(|p| matches!(p, EventPayload::SessionEnded { .. }))
-        {
+        if payloads.iter().any(|p| matches!(p, EventPayload::SessionEnded { .. })) {
             self.session_live = false;
         }
         self.emit(payloads, now)
@@ -154,13 +140,8 @@ impl ThreadEngine {
             .assembler
             .take_interaction(&interaction_id)
             .ok_or_else(|| EngineError::InteractionNotPending(interaction_id.clone()))?;
-        let events = self.emit(
-            vec![EventPayload::InteractionResolved {
-                interaction_id,
-                resolution,
-            }],
-            now,
-        );
+        let events =
+            self.emit(vec![EventPayload::InteractionResolved { interaction_id, resolution }], now);
         Ok((request_id, events))
     }
 
@@ -168,8 +149,7 @@ impl ThreadEngine {
     /// asked to interrupt: a bridge that already settled its turn makes this a no-op.
     pub fn force_settle(&mut self, now: u64) -> Vec<ThreadEvent> {
         let mut payloads = Vec::new();
-        self.assembler
-            .settle(TurnStatus::Interrupted, None, &mut payloads);
+        self.assembler.settle(TurnStatus::Interrupted, None, &mut payloads);
         self.emit(payloads, now)
     }
 
@@ -185,10 +165,7 @@ impl ThreadEngine {
         let mut events = Vec::with_capacity(payloads.len() + 1);
         for payload in payloads {
             let applied = self.timeline.apply(&payload);
-            debug_assert!(
-                applied.is_ok(),
-                "assembler broke the timeline grammar: {applied:?}"
-            );
+            debug_assert!(applied.is_ok(), "assembler broke the timeline grammar: {applied:?}");
             self.push(payload, now, &mut events);
         }
         let status = if self.timeline.open_turn().is_some() {
@@ -199,11 +176,7 @@ impl ThreadEngine {
             ThreadStatus::Idle
         };
         if status != self.thread.status {
-            self.push(
-                EventPayload::ThreadStatusChanged { status },
-                now,
-                &mut events,
-            );
+            self.push(EventPayload::ThreadStatusChanged { status }, now, &mut events);
         }
         events
     }

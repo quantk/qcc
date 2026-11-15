@@ -1,0 +1,17 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"claude-code","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"Run the shell command `cat note.txt`"}
+{"type":"session/started","resumed":false}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"session/identified","provider_session":"215116c1-3350-419b-a791-40d98db530e6"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"command","command":"cat note.txt"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"command","command":"cat note.txt","output":"hello fixture"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_2","text":"The"}
+{"type":"item/text/delta","item_id":"item_2","text":" command printed:"}
+{"type":"item/text/delta","item_id":"item_2","text":"\n\n```"}
+{"type":"item/text/delta","item_id":"item_2","text":"\nhello fixture\n```"}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"The command printed:\n\n```\nhello fixture\n```"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":180,"cached_input_tokens":50575},"last":{"input_tokens":4,"output_tokens":180,"cached_input_tokens":50575},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

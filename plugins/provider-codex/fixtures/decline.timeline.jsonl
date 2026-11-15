@@ -1,0 +1,43 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"codex","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"Run the shell command `touch made.txt`"}
+{"type":"session/started","resumed":false}
+{"type":"session/identified","provider_session":"01a1de76-d3f1-7aa1-813f-3699d6ef9290"}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_1","text":"Running"}
+{"type":"item/text/delta","item_id":"item_1","text":" the"}
+{"type":"item/text/delta","item_id":"item_1","text":" command"}
+{"type":"item/text/delta","item_id":"item_1","text":"."}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"Running the command."}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'touch made.txt'","cwd":"/work"}}
+{"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_2","request":{"type":"approval","title":"May I run the requested command to create made.txt in the current directory?","detail":"/run/current-system/sw/bin/zsh -lc 'touch made.txt'","options":[{"id":"accept","label":"Allow","kind":"allow"},{"id":"acceptForSession","label":"Allow for this session","kind":"allow"},{"id":"decline","label":"Deny","kind":"deny"}]}}
+{"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"decline"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"declined","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'touch made.txt'","cwd":"/work"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":22299,"output_tokens":133,"cached_input_tokens":12160},"last":{"input_tokens":22299,"output_tokens":133,"cached_input_tokens":12160},"model_context_window":475000}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_3","text":"Could"}
+{"type":"item/text/delta","item_id":"item_3","text":" not"}
+{"type":"item/text/delta","item_id":"item_3","text":" run"}
+{"type":"item/text/delta","item_id":"item_3","text":" `"}
+{"type":"item/text/delta","item_id":"item_3","text":"touch"}
+{"type":"item/text/delta","item_id":"item_3","text":" made"}
+{"type":"item/text/delta","item_id":"item_3","text":".txt"}
+{"type":"item/text/delta","item_id":"item_3","text":"`:"}
+{"type":"item/text/delta","item_id":"item_3","text":" permission"}
+{"type":"item/text/delta","item_id":"item_3","text":" to"}
+{"type":"item/text/delta","item_id":"item_3","text":" create"}
+{"type":"item/text/delta","item_id":"item_3","text":" the"}
+{"type":"item/text/delta","item_id":"item_3","text":" file"}
+{"type":"item/text/delta","item_id":"item_3","text":" was"}
+{"type":"item/text/delta","item_id":"item_3","text":" rejected"}
+{"type":"item/text/delta","item_id":"item_3","text":";"}
+{"type":"item/text/delta","item_id":"item_3","text":" no"}
+{"type":"item/text/delta","item_id":"item_3","text":" reason"}
+{"type":"item/text/delta","item_id":"item_3","text":" was"}
+{"type":"item/text/delta","item_id":"item_3","text":" provided"}
+{"type":"item/text/delta","item_id":"item_3","text":"."}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"Could not run `touch made.txt`: permission to create the file was rejected; no reason was provided."}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":44776,"output_tokens":187,"cached_input_tokens":34304},"last":{"input_tokens":22477,"output_tokens":54,"cached_input_tokens":22144},"model_context_window":475000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

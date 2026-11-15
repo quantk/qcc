@@ -93,10 +93,7 @@ impl DeltaAssembler {
     /// Forget a pending interaction and return the provider-side request id the
     /// resolution has to be sent back with.
     pub fn take_interaction(&mut self, id: &InteractionId) -> Option<String> {
-        let index = self
-            .interactions
-            .iter()
-            .position(|pending| &pending.id == id)?;
+        let index = self.interactions.iter().position(|pending| &pending.id == id)?;
         Some(self.interactions.remove(index).request_id)
     }
 
@@ -110,11 +107,7 @@ impl DeltaAssembler {
                     self.start_turn(&mut out);
                 }
             }
-            Delta::TurnBoundary {
-                status,
-                error,
-                claim_if_idle,
-            } => {
+            Delta::TurnBoundary { status, error, claim_if_idle } => {
                 if self.turn.is_none() {
                     if !claim_if_idle {
                         self.violations.push(GrammarViolation::BoundaryWithoutTurn);
@@ -139,15 +132,8 @@ impl DeltaAssembler {
                     self.release_streams(&turn_id, &mut out);
                 }
                 let id = self.id_for(&key);
-                let item = Item {
-                    id,
-                    status: ItemStatus::Pending,
-                    shape,
-                };
-                out.push(EventPayload::ItemStarted {
-                    turn_id,
-                    item: item.clone(),
-                });
+                let item = Item { id, status: ItemStatus::Pending, shape };
+                out.push(EventPayload::ItemStarted { turn_id, item: item.clone() });
                 self.open.push(OpenItem { key, item });
             }
             Delta::ItemClose { key, shape, status } => {
@@ -155,19 +141,14 @@ impl DeltaAssembler {
                     return out;
                 };
                 if !status.is_terminal() {
-                    self.violations
-                        .push(GrammarViolation::CloseWithPendingStatus(key));
+                    self.violations.push(GrammarViolation::CloseWithPendingStatus(key));
                     return out;
                 }
                 let item = match self.position(&key) {
                     Some(index) => {
                         // The carried shape wins, including a mid-flight reclassification.
                         let open = self.open.remove(index);
-                        Item {
-                            id: open.item.id,
-                            status,
-                            shape,
-                        }
+                        Item { id: open.item.id, status, shape }
                     }
                     None => {
                         if self.is_settled(&key) {
@@ -204,14 +185,8 @@ impl DeltaAssembler {
                             status: ItemStatus::Pending,
                             shape: channel.shape(String::new()),
                         };
-                        out.push(EventPayload::ItemStarted {
-                            turn_id,
-                            item: item.clone(),
-                        });
-                        self.open.push(OpenItem {
-                            key: key.clone(),
-                            item,
-                        });
+                        out.push(EventPayload::ItemStarted { turn_id, item: item.clone() });
+                        self.open.push(OpenItem { key: key.clone(), item });
                         self.open.len() - 1
                     }
                 };
@@ -222,10 +197,7 @@ impl DeltaAssembler {
                 };
                 if !text.is_empty() {
                     buffer.push_str(&text);
-                    out.push(EventPayload::ItemTextDelta {
-                        item_id: item.id.clone(),
-                        text,
-                    });
+                    out.push(EventPayload::ItemTextDelta { item_id: item.id.clone(), text });
                 }
             }
             Delta::ItemTextClose { key, channel, text } => {
@@ -263,45 +235,33 @@ impl DeltaAssembler {
                                 shape: shape.clone(),
                             },
                         });
-                        Item {
-                            id,
-                            status: ItemStatus::Completed,
-                            shape,
-                        }
+                        Item { id, status: ItemStatus::Completed, shape }
                     }
                 };
                 self.remember_settled(&key, &item.id);
                 out.push(EventPayload::ItemCompleted { turn_id, item });
             }
             Delta::Usage { usage } => out.push(EventPayload::UsageUpdated { usage }),
-            Delta::InteractionRequest {
-                request_id,
-                item,
-                request,
-            } => {
-                if self
-                    .interactions
-                    .iter()
-                    .any(|pending| pending.request_id == request_id)
-                {
-                    self.violations
-                        .push(GrammarViolation::InteractionAlreadyPending(request_id));
+            Delta::InteractionRequest { request_id, item, request } => {
+                if self.interactions.iter().any(|pending| pending.request_id == request_id) {
+                    self.violations.push(GrammarViolation::InteractionAlreadyPending(request_id));
                     return out;
                 }
                 let interaction_id = self.mint.interaction();
                 let item_id = item
                     .and_then(|key| self.position(&key))
                     .map(|index| self.open[index].item.id.clone());
-                self.interactions.push(PendingInteraction {
-                    id: interaction_id.clone(),
-                    request_id,
-                });
+                self.interactions
+                    .push(PendingInteraction { id: interaction_id.clone(), request_id });
                 out.push(EventPayload::InteractionRequested {
                     interaction_id,
                     turn_id: self.turn.clone(),
                     item_id,
                     request,
                 });
+            }
+            Delta::SessionIdentity { provider_session } => {
+                out.push(EventPayload::SessionIdentified { provider_session });
             }
             Delta::SessionReset => {
                 self.settle(TurnStatus::Interrupted, None, &mut out);
@@ -357,17 +317,10 @@ impl DeltaAssembler {
             let mut item = open.item;
             item.status = settled_item_status(&item, status);
             self.remember_settled(&open.key, &item.id);
-            out.push(EventPayload::ItemCompleted {
-                turn_id: turn_id.clone(),
-                item,
-            });
+            out.push(EventPayload::ItemCompleted { turn_id: turn_id.clone(), item });
         }
         self.input_pending = false;
-        out.push(EventPayload::TurnCompleted {
-            turn_id,
-            status,
-            error,
-        });
+        out.push(EventPayload::TurnCompleted { turn_id, status, error });
     }
 
     fn cancel_interactions(&mut self, out: &mut Vec<EventPayload>) {
@@ -389,10 +342,7 @@ impl DeltaAssembler {
         for open in streams {
             let mut item = open.item;
             item.status = ItemStatus::Completed;
-            out.push(EventPayload::ItemCompleted {
-                turn_id: turn_id.clone(),
-                item,
-            });
+            out.push(EventPayload::ItemCompleted { turn_id: turn_id.clone(), item });
         }
     }
 

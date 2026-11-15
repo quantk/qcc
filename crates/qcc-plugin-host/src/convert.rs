@@ -59,21 +59,15 @@ fn shape(shape: wit::ItemShape) -> Result<ItemShape, String> {
             output: c.output,
             exit_code: c.exit_code,
         },
-        wit::ItemShape::FileChange(c) => ItemShape::FileChange {
-            path: c.path,
-            diff: c.diff,
-        },
+        wit::ItemShape::FileChange(c) => ItemShape::FileChange { path: c.path, diff: c.diff },
         wit::ItemShape::FileRead(path) => ItemShape::FileRead { path },
         wit::ItemShape::Search(query) => ItemShape::Search { query },
-        wit::ItemShape::Tool(t) => ItemShape::Tool {
-            name: t.name,
-            input: json(&t.input)?,
-            output: t.output,
-        },
-        wit::ItemShape::Extension(e) => ItemShape::Extension {
-            kind: e.kind,
-            payload: json(&e.payload)?,
-        },
+        wit::ItemShape::Tool(t) => {
+            ItemShape::Tool { name: t.name, input: json(&t.input)?, output: t.output }
+        }
+        wit::ItemShape::Extension(e) => {
+            ItemShape::Extension { kind: e.kind, payload: json(&e.payload)? }
+        }
     })
 }
 
@@ -125,25 +119,18 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
             error: b.error,
             claim_if_idle: b.claim_if_idle,
         },
-        wit::Delta::ItemOpen(o) => Delta::ItemOpen {
-            key: key(o.key),
-            shape: shape(o.shape)?,
-        },
+        wit::Delta::ItemOpen(o) => Delta::ItemOpen { key: key(o.key), shape: shape(o.shape)? },
         wit::Delta::ItemClose(c) => Delta::ItemClose {
             key: key(c.key),
             shape: shape(c.shape)?,
             status: item_status(c.status),
         },
-        wit::Delta::ItemTextDelta(d) => Delta::ItemTextDelta {
-            key: key(d.key),
-            channel: channel(d.channel),
-            text: d.text,
-        },
-        wit::Delta::ItemTextClose(c) => Delta::ItemTextClose {
-            key: key(c.key),
-            channel: channel(c.channel),
-            text: c.text,
-        },
+        wit::Delta::ItemTextDelta(d) => {
+            Delta::ItemTextDelta { key: key(d.key), channel: channel(d.channel), text: d.text }
+        }
+        wit::Delta::ItemTextClose(c) => {
+            Delta::ItemTextClose { key: key(c.key), channel: channel(c.channel), text: c.text }
+        }
         wit::Delta::Usage(u) => Delta::Usage {
             usage: UsageSnapshot {
                 total: token_usage(u.total),
@@ -156,13 +143,14 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
             item: ask.item.map(key),
             request: interaction_request(ask.request),
         },
+        wit::Delta::SessionIdentity(provider_session) => {
+            Delta::SessionIdentity { provider_session }
+        }
         wit::Delta::SessionReset => Delta::SessionReset,
         wit::Delta::SessionEnded(reason) => Delta::SessionEnded { reason },
         wit::Delta::ProviderError(message) => Delta::ProviderError { message },
         wit::Delta::ProviderWarning(message) => Delta::ProviderWarning { message },
-        wit::Delta::Unhandled(payload) => Delta::Unhandled {
-            payload: json(&payload)?,
-        },
+        wit::Delta::Unhandled(payload) => Delta::Unhandled { payload: json(&payload)? },
     })
 }
 
@@ -177,27 +165,20 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 steer: p.capabilities.steer,
             },
         }),
-        wit::Contribution::Environment(e) => Contribution::Environment(EnvironmentInfo {
-            id: e.id,
-            name: e.name,
-        }),
+        wit::Contribution::Environment(e) => {
+            Contribution::Environment(EnvironmentInfo { id: e.id, name: e.name })
+        }
     }
 }
 
 pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
     match outcome {
         wit::Outcome::Done => Outcome::Done,
-        wit::Outcome::SessionStarted(s) => Outcome::SessionStarted {
-            provider_session: s.provider_session,
-        },
+        wit::Outcome::SessionStarted(s) => {
+            Outcome::SessionStarted { provider_session: s.provider_session }
+        }
         wit::Outcome::Models(models) => Outcome::Models(
-            models
-                .into_iter()
-                .map(|m| ModelInfo {
-                    id: m.id,
-                    name: m.name,
-                })
-                .collect(),
+            models.into_iter().map(|m| ModelInfo { id: m.id, name: m.name }).collect(),
         ),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
     }
@@ -231,44 +212,38 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
             request: match request {
                 ProviderRequest::Start(start) => wit::ProviderRequest::Start(session_start(start)),
                 ProviderRequest::Input { thread, text } => {
-                    wit::ProviderRequest::Input(wit::ThreadInput {
-                        thread: thread.0,
-                        text,
-                    })
+                    wit::ProviderRequest::Input(wit::ThreadInput { thread: thread.0, text })
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),
-                ProviderRequest::ResolveInteraction {
-                    thread,
-                    request_id,
-                    resolution: r,
-                } => wit::ProviderRequest::ResolveInteraction(wit::InteractionAnswer {
-                    thread: thread.0,
-                    request_id,
-                    resolution: resolution(r),
-                }),
+                ProviderRequest::ResolveInteraction { thread, request_id, resolution: r } => {
+                    wit::ProviderRequest::ResolveInteraction(wit::InteractionAnswer {
+                        thread: thread.0,
+                        request_id,
+                        resolution: resolution(r),
+                    })
+                }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
             },
         }),
-        PluginRequest::Environment {
-            environment,
-            request,
-        } => wit::Event::Environment(wit::EnvironmentCall {
-            environment,
-            request: match request {
-                EnvironmentRequest::Prepare { thread, source_dir } => {
-                    wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
-                        thread: thread.0,
-                        source_dir,
-                    })
-                }
-                EnvironmentRequest::Remove { thread, cwd } => {
-                    wit::EnvironmentRequest::Remove(wit::EnvironmentRemove {
-                        thread: thread.0,
-                        cwd,
-                    })
-                }
-            },
-        }),
+        PluginRequest::Environment { environment, request } => {
+            wit::Event::Environment(wit::EnvironmentCall {
+                environment,
+                request: match request {
+                    EnvironmentRequest::Prepare { thread, source_dir } => {
+                        wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
+                            thread: thread.0,
+                            source_dir,
+                        })
+                    }
+                    EnvironmentRequest::Remove { thread, cwd } => {
+                        wit::EnvironmentRequest::Remove(wit::EnvironmentRemove {
+                            thread: thread.0,
+                            cwd,
+                        })
+                    }
+                },
+            })
+        }
     }
 }

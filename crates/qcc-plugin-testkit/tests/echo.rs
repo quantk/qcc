@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use qcc_domain::{
-    EventPayload, InteractionResolution, ItemShape, ItemStatus, ProviderCapabilities, TurnStatus,
+    EventPayload, InteractionResolution, ItemStatus, ProviderCapabilities, TurnStatus,
 };
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{Contribution, Grant, Outcome, Permissions, PluginError, ProviderRequest};
@@ -16,54 +16,17 @@ fn echo() -> Harness {
 }
 
 fn golden(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(name)
-}
-
-fn agent_messages(harness: &Harness) -> Vec<String> {
-    harness
-        .events()
-        .iter()
-        .filter_map(|event| match &event.payload {
-            EventPayload::ItemCompleted { item, .. } => match &item.shape {
-                ItemShape::AgentMessage { text } => Some(text.clone()),
-                _ => None,
-            },
-            _ => None,
-        })
-        .collect()
-}
-
-fn turn_statuses(harness: &Harness) -> Vec<(TurnStatus, Option<String>)> {
-    harness
-        .events()
-        .iter()
-        .filter_map(|event| match &event.payload {
-            EventPayload::TurnCompleted { status, error, .. } => Some((*status, error.clone())),
-            _ => None,
-        })
-        .collect()
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name)
 }
 
 #[test]
 fn declares_its_provider() {
     let harness = echo();
     let [Contribution::Provider(info)] = harness.handle().contributions() else {
-        panic!(
-            "expected one provider, got {:?}",
-            harness.handle().contributions()
-        );
+        panic!("expected one provider, got {:?}", harness.handle().contributions());
     };
     assert_eq!(info.id.as_str(), "echo");
-    assert_eq!(
-        info.capabilities,
-        ProviderCapabilities {
-            resume: true,
-            fork: false,
-            steer: false
-        }
-    );
+    assert_eq!(info.capabilities, ProviderCapabilities { resume: true, fork: false, steer: false });
     assert_eq!(harness.handle().id(), "provider-echo");
 }
 
@@ -74,15 +37,9 @@ fn streamed_turn_matches_the_recorded_timeline() {
     harness.wait_turns(1);
     harness.assert_conformant();
     harness.assert_golden(golden("echo-streamed-turn.jsonl"));
-    assert_eq!(agent_messages(&harness), ["hello brave new world"]);
-    assert_eq!(
-        harness.thread().provider_session.as_deref(),
-        Some("echo-thread-1")
-    );
-    assert_eq!(
-        harness.thread().title.as_deref(),
-        Some("hello brave new world")
-    );
+    assert_eq!(harness.agent_messages(), ["hello brave new world"]);
+    assert_eq!(harness.thread().provider_session.as_deref(), Some("echo-thread-1"));
+    assert_eq!(harness.thread().title.as_deref(), Some("hello brave new world"));
 }
 
 #[test]
@@ -94,10 +51,7 @@ fn tool_call_splits_the_message_stream() {
     harness.wait_turns(2);
     harness.assert_conformant();
     harness.assert_golden(golden("echo-tool-call.jsonl"));
-    assert_eq!(
-        agent_messages(&harness),
-        ["Calling a tool.", "Done.", "thanks"]
-    );
+    assert_eq!(harness.agent_messages(), ["Calling a tool.", "Done.", "thanks"]);
 }
 
 #[test]
@@ -105,16 +59,12 @@ fn question_is_answered_through_the_provider() {
     let mut harness = echo();
     harness.start(Some("/ask Proceed?")).unwrap();
     harness.wait_until("the question", |h| h.pending_interaction().is_some());
-    assert_eq!(turn_statuses(&harness), []);
+    assert_eq!(harness.turn_statuses(), []);
 
-    harness
-        .resolve(InteractionResolution::Text {
-            text: "go ahead".into(),
-        })
-        .unwrap();
+    harness.resolve(InteractionResolution::Text { text: "go ahead".into() }).unwrap();
     harness.wait_turns(1);
     harness.assert_conformant();
-    assert_eq!(agent_messages(&harness), ["You said: go ahead"]);
+    assert_eq!(harness.agent_messages(), ["You said: go ahead"]);
 }
 
 #[test]
@@ -131,11 +81,7 @@ fn declined_approval_settles_the_item_as_declined() {
         })
         .unwrap();
 
-    harness
-        .resolve(InteractionResolution::Selected {
-            option_id: "deny".into(),
-        })
-        .unwrap();
+    harness.resolve(InteractionResolution::Selected { option_id: "deny".into() }).unwrap();
     harness.wait_turns(1);
     harness.assert_conformant();
     let settled = harness
@@ -154,18 +100,15 @@ fn declined_approval_settles_the_item_as_declined() {
 #[test]
 fn timers_drive_a_slow_stream_and_interrupt_stops_it() {
     let mut harness = echo();
-    let long = (0..2000)
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let long = (0..2000).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
     harness.start(Some(&format!("/slow {long}"))).unwrap();
     harness.wait_until("streamed text", |h| {
         h.count(|payload| matches!(payload, EventPayload::ItemTextDelta { .. })) >= 3
     });
     harness.interrupt().unwrap();
     harness.wait_turns(1);
-    assert_eq!(turn_statuses(&harness), [(TurnStatus::Interrupted, None)]);
-    let partial = agent_messages(&harness).remove(0);
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Interrupted, None)]);
+    let partial = harness.agent_messages().remove(0);
     assert!(partial.starts_with("0 1 2 "), "{partial:?}");
     assert!(partial.len() < long.len());
 
@@ -173,23 +116,22 @@ fn timers_drive_a_slow_stream_and_interrupt_stops_it() {
     harness.input("/slow x y").unwrap();
     harness.wait_turns(2);
     harness.assert_conformant();
-    assert_eq!(agent_messages(&harness)[1], "x y ");
+    assert_eq!(harness.agent_messages()[1], "x y ");
 }
 
 #[test]
 fn kv_store_outlives_the_plugin_instance() {
     let dir = tempfile::tempdir().unwrap();
     let run = |prompts: &[&str]| {
-        let mut harness = Harness::bundled("provider-echo")
-            .kv(DirKv::new(dir.path().join("kv")))
-            .build();
+        let mut harness =
+            Harness::bundled("provider-echo").kv(DirKv::new(dir.path().join("kv"))).build();
         harness.start(None).unwrap();
         for prompt in prompts {
             harness.input(prompt).unwrap();
         }
         harness.wait_turns(prompts.len());
         harness.assert_conformant();
-        agent_messages(&harness)
+        harness.agent_messages()
     };
     assert_eq!(run(&["/kv", "/kv"]), ["count 1", "count 2"]);
     assert_eq!(run(&["/kv"]), ["count 3"]);
@@ -198,13 +140,11 @@ fn kv_store_outlives_the_plugin_instance() {
 #[test]
 fn runs_an_allowed_process_and_streams_its_output() {
     let mut harness = echo();
-    harness
-        .start(Some("/exec echo from a real process"))
-        .unwrap();
+    harness.start(Some("/exec echo from a real process")).unwrap();
     harness.wait_turns(1);
     harness.assert_conformant();
-    assert_eq!(agent_messages(&harness), ["from a real process\n"]);
-    assert_eq!(turn_statuses(&harness), [(TurnStatus::Completed, None)]);
+    assert_eq!(harness.agent_messages(), ["from a real process\n"]);
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Completed, None)]);
 }
 
 #[test]
@@ -215,20 +155,12 @@ fn recorded_process_traffic_replaces_the_real_process() {
         ScriptStep::line("recorded line 2"),
         ScriptStep::Exit(Some(2)),
     ]]);
-    let mut harness = Harness::bundled("provider-echo")
-        .processes(processes.clone())
-        .build();
+    let mut harness = Harness::bundled("provider-echo").processes(processes.clone()).build();
     harness.start(Some("/exec echo live")).unwrap();
     harness.wait_turns(1);
     harness.assert_conformant();
-    assert_eq!(
-        agent_messages(&harness),
-        ["recorded line 1\nrecorded line 2\n"]
-    );
-    assert_eq!(
-        turn_statuses(&harness),
-        [(TurnStatus::Failed, Some("exit code 2".into()))]
-    );
+    assert_eq!(harness.agent_messages(), ["recorded line 1\nrecorded line 2\n"]);
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Failed, Some("exit code 2".into()))]);
     let spawns = processes.spawns();
     assert_eq!(
         (spawns[0].program.as_str(), &spawns[0].args[..]),
@@ -243,31 +175,20 @@ fn a_program_outside_the_manifest_is_refused() {
     harness.wait_turns(1);
     harness.assert_conformant();
     assert_eq!(
-        turn_statuses(&harness),
-        [(
-            TurnStatus::Failed,
-            Some("permission denied: process \"sh\"".into())
-        )]
+        harness.turn_statuses(),
+        [(TurnStatus::Failed, Some("permission denied: process \"sh\"".into()))]
     );
 }
 
 #[test]
 fn ungranted_permissions_are_refused() {
     // The manifest requests everything; the user granted only deltas.
-    let granted = Permissions {
-        deltas: true,
-        ..Permissions::default()
-    };
-    let mut harness = Harness::bundled("provider-echo")
-        .grant(Grant::Only(granted.clone()))
-        .build();
+    let granted = Permissions { deltas: true, ..Permissions::default() };
+    let mut harness = Harness::bundled("provider-echo").grant(Grant::Only(granted.clone())).build();
     assert_eq!(harness.handle().permissions(), &granted);
     harness.start(None).unwrap();
 
-    assert_eq!(
-        harness.input("/kv"),
-        Err(PluginError::Rejected("permission denied: kv".into()))
-    );
+    assert_eq!(harness.input("/kv"), Err(PluginError::Rejected("permission denied: kv".into())));
     assert_eq!(
         harness.input("/slow a b"),
         Err(PluginError::Rejected("permission denied: timers".into()))
@@ -275,23 +196,19 @@ fn ungranted_permissions_are_refused() {
     harness.input("/exec echo hi").unwrap();
     harness.wait_turns(1);
     assert_eq!(
-        turn_statuses(&harness),
-        [(
-            TurnStatus::Failed,
-            Some("permission denied: process \"echo\"".into())
-        )]
+        harness.turn_statuses(),
+        [(TurnStatus::Failed, Some("permission denied: process \"echo\"".into()))]
     );
     // What was granted keeps working.
     harness.input("still here").unwrap();
     harness.wait_turns(2);
-    assert_eq!(agent_messages(&harness), ["still here"]);
+    assert_eq!(harness.agent_messages(), ["still here"]);
 }
 
 #[test]
 fn a_plugin_without_the_deltas_permission_cannot_touch_the_timeline() {
-    let mut harness = Harness::bundled("provider-echo")
-        .grant(Grant::Only(Permissions::default()))
-        .build();
+    let mut harness =
+        Harness::bundled("provider-echo").grant(Grant::Only(Permissions::default())).build();
     assert_eq!(
         harness.start(Some("hi")),
         Err(PluginError::Rejected("permission denied: deltas".into()))
@@ -307,16 +224,10 @@ fn a_plugin_without_the_deltas_permission_cannot_touch_the_timeline() {
 fn a_crash_is_contained_and_reported() {
     let mut harness = echo();
     harness.start(None).unwrap();
-    assert!(matches!(
-        harness.input("/crash"),
-        Err(PluginError::Crashed(_))
-    ));
+    assert!(matches!(harness.input("/crash"), Err(PluginError::Crashed(_))));
     assert!(harness.crash().is_some());
     // The instance is never entered again.
-    assert!(matches!(
-        harness.input("hello"),
-        Err(PluginError::Crashed(_))
-    ));
+    assert!(matches!(harness.input("hello"), Err(PluginError::Crashed(_))));
 }
 
 #[test]
@@ -326,11 +237,8 @@ fn stop_settles_everything_and_resume_restores_the_session() {
     harness.wait_until("the question", |h| h.pending_interaction().is_some());
     harness.stop().unwrap();
     harness.assert_conformant();
-    assert_eq!(turn_statuses(&harness), [(TurnStatus::Interrupted, None)]);
-    assert_eq!(
-        harness.count(|p| matches!(p, EventPayload::SessionEnded { .. })),
-        1
-    );
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Interrupted, None)]);
+    assert_eq!(harness.count(|p| matches!(p, EventPayload::SessionEnded { .. })), 1);
     assert_eq!(
         harness.input("anyone?"),
         Err(PluginError::Rejected("the session was not started".into()))
@@ -338,15 +246,14 @@ fn stop_settles_everything_and_resume_restores_the_session() {
 
     harness.resume(Some("back again")).unwrap();
     harness.wait_turns(2);
-    assert_eq!(agent_messages(&harness), ["back again"]);
-    assert_eq!(
-        harness.thread().provider_session.as_deref(),
-        Some("echo-thread-1")
+    assert_eq!(harness.agent_messages(), ["back again"]);
+    assert_eq!(harness.thread().provider_session.as_deref(), Some("echo-thread-1"));
+    assert!(
+        harness.events().iter().any(|event| matches!(
+            event.payload,
+            EventPayload::SessionStarted { resumed: true, .. }
+        ))
     );
-    assert!(harness.events().iter().any(|event| matches!(
-        event.payload,
-        EventPayload::SessionStarted { resumed: true, .. }
-    )));
 }
 
 #[test]

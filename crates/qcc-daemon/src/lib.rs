@@ -21,6 +21,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// The unix socket clients connect to.
     pub socket: PathBuf,
+    /// Compiled plugins and other things that can be thrown away.
+    pub cache_dir: PathBuf,
 }
 
 impl Config {

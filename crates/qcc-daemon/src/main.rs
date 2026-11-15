@@ -39,11 +39,10 @@ fn main() -> anyhow::Result<()> {
     let config = Config {
         data_dir: args.data_dir.unwrap_or_else(paths::default_data_dir),
         socket,
+        cache_dir: paths::default_cache_dir(),
     };
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(async {
         let mut interrupt = signal(SignalKind::interrupt())?;
         let mut terminate = signal(SignalKind::terminate())?;

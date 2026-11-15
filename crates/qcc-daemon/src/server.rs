@@ -86,10 +86,7 @@ async fn serve(stream: UnixStream, connection: u64, commands: UnboundedSender<Co
                 // Never drop a bad request silently: the peer would wait forever.
                 let response = Response::err(
                     Value::Null,
-                    RpcError::new(
-                        codes::PARSE_ERROR,
-                        format!("invalid JSON-RPC message: {error}"),
-                    ),
+                    RpcError::new(codes::PARSE_ERROR, format!("invalid JSON-RPC message: {error}")),
                 );
                 let _ = out.send(serde_json::to_string(&response).expect("responses serialize"));
             }

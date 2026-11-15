@@ -20,6 +20,7 @@ qcc-domain = { path = "crates/qcc-domain" }
 qcc-runtime = { path = "crates/qcc-runtime" }
 qcc-store = { path = "crates/qcc-store" }
 qcc-plugin-sdk = { path = "crates/qcc-plugin-sdk" }
+qcc-plugin-testkit = { path = "crates/qcc-plugin-testkit" }
 qcc-plugin-host = { path = "crates/qcc-plugin-host" }
 qcc-plugins-bundle = { path = "crates/qcc-plugins-bundle" }
 qcc-protocol = { path = "crates/qcc-protocol" }
@@ -30,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 wit-bindgen = "0.63"
-wasmtime = { version = "50", default-features = false, features = ["component-model", "cranelift", "runtime", "std", "parallel-compilation"] }
+wasmtime = { version = "50", default-features = false, features = ["component-model", "cranelift", "runtime", "std", "parallel-compilation", "cache"] }
 wasmtime-wasi = { version = "50", default-features = false, features = ["p2"] }
 tokio = { version = "1", features = ["sync"] }
 toml = "1"

@@ -1,0 +1,16 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"opencode","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"Create a file named made.txt"}
+{"type":"session/started","resumed":false}
+{"type":"session/identified","provider_session":"ses_e218aebb4ffeqXzxDkss8SyvpE"}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"fileChange","path":"/work/made.txt"}}
+{"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_1","request":{"type":"approval","title":"Allow edit?","detail":"/work/made.txt","options":[{"id":"once","label":"Allow once","kind":"allow"},{"id":"always","label":"Always allow","kind":"allow"},{"id":"reject","label":"Reject","kind":"deny"}]}}
+{"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"once"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"fileChange","path":"/work/made.txt","diff":"Index: /work/made.txt\n===================================================================\n--- /work/made.txt\n+++ /work/made.txt\n@@ -0,0 +1,1 @@\n+ok\n"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_2","text":"done"}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"done"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":145,"output_tokens":3,"cached_input_tokens":17792},"last":{"input_tokens":145,"output_tokens":3,"cached_input_tokens":17792},"model_context_window":200000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

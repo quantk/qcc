@@ -1,0 +1,9 @@
+id = "provider-claude-code"
+name = "Claude Code"
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+deltas = true
+process = ["claude"]

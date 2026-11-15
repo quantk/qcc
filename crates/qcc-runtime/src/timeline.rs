@@ -69,10 +69,7 @@ impl Timeline {
                 let fresh = self.seen_turns.insert(turn_id.clone());
                 let previous = self.open_turn.replace(turn_id.clone());
                 if let Some(previous) = previous {
-                    return Err(TimelineViolation::TurnWhileTurnOpen(
-                        turn_id.clone(),
-                        previous,
-                    ));
+                    return Err(TimelineViolation::TurnWhileTurnOpen(turn_id.clone(), previous));
                 }
                 if !fresh {
                     return Err(TimelineViolation::TurnIdReused(turn_id.clone()));
@@ -159,15 +156,14 @@ impl Timeline {
                 let before = self.pending_interactions.len();
                 self.pending_interactions.retain(|id| id != interaction_id);
                 if self.pending_interactions.len() == before {
-                    return Err(TimelineViolation::InteractionNotPending(
-                        interaction_id.clone(),
-                    ));
+                    return Err(TimelineViolation::InteractionNotPending(interaction_id.clone()));
                 }
                 Ok(())
             }
             EventPayload::ThreadCreated { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }
+            | EventPayload::SessionIdentified { .. }
             | EventPayload::SessionEnded { .. }
             | EventPayload::InputSubmitted { .. }
             | EventPayload::UsageUpdated { .. }
@@ -207,24 +203,14 @@ impl Timeline {
         for item in self.open_items.values() {
             let mut item = item.clone();
             item.status = settled_item_status(&item, status);
-            events.push(EventPayload::ItemCompleted {
-                turn_id: turn_id.clone(),
-                item,
-            });
+            events.push(EventPayload::ItemCompleted { turn_id: turn_id.clone(), item });
         }
-        events.push(EventPayload::TurnCompleted {
-            turn_id,
-            status,
-            error,
-        });
+        events.push(EventPayload::TurnCompleted { turn_id, status, error });
         events
     }
 
     fn ordinal_of(&self, item_id: &ItemId) -> Option<u64> {
-        self.open_items
-            .iter()
-            .find(|(_, item)| &item.id == item_id)
-            .map(|(ordinal, _)| *ordinal)
+        self.open_items.iter().find(|(_, item)| &item.id == item_id).map(|(ordinal, _)| *ordinal)
     }
 }
 

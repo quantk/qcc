@@ -57,19 +57,16 @@ impl Thread {
         self.last_seq = event.seq;
         match &event.payload {
             EventPayload::ThreadStatusChanged { status } => self.status = *status,
-            EventPayload::SessionStarted {
-                provider_session, ..
-            } => {
+            EventPayload::SessionStarted { provider_session, .. } => {
                 if provider_session.is_some() {
                     self.provider_session.clone_from(provider_session);
                 }
             }
+            EventPayload::SessionIdentified { provider_session } => {
+                self.provider_session = Some(provider_session.clone());
+            }
             EventPayload::InputSubmitted { text } if self.title.is_none() => {
-                let line = text
-                    .lines()
-                    .find(|l| !l.trim().is_empty())
-                    .unwrap_or("")
-                    .trim();
+                let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
                 if !line.is_empty() {
                     self.title = Some(line.chars().take(TITLE_MAX_CHARS).collect());
                 }

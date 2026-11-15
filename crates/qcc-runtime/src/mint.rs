@@ -37,11 +37,7 @@ impl SequentialMint {
     /// Continue numbering after `count` ids of each family, the way a restarted
     /// daemon must not reuse ids already in the journal.
     pub fn starting_after(count: u64) -> Self {
-        Self {
-            turns: count,
-            items: count,
-            interactions: count,
-        }
+        Self { turns: count, items: count, interactions: count }
     }
 }
 

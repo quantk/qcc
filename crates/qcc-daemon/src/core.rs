@@ -47,9 +47,7 @@ impl Responder {
             Ok(value) => Response::ok(id, value),
             Err(error) => Response::err(id, error),
         };
-        let _ = self
-            .out
-            .send(serde_json::to_string(&response).expect("responses serialize"));
+        let _ = self.out.send(serde_json::to_string(&response).expect("responses serialize"));
     }
 }
 
@@ -127,28 +125,18 @@ pub(crate) struct Core {
 }
 
 fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 fn params<M: Method>(params: Value) -> Result<M::Params, RpcError> {
     // Methods without parameters may omit them.
-    let params = if params.is_null() {
-        Value::Object(Default::default())
-    } else {
-        params
-    };
+    let params = if params.is_null() { Value::Object(Default::default()) } else { params };
     serde_json::from_value(params)
         .map_err(|error| RpcError::new(codes::INVALID_PARAMS, format!("{}: {error}", M::NAME)))
 }
 
 fn thread_not_found(id: &ThreadId) -> RpcError {
-    RpcError::new(
-        codes::THREAD_NOT_FOUND,
-        format!("thread {id} does not exist"),
-    )
+    RpcError::new(codes::THREAD_NOT_FOUND, format!("thread {id} does not exist"))
 }
 
 impl Core {
@@ -221,12 +209,7 @@ impl Core {
 
     fn handle(&mut self, command: Command) {
         match command {
-            Command::Rpc {
-                connection,
-                method,
-                params,
-                responder,
-            } => {
+            Command::Rpc { connection, method, params, responder } => {
                 self.rpc(connection, &method, params, responder);
             }
             Command::Disconnected { connection } => {
@@ -234,25 +217,12 @@ impl Core {
                     subscribers.retain(|subscriber| subscriber.connection != connection);
                 }
             }
-            Command::Deltas {
-                plugin,
-                thread,
-                deltas,
-            } => self.deltas(&plugin, thread, deltas),
+            Command::Deltas { plugin, thread, deltas } => self.deltas(&plugin, thread, deltas),
             Command::PluginCrashed { plugin, reason } => self.plugin_crashed(&plugin, &reason),
-            Command::SessionStartFinished {
-                thread,
-                resumed,
-                result,
-            } => {
+            Command::SessionStartFinished { thread, resumed, result } => {
                 self.session_start_finished(thread, resumed, result);
             }
-            Command::CallFinished {
-                thread,
-                action,
-                result,
-                responder,
-            } => {
+            Command::CallFinished { thread, action, result, responder } => {
                 self.call_finished(thread, action, result, responder);
             }
             Command::Shutdown => {}
@@ -290,9 +260,7 @@ impl Core {
             ThreadGet::NAME => {
                 let result = params::<ThreadGet>(raw).and_then(|ThreadGetParams { thread_id }| {
                     let thread = self.supervisor.thread(&thread_id).cloned();
-                    thread
-                        .map(|thread| ThreadResult { thread })
-                        .ok_or(thread_not_found(&thread_id))
+                    thread.map(|thread| ThreadResult { thread }).ok_or(thread_not_found(&thread_id))
                 });
                 responder.reply(result);
             }
@@ -369,20 +337,14 @@ impl Core {
         self.commit(events);
         self.start_session(&id, p.prompt);
 
-        let thread = self
-            .supervisor
-            .thread(&id)
-            .cloned()
-            .ok_or_else(|| thread_not_found(&id))?;
+        let thread = self.supervisor.thread(&id).cloned().ok_or_else(|| thread_not_found(&id))?;
         Ok(ThreadResult { thread })
     }
 
     fn thread_send(&mut self, p: ThreadSendParams) -> Result<Empty, RpcError> {
         let ThreadSendParams { thread_id, text } = p;
-        let engine = self
-            .supervisor
-            .engine(&thread_id)
-            .map_err(|_| thread_not_found(&thread_id))?;
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let live = engine.session_live();
         let events = engine.submit_input(text.clone(), now_ms());
         self.commit(events);
@@ -391,8 +353,9 @@ impl Core {
         if session.starting {
             session.queued_inputs.push(text);
         } else if live {
-            self.call_provider(&thread_id, Action::Input, None, |thread| {
-                ProviderRequest::Input { thread, text }
+            self.call_provider(&thread_id, Action::Input, None, |thread| ProviderRequest::Input {
+                thread,
+                text,
             });
         } else {
             self.start_session(&thread_id, Some(text));
@@ -405,11 +368,7 @@ impl Core {
         let Ok(engine) = self.supervisor.engine(&thread_id) else {
             return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
         };
-        if self
-            .sessions
-            .get(&thread_id)
-            .is_some_and(|session| session.starting)
-        {
+        if self.sessions.get(&thread_id).is_some_and(|session| session.starting) {
             return responder.reply::<Empty>(Err(RpcError::new(
                 codes::PROVIDER_ERROR,
                 "the provider session is still starting; try again",
@@ -449,37 +408,24 @@ impl Core {
         // Registered in the same step as the read: nothing can be appended in
         // between, so the backlog and the live stream meet without a gap.
         if let Some(subscription) = p.subscription {
-            self.subscribers
-                .entry(p.thread_id)
-                .or_default()
-                .push(Subscriber {
-                    connection,
-                    subscription,
-                    out,
-                });
+            self.subscribers.entry(p.thread_id).or_default().push(Subscriber {
+                connection,
+                subscription,
+                out,
+            });
         }
     }
 
     fn interaction_resolve(&mut self, p: InteractionResolveParams) -> Result<Empty, RpcError> {
-        let InteractionResolveParams {
-            thread_id,
-            interaction_id,
-            resolution,
-        } = p;
-        let engine = self
-            .supervisor
-            .engine(&thread_id)
-            .map_err(|_| thread_not_found(&thread_id))?;
+        let InteractionResolveParams { thread_id, interaction_id, resolution } = p;
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let (request_id, events) = engine
             .resolve_interaction(interaction_id, resolution.clone(), now_ms())
             .map_err(|error| RpcError::new(codes::INTERACTION_NOT_PENDING, error.to_string()))?;
         self.commit(events);
         self.call_provider(&thread_id, Action::Resolve, None, |thread| {
-            ProviderRequest::ResolveInteraction {
-                thread,
-                request_id,
-                resolution,
-            }
+            ProviderRequest::ResolveInteraction { thread, request_id, resolution }
         });
         Ok(Empty {})
     }
@@ -544,10 +490,7 @@ impl Core {
                 prompt,
                 env: vec![
                     (paths::THREAD_ID_ENV.into(), id.to_string()),
-                    (
-                        paths::SOCKET_ENV.into(),
-                        self.config.socket.display().to_string(),
-                    ),
+                    (paths::SOCKET_ENV.into(), self.config.socket.display().to_string()),
                 ],
             }),
         };
@@ -555,11 +498,7 @@ impl Core {
         let (plugin, commands, thread) = (plugin.clone(), self.commands.clone(), id.clone());
         tokio::spawn(async move {
             let result = plugin.call(request).await;
-            let _ = commands.send(Command::SessionStartFinished {
-                thread,
-                resumed,
-                result,
-            });
+            let _ = commands.send(Command::SessionStartFinished { thread, resumed, result });
         });
     }
 
@@ -611,14 +550,8 @@ impl Core {
         responder: Option<Responder>,
         request: impl FnOnce(ThreadId) -> ProviderRequest,
     ) {
-        let provider = self
-            .supervisor
-            .thread(id)
-            .map(|thread| thread.provider.clone());
-        let plugin = provider
-            .as_ref()
-            .and_then(|p| self.host.provider(p))
-            .map(|(p, _)| p.clone());
+        let provider = self.supervisor.thread(id).map(|thread| thread.provider.clone());
+        let plugin = provider.as_ref().and_then(|p| self.host.provider(p)).map(|(p, _)| p.clone());
         let (Some(provider), Some(plugin)) = (provider, plugin) else {
             let _ = self.commands.send(Command::CallFinished {
                 thread: id.clone(),
@@ -628,19 +561,11 @@ impl Core {
             });
             return;
         };
-        let request = PluginRequest::Provider {
-            provider,
-            request: request(id.clone()),
-        };
+        let request = PluginRequest::Provider { provider, request: request(id.clone()) };
         let (commands, thread) = (self.commands.clone(), id.clone());
         tokio::spawn(async move {
             let result = plugin.call(request).await;
-            let _ = commands.send(Command::CallFinished {
-                thread,
-                action,
-                result,
-                responder,
-            });
+            let _ = commands.send(Command::CallFinished { thread, action, result, responder });
         });
     }
 
@@ -655,12 +580,7 @@ impl Core {
             Ok(_) => {}
             // The provider refused; it is still alive and the user should see why.
             Err(PluginError::Rejected(message)) => {
-                self.apply_deltas(
-                    &id,
-                    vec![Delta::ProviderError {
-                        message: message.clone(),
-                    }],
-                );
+                self.apply_deltas(&id, vec![Delta::ProviderError { message: message.clone() }]);
             }
             // Reported separately through `PluginCrashed`, which settles every thread
             // of the plugin.
@@ -736,21 +656,13 @@ impl Core {
             .supervisor
             .threads()
             .filter(|thread| {
-                self.host
-                    .provider(&thread.provider)
-                    .is_some_and(|(owner, _)| owner.id() == plugin)
+                self.host.provider(&thread.provider).is_some_and(|(owner, _)| owner.id() == plugin)
             })
             .map(|thread| thread.id.clone())
             .collect();
         for id in affected {
-            let starting = self
-                .sessions
-                .get(&id)
-                .is_some_and(|session| session.starting);
-            let live = self
-                .supervisor
-                .engine(&id)
-                .is_ok_and(|engine| engine.session_live());
+            let starting = self.sessions.get(&id).is_some_and(|session| session.starting);
+            let live = self.supervisor.engine(&id).is_ok_and(|engine| engine.session_live());
             if starting || live {
                 self.session_failed(&id, format!("plugin {plugin} crashed: {reason}"));
             }

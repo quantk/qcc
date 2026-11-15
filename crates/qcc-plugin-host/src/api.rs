@@ -26,46 +26,23 @@ pub struct SessionStart {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderRequest {
     Start(SessionStart),
-    Input {
-        thread: ThreadId,
-        text: String,
-    },
-    Interrupt {
-        thread: ThreadId,
-    },
-    Stop {
-        thread: ThreadId,
-    },
-    ResolveInteraction {
-        thread: ThreadId,
-        request_id: String,
-        resolution: InteractionResolution,
-    },
+    Input { thread: ThreadId, text: String },
+    Interrupt { thread: ThreadId },
+    Stop { thread: ThreadId },
+    ResolveInteraction { thread: ThreadId, request_id: String, resolution: InteractionResolution },
     ListModels,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvironmentRequest {
-    Prepare {
-        thread: ThreadId,
-        source_dir: String,
-    },
-    Remove {
-        thread: ThreadId,
-        cwd: String,
-    },
+    Prepare { thread: ThreadId, source_dir: String },
+    Remove { thread: ThreadId, cwd: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginRequest {
-    Provider {
-        provider: ProviderId,
-        request: ProviderRequest,
-    },
-    Environment {
-        environment: String,
-        request: EnvironmentRequest,
-    },
+    Provider { provider: ProviderId, request: ProviderRequest },
+    Environment { environment: String, request: EnvironmentRequest },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

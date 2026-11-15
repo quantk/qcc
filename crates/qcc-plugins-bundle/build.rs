@@ -13,11 +13,7 @@ const TARGET: &str = "wasm32-wasip2";
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let root = manifest_dir
-        .parent()
-        .and_then(Path::parent)
-        .unwrap()
-        .to_path_buf();
+    let root = manifest_dir.parent().and_then(Path::parent).unwrap().to_path_buf();
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let plugins_dir = root.join("plugins");
 
@@ -41,14 +37,7 @@ fn main() {
     let mut cargo = Command::new(env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
     cargo
         .current_dir(&root)
-        .args([
-            "build",
-            "--release",
-            "--locked",
-            "--target",
-            TARGET,
-            "--target-dir",
-        ])
+        .args(["build", "--release", "--locked", "--target", TARGET, "--target-dir"])
         .arg(&target_dir);
     for plugin in &plugins {
         cargo.args(["-p", plugin]);

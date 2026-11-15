@@ -89,18 +89,12 @@ impl PluginHandle {
 
     /// Queue a request and wait for the plugin's answer.
     pub async fn call(&self, request: PluginRequest) -> Result<Outcome, PluginError> {
-        self.send(request)?
-            .await
-            .map_err(|_| PluginError::Gone)?
-            .map(convert::outcome)
+        self.send(request)?.await.map_err(|_| PluginError::Gone)?.map(convert::outcome)
     }
 
     /// [`PluginHandle::call`] for callers outside an async runtime.
     pub fn call_blocking(&self, request: PluginRequest) -> Result<Outcome, PluginError> {
-        self.send(request)?
-            .blocking_recv()
-            .map_err(|_| PluginError::Gone)?
-            .map(convert::outcome)
+        self.send(request)?.blocking_recv().map_err(|_| PluginError::Gone)?.map(convert::outcome)
     }
 
     fn send(
@@ -110,10 +104,7 @@ impl PluginHandle {
         let (reply, receiver) = oneshot::channel();
         self.inner
             .tx
-            .send(Message::Call {
-                event: convert::event(request),
-                reply,
-            })
+            .send(Message::Call { event: convert::event(request), reply })
             .map_err(|_| PluginError::Gone)?;
         Ok(receiver)
     }
@@ -134,9 +125,7 @@ pub(crate) fn spawn(
     let state = State {
         wasi: WasiCtx::builder().inherit_stderr().build(),
         table: ResourceTable::new(),
-        limits: StoreLimitsBuilder::new()
-            .memory_size(MEMORY_LIMIT_BYTES)
-            .build(),
+        limits: StoreLimitsBuilder::new().memory_size(MEMORY_LIMIT_BYTES).build(),
         plugin_id: manifest.id.clone(),
         permissions: permissions.clone(),
         services,
@@ -169,13 +158,7 @@ pub(crate) fn spawn(
         .map(convert::contribution)
         .collect();
     Ok(PluginHandle {
-        inner: Arc::new(Inner {
-            manifest,
-            permissions,
-            contributions,
-            tx,
-            thread: Some(thread),
-        }),
+        inner: Arc::new(Inner { manifest, permissions, contributions, tx, thread: Some(thread) }),
     })
 }
 
@@ -205,10 +188,7 @@ impl State {
 
 impl WasiView for State {
     fn ctx(&mut self) -> WasiCtxView<'_> {
-        WasiCtxView {
-            ctx: &mut self.wasi,
-            table: &mut self.table,
-        }
+        WasiCtxView { ctx: &mut self.wasi, table: &mut self.table }
     }
 }
 
@@ -238,14 +218,7 @@ impl Actor {
             .call_init(&mut store)
             .map_err(|error| format!("init trapped: {error:#}"))?
             .map_err(|error| format!("init failed: {error}"))?;
-        Ok((
-            Self {
-                store,
-                plugin,
-                crashed: None,
-            },
-            contributions,
-        ))
+        Ok((Self { store, plugin, crashed: None }, contributions))
     }
 
     fn run(&mut self, rx: Receiver<Message>) {
@@ -348,10 +321,7 @@ impl imports::deltas::Host for State {
             return Err(self.denied("deltas"));
         }
         // All or nothing: a batch with one malformed delta is refused whole.
-        let deltas = deltas
-            .into_iter()
-            .map(convert::delta)
-            .collect::<Result<Vec<_>, _>>()?;
+        let deltas = deltas.into_iter().map(convert::delta).collect::<Result<Vec<_>, _>>()?;
         (self.services.deltas)(&self.plugin_id, ThreadId(thread), deltas);
         Ok(())
     }
@@ -459,8 +429,6 @@ impl imports::process::Host for State {
 
 impl State {
     fn process(&mut self, process: u64) -> Result<&mut Box<dyn ProcessHandle>, String> {
-        self.processes
-            .get_mut(&process)
-            .ok_or_else(|| format!("no process {process}"))
+        self.processes.get_mut(&process).ok_or_else(|| format!("no process {process}"))
     }
 }

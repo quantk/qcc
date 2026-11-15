@@ -51,10 +51,7 @@ impl Client {
         let socket = socket.as_ref();
         let stream = UnixStream::connect(socket)
             .await
-            .map_err(|error| ClientError::Connect {
-                path: socket.display().to_string(),
-                error,
-            })?;
+            .map_err(|error| ClientError::Connect { path: socket.display().to_string(), error })?;
         let (reader, writer) = stream.into_split();
         let client = Arc::new(Self {
             writer: tokio::sync::Mutex::new(writer),
@@ -81,10 +78,8 @@ impl Client {
                         }
                     }
                     Ok(Incoming::Request(notification)) if notification.method == THREAD_EVENT => {
-                        let Ok(ThreadEventNotification {
-                            subscription,
-                            event,
-                        }) = serde_json::from_value(notification.params)
+                        let Ok(ThreadEventNotification { subscription, event }) =
+                            serde_json::from_value(notification.params)
                         else {
                             continue;
                         };
@@ -137,20 +132,12 @@ impl Client {
         let live = follow.then(|| {
             let subscription = self.next_id.fetch_add(1, Ordering::Relaxed);
             let (sender, receiver) = mpsc::unbounded_channel();
-            self.subscriptions
-                .lock()
-                .unwrap()
-                .insert(subscription, sender);
+            self.subscriptions.lock().unwrap().insert(subscription, sender);
             (subscription, receiver)
         });
         let subscription = live.as_ref().map(|(id, _)| *id);
-        let result = self
-            .call::<ThreadEvents>(ThreadEventsParams {
-                thread_id,
-                after,
-                subscription,
-            })
-            .await;
+        let result =
+            self.call::<ThreadEvents>(ThreadEventsParams { thread_id, after, subscription }).await;
         match result {
             Ok(result) => Ok(EventStream {
                 client: self.clone(),
@@ -195,11 +182,7 @@ impl EventStream {
     /// Stop following. Dropping the stream does the same lazily.
     pub async fn close(mut self) {
         if let Some((subscription, _)) = self.live.take() {
-            self.client
-                .subscriptions
-                .lock()
-                .unwrap()
-                .remove(&subscription);
+            self.client.subscriptions.lock().unwrap().remove(&subscription);
             let _ = self
                 .client
                 .call::<ThreadUnsubscribe>(ThreadUnsubscribeParams { subscription })
@@ -211,11 +194,7 @@ impl EventStream {
 impl Drop for EventStream {
     fn drop(&mut self) {
         if let Some((subscription, _)) = &self.live {
-            self.client
-                .subscriptions
-                .lock()
-                .unwrap()
-                .remove(subscription);
+            self.client.subscriptions.lock().unwrap().remove(subscription);
         }
     }
 }

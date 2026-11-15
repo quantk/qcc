@@ -54,6 +54,10 @@ pub mod bindings {
     });
 }
 
+#[cfg(feature = "jsonrpc")]
+pub mod jsonrpc;
+pub mod lines;
+
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
 pub use bindings::qcc::plugin::{deltas, kv, process, timers};
@@ -218,9 +222,7 @@ pub mod __private {
     fn with_plugin<P: Plugin, R>(f: impl FnOnce(&mut P) -> R) -> R {
         INSTANCE.with_borrow_mut(|slot| {
             let instance = slot.get_or_insert_with(|| Box::new(P::default()));
-            let plugin = instance
-                .downcast_mut::<P>()
-                .expect("one plugin type per component");
+            let plugin = instance.downcast_mut::<P>().expect("one plugin type per component");
             f(plugin)
         })
     }
@@ -287,10 +289,7 @@ pub mod __private {
                 Ok(Outcome::Done)
             }
             Event::ProcessExit(exit) => {
-                plugin.on_process(ProcessEvent::Exit {
-                    process: exit.process,
-                    code: exit.code,
-                });
+                plugin.on_process(ProcessEvent::Exit { process: exit.process, code: exit.code });
                 Ok(Outcome::Done)
             }
             Event::Timer(timer) => {

@@ -148,10 +148,7 @@ enum PluginCommand {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
             eprintln!("qcc: {error}");
@@ -172,10 +169,7 @@ fn main() -> ExitCode {
 fn out(line: impl AsRef<str>) {
     use std::io::Write;
     let mut stdout = std::io::stdout().lock();
-    if writeln!(stdout, "{}", line.as_ref())
-        .and_then(|()| stdout.flush())
-        .is_err()
-    {
+    if writeln!(stdout, "{}", line.as_ref()).and_then(|()| stdout.flush()).is_err() {
         std::process::exit(0);
     }
 }
@@ -202,14 +196,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::Spawn {
-            provider,
-            prompt,
-            cwd,
-            model,
-            parent,
-            follow,
-        }) => {
+        Command::Thread(ThreadCommand::Spawn { provider, prompt, cwd, model, parent, follow }) => {
             let cwd = match cwd {
                 Some(cwd) => std::path::absolute(cwd)?,
                 None => std::env::current_dir()?,
@@ -239,25 +226,16 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::Send {
-            thread,
-            text,
-            follow,
-        }) => {
+        Command::Thread(ThreadCommand::Send { thread, text, follow }) => {
             let thread_id = ThreadId::new(thread);
             // Read the cursor first so the stream starts at this message.
             let cursor = client
-                .call::<ThreadGet>(ThreadGetParams {
-                    thread_id: thread_id.clone(),
-                })
+                .call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() })
                 .await?
                 .thread
                 .last_seq;
             client
-                .call::<ThreadSend>(ThreadSendParams {
-                    thread_id: thread_id.clone(),
-                    text,
-                })
+                .call::<ThreadSend>(ThreadSendParams { thread_id: thread_id.clone(), text })
                 .await?;
             if follow {
                 let stream = client.events(thread_id, cursor, true).await?;
@@ -269,16 +247,9 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
 
         Command::Thread(ThreadCommand::Stop { thread, release }) => {
-            let mode = if release {
-                StopMode::Release
-            } else {
-                StopMode::Interrupt
-            };
+            let mode = if release { StopMode::Release } else { StopMode::Interrupt };
             client
-                .call::<ThreadStop>(ThreadStopParams {
-                    thread_id: ThreadId::new(thread),
-                    mode,
-                })
+                .call::<ThreadStop>(ThreadStopParams { thread_id: ThreadId::new(thread), mode })
                 .await?;
             if json {
                 print_json(&Empty {})?;
@@ -298,11 +269,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
 
         Command::Thread(ThreadCommand::Show { thread }) => {
             let thread_id = ThreadId::new(thread);
-            let result = client
-                .call::<ThreadGet>(ThreadGetParams {
-                    thread_id: thread_id.clone(),
-                })
-                .await?;
+            let result =
+                client.call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() }).await?;
             let mut stream = client.events(thread_id, 0, false).await?;
             let mut events = Vec::new();
             while let Some(event) = stream.next().await {
@@ -314,10 +282,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     thread: &'a qcc_domain::Thread,
                     events: &'a [ThreadEvent],
                 }
-                print_json(&Shown {
-                    thread: &result.thread,
-                    events: &events,
-                })?;
+                print_json(&Shown { thread: &result.thread, events: &events })?;
             } else {
                 out(render::thread_details(&result.thread));
                 for event in &events {
@@ -328,11 +293,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::Events {
-            thread,
-            after,
-            follow,
-        }) => {
+        Command::Thread(ThreadCommand::Events { thread, after, follow }) => {
             let mut stream = client.events(ThreadId::new(thread), after, follow).await?;
             while let Some(event) = stream.next().await {
                 print_event(&event, json)?;
@@ -342,19 +303,12 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Interaction(InteractionCommand::Resolve {
-            thread,
-            interaction,
-            answer,
-        }) => {
+        Command::Interaction(InteractionCommand::Resolve { thread, interaction, answer }) => {
             let resolution = match answer {
-                Answer {
-                    option: Some(option_id),
-                    ..
-                } => InteractionResolution::Selected { option_id },
-                Answer {
-                    text: Some(text), ..
-                } => InteractionResolution::Text { text },
+                Answer { option: Some(option_id), .. } => {
+                    InteractionResolution::Selected { option_id }
+                }
+                Answer { text: Some(text), .. } => InteractionResolution::Text { text },
                 Answer { .. } => InteractionResolution::Cancelled,
             };
             client
@@ -406,9 +360,8 @@ async fn follow_turn(mut stream: EventStream, json: bool) -> anyhow::Result<Exit
                 });
             }
             // The session never got as far as a turn.
-            EventPayload::ThreadStatusChanged {
-                status: ThreadStatus::Failed,
-            } => {
+            EventPayload::ThreadStatusChanged { status: ThreadStatus::Failed }
+            | EventPayload::SessionEnded { .. } => {
                 stream.close().await;
                 return Ok(ExitCode::FAILURE);
             }

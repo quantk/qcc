@@ -6,8 +6,13 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# JSON-RPC helpers for bridges whose agent speaks it.
+jsonrpc = ["dep:serde_json"]
+
 [dependencies]
 wit-bindgen.workspace = true
+serde_json = { workspace = true, optional = true }
 
 # Generated component glue needs `unsafe`, which the workspace lints forbid.
 [lints]

@@ -11,15 +11,11 @@ pub const DATA_DIR_ENV: &str = "QCC_DATA_DIR";
 pub const THREAD_ID_ENV: &str = "QCC_THREAD_ID";
 
 fn home() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
+    env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
-    env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    env::var_os(name).filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 /// `$QCC_DATA_DIR`, else `$XDG_DATA_HOME/qcc`, else `~/.local/share/qcc`.
@@ -27,6 +23,13 @@ pub fn default_data_dir() -> PathBuf {
     env_path(DATA_DIR_ENV)
         .or_else(|| env_path("XDG_DATA_HOME").map(|dir| dir.join("qcc")))
         .unwrap_or_else(|| home().join(".local/share/qcc"))
+}
+
+/// `$XDG_CACHE_HOME/qcc`, else `~/.cache/qcc`.
+pub fn default_cache_dir() -> PathBuf {
+    env_path("XDG_CACHE_HOME")
+        .map(|dir| dir.join("qcc"))
+        .unwrap_or_else(|| home().join(".cache/qcc"))
 }
 
 /// `$QCC_SOCKET`, else `$XDG_RUNTIME_DIR/qcc/qccd.sock`, else the socket inside the

@@ -81,12 +81,7 @@ impl KvStore for MemoryKv {
     }
 
     fn keys(&mut self, prefix: &str) -> Result<Vec<String>, String> {
-        Ok(self
-            .entries
-            .keys()
-            .filter(|key| key.starts_with(prefix))
-            .cloned()
-            .collect())
+        Ok(self.entries.keys().filter(|key| key.starts_with(prefix)).cloned().collect())
     }
 }
 
@@ -237,10 +232,7 @@ impl ProcessBackend for OsProcesses {
         if let Some(cwd) = &options.cwd {
             command.current_dir(cwd);
         }
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = command
             .spawn()
             .map_err(|error| format!("cannot run {:?}: {error}", options.program))?;
@@ -296,10 +288,7 @@ struct OsProcess {
 impl ProcessHandle for OsProcess {
     fn write_stdin(&mut self, data: &[u8]) -> Result<(), String> {
         let stdin = self.stdin.as_mut().ok_or("stdin is closed")?;
-        stdin
-            .write_all(data)
-            .and_then(|()| stdin.flush())
-            .map_err(|error| error.to_string())
+        stdin.write_all(data).and_then(|()| stdin.flush()).map_err(|error| error.to_string())
     }
 
     fn close_stdin(&mut self) -> Result<(), String> {
@@ -380,15 +369,10 @@ mod tests {
             )
             .unwrap();
         process.write_stdin(b"hello\n").unwrap();
-        let events: Vec<_> = rx
-            .iter()
-            .take_while(|e| !matches!(e, ProcessOutput::Exit(_)))
-            .collect();
+        let events: Vec<_> =
+            rx.iter().take_while(|e| !matches!(e, ProcessOutput::Exit(_))).collect();
         // The daemon's own environment does not leak: `$SECRET` is empty even if set.
-        assert_eq!(
-            events,
-            [ProcessOutput::Stdout(b"got hello  yes\n".to_vec())]
-        );
+        assert_eq!(events, [ProcessOutput::Stdout(b"got hello  yes\n".to_vec())]);
         process.close_stdin().unwrap();
         assert!(process.write_stdin(b"x").is_err());
 
@@ -425,9 +409,6 @@ mod tests {
             )
             .unwrap();
         process.kill().unwrap();
-        assert_eq!(
-            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
-            ProcessOutput::Exit(None)
-        );
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), ProcessOutput::Exit(None));
     }
 }

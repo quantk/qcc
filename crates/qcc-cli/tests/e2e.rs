@@ -7,6 +7,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
+/// Compiled plugins are shared by every daemon these tests start.
+fn cache_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("qcc-cache")
+}
+
 /// A daemon running on its own runtime thread, like a separate process would.
 struct Daemon {
     shutdown: Option<tokio::sync::oneshot::Sender<()>>,
@@ -19,14 +24,13 @@ impl Daemon {
         let config = qcc_daemon::Config {
             data_dir: data_dir.to_path_buf(),
             socket: data_dir.join("qccd.sock"),
+            cache_dir: cache_dir(),
         };
         let socket = config.socket.clone();
         let (shutdown, stop) = tokio::sync::oneshot::channel::<()>();
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let thread = std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()?;
+            let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
             runtime.block_on(qcc_daemon::serve(
                 config,
                 move || {
@@ -37,14 +41,8 @@ impl Daemon {
                 },
             ))
         });
-        ready_rx
-            .recv_timeout(Duration::from_secs(60))
-            .expect("daemon did not start");
-        Self {
-            shutdown: Some(shutdown),
-            thread: Some(thread),
-            socket,
-        }
+        ready_rx.recv_timeout(Duration::from_secs(60)).expect("daemon did not start");
+        Self { shutdown: Some(shutdown), thread: Some(thread), socket }
     }
 
     fn stop(mut self) {
@@ -85,15 +83,8 @@ impl Daemon {
 
     /// Spawn a thread without waiting for it; returns its id.
     fn spawn(&self, prompt: &str) -> String {
-        let output = self.qcc(&[
-            "thread",
-            "spawn",
-            "--provider",
-            "echo",
-            "--prompt",
-            prompt,
-            "--json",
-        ]);
+        let output =
+            self.qcc(&["thread", "spawn", "--provider", "echo", "--prompt", prompt, "--json"]);
         assert!(output.ok, "{}", output.stderr);
         output.json()["thread"]["id"].as_str().unwrap().to_owned()
     }
@@ -111,11 +102,7 @@ impl Daemon {
             if let Some(event) = self.events(thread).into_iter().find(|e| e["type"] == kind) {
                 return event;
             }
-            assert!(
-                Instant::now() < deadline,
-                "no {kind} event: {:#?}",
-                self.events(thread)
-            );
+            assert!(Instant::now() < deadline, "no {kind} event: {:#?}", self.events(thread));
             std::thread::sleep(Duration::from_millis(20));
         }
     }
@@ -145,18 +132,12 @@ impl Output {
     }
 
     fn json_lines(&self) -> Vec<Value> {
-        self.stdout
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
+        self.stdout.lines().map(|line| serde_json::from_str(line).unwrap()).collect()
     }
 }
 
 fn types(events: &[Value]) -> Vec<&str> {
-    events
-        .iter()
-        .map(|event| event["type"].as_str().unwrap())
-        .collect()
+    events.iter().map(|event| event["type"].as_str().unwrap()).collect()
 }
 
 fn messages(events: &[Value]) -> Vec<&str> {
@@ -200,10 +181,7 @@ fn spawn_streams_a_turn_and_the_journal_survives_a_restart() {
         ]
     );
     assert_eq!(messages(&streamed), ["hi there"]);
-    let seqs: Vec<u64> = streamed
-        .iter()
-        .map(|e| e["seq"].as_u64().unwrap())
-        .collect();
+    let seqs: Vec<u64> = streamed.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
     assert_eq!(seqs, (1..=10).collect::<Vec<_>>());
     let id = streamed[0]["thread_id"].as_str().unwrap().to_owned();
 
@@ -215,11 +193,7 @@ fn spawn_streams_a_turn_and_the_journal_survives_a_restart() {
     // What a client was told is exactly what the journal holds.
     assert_eq!(daemon.events(&id), streamed);
     let human = daemon.qcc(&["thread", "show", &id]);
-    assert!(
-        human.stdout.contains("> hi there\nhi there"),
-        "{}",
-        human.stdout
-    );
+    assert!(human.stdout.contains("> hi there\nhi there"), "{}", human.stdout);
 
     daemon.stop();
     let daemon = Daemon::start(dir.path());
@@ -236,15 +210,9 @@ fn spawn_streams_a_turn_and_the_journal_survives_a_restart() {
     let resumed = output.json_lines();
     assert_eq!(types(&resumed)[..2], ["input/submitted", "session/started"]);
     assert_eq!(resumed[1]["resumed"], true);
-    assert_eq!(
-        resumed[1]["provider_session"],
-        format!("echo-{id}").as_str()
-    );
+    assert_eq!(resumed[1]["provider_session"], format!("echo-{id}").as_str());
     assert_eq!(messages(&resumed), ["still there?"]);
-    assert_eq!(
-        resumed[0]["seq"].as_u64().unwrap(),
-        after_restart.len() as u64 + 1
-    );
+    assert_eq!(resumed[0]["seq"].as_u64().unwrap(), after_restart.len() as u64 + 1);
 }
 
 #[test]
@@ -259,20 +227,10 @@ fn question_is_answered_from_the_cli() {
     let interaction = request["interaction_id"].as_str().unwrap();
 
     let human = daemon.qcc(&["thread", "show", &id]);
-    assert!(
-        human
-            .stdout
-            .contains(&format!("qcc interaction resolve {id} {interaction}"))
-    );
+    assert!(human.stdout.contains(&format!("qcc interaction resolve {id} {interaction}")));
 
-    let answer = daemon.qcc(&[
-        "interaction",
-        "resolve",
-        &id,
-        interaction,
-        "--text",
-        "not on a Friday",
-    ]);
+    let answer =
+        daemon.qcc(&["interaction", "resolve", &id, interaction, "--text", "not on a Friday"]);
     assert!(answer.ok, "{}", answer.stderr);
     daemon.wait_for(&id, "turn/completed");
     assert_eq!(messages(&daemon.events(&id)), ["You said: not on a Friday"]);
@@ -288,10 +246,7 @@ fn question_is_answered_from_the_cli() {
 fn stop_interrupts_a_running_turn() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());
-    let long = (0..5000)
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let long = (0..5000).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
     let id = daemon.spawn(&format!("/slow {long}"));
     daemon.wait_for(&id, "item/text/delta");
 
@@ -299,10 +254,7 @@ fn stop_interrupts_a_running_turn() {
     assert!(stopped.ok, "{}", stopped.stderr);
     // `stop` returns only once the turn is settled.
     let events = daemon.events(&id);
-    let turn = events
-        .iter()
-        .find(|e| e["type"] == "turn/completed")
-        .expect("turn settled");
+    let turn = events.iter().find(|e| e["type"] == "turn/completed").expect("turn settled");
     assert_eq!(turn["status"], "interrupted");
     assert_eq!(daemon.thread(&id)["status"], "idle");
 
@@ -331,10 +283,7 @@ fn stop_interrupts_a_running_turn() {
 fn shutdown_settles_a_turn_in_flight() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());
-    let long = (0..5000)
-        .map(|n| n.to_string())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let long = (0..5000).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
     let id = daemon.spawn(&format!("/slow {long}"));
     daemon.wait_for(&id, "item/text/delta");
     daemon.stop();
@@ -344,12 +293,7 @@ fn shutdown_settles_a_turn_in_flight() {
     let tail = types(&events);
     assert_eq!(
         tail[tail.len() - 4..],
-        [
-            "item/completed",
-            "turn/completed",
-            "thread/status",
-            "session/ended"
-        ]
+        ["item/completed", "turn/completed", "thread/status", "session/ended"]
     );
     assert_eq!(daemon.thread(&id)["status"], "idle");
 }
@@ -358,20 +302,11 @@ fn shutdown_settles_a_turn_in_flight() {
 fn a_crashing_plugin_fails_its_thread_not_the_daemon() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());
-    let output = daemon.qcc(&[
-        "thread",
-        "spawn",
-        "--provider",
-        "echo",
-        "--prompt",
-        "/crash",
-        "--follow",
-    ]);
+    let output =
+        daemon.qcc(&["thread", "spawn", "--provider", "echo", "--prompt", "/crash", "--follow"]);
     assert!(!output.ok);
     assert!(
-        output
-            .stdout
-            .contains("error: plugin provider-echo crashed: wasm trap"),
+        output.stdout.contains("error: plugin provider-echo crashed: wasm trap"),
         "{}",
         output.stdout
     );
@@ -388,33 +323,16 @@ fn errors_are_reported_with_a_failing_exit_code() {
 
     let unknown_provider = daemon.qcc(&["thread", "spawn", "--provider", "nope"]);
     assert!(!unknown_provider.ok);
-    assert_eq!(
-        unknown_provider.stderr.trim(),
-        "qcc: no plugin provides \"nope\" (code -32002)"
-    );
+    assert_eq!(unknown_provider.stderr.trim(), "qcc: no plugin provides \"nope\" (code -32002)");
 
     let unknown_thread = daemon.qcc(&["thread", "send", "thr_missing", "hello"]);
     assert!(!unknown_thread.ok);
-    assert!(
-        unknown_thread
-            .stderr
-            .contains("thread thr_missing does not exist")
-    );
+    assert!(unknown_thread.stderr.contains("thread thr_missing does not exist"));
 
-    let bad_cwd = daemon.qcc(&[
-        "thread",
-        "spawn",
-        "--provider",
-        "echo",
-        "--cwd",
-        "/no/such/directory",
-    ]);
+    let bad_cwd =
+        daemon.qcc(&["thread", "spawn", "--provider", "echo", "--cwd", "/no/such/directory"]);
     assert!(!bad_cwd.ok);
-    assert!(
-        bad_cwd
-            .stderr
-            .contains("is not an absolute path to a directory")
-    );
+    assert!(bad_cwd.stderr.contains("is not an absolute path to a directory"));
 
     let failed = daemon.qcc(&[
         "thread",
@@ -426,11 +344,7 @@ fn errors_are_reported_with_a_failing_exit_code() {
         "--follow",
     ]);
     assert!(!failed.ok);
-    assert!(
-        failed.stdout.contains("turn failed: nope"),
-        "{}",
-        failed.stdout
-    );
+    assert!(failed.stdout.contains("turn failed: nope"), "{}", failed.stdout);
 
     let socket = dir.path().join("nobody-home.sock");
     let no_daemon = Command::new(env!("CARGO_BIN_EXE_qcc"))
@@ -450,15 +364,7 @@ fn a_spawn_from_inside_an_agent_session_records_its_parent() {
     // The daemon hands every agent session its thread id in the environment.
     let child = daemon
         .qcc_env(
-            &[
-                "thread",
-                "spawn",
-                "--provider",
-                "echo",
-                "--prompt",
-                "child",
-                "--json",
-            ],
+            &["thread", "spawn", "--provider", "echo", "--prompt", "child", "--json"],
             &[("QCC_THREAD_ID", &parent)],
         )
         .json();
@@ -477,18 +383,16 @@ fn plugins_and_daemon_are_listed() {
     let daemon = Daemon::start(dir.path());
 
     let plugins = daemon.qcc(&["plugin", "list", "--json"]).json();
-    let echo = &plugins["plugins"][0];
-    assert_eq!(echo["id"], "provider-echo");
+    let ids: Vec<&str> =
+        plugins["plugins"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["provider-acp", "provider-claude-code", "provider-codex", "provider-echo"]);
+    let echo = &plugins["plugins"][3];
     assert_eq!(echo["bundled"], true);
     assert_eq!(echo["providers"][0]["id"], "echo");
     assert_eq!(echo["providers"][0]["capabilities"]["resume"], true);
     assert_eq!(echo["permissions"]["process"][0], "echo");
     // Bundled plugins are installed like any other.
-    assert!(
-        dir.path()
-            .join("plugins/provider-echo/plugin.wasm")
-            .is_file()
-    );
+    assert!(dir.path().join("plugins/provider-echo/plugin.wasm").is_file());
 
     let status = daemon.qcc(&["daemon", "status", "--json"]).json();
     assert_eq!(status["data_dir"], dir.path().to_str().unwrap());
@@ -497,16 +401,9 @@ fn plugins_and_daemon_are_listed() {
     let config = qcc_daemon::Config {
         data_dir: dir.path().to_path_buf(),
         socket: daemon.socket.clone(),
+        cache_dir: cache_dir(),
     };
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
     let second = runtime.block_on(qcc_daemon::serve(config, || {}, std::future::pending()));
-    assert!(
-        second
-            .unwrap_err()
-            .to_string()
-            .contains("already listening")
-    );
+    assert!(second.unwrap_err().to_string().contains("already listening"));
 }

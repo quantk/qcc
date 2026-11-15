@@ -1,0 +1,79 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"claude-code","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"Write the numbers from 1 to 400"}
+{"type":"session/started","resumed":false}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"session/identified","provider_session":"e7942166-5bb1-45d0-a9a7-8194f5ac9f1f"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_1","text":"1"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n2\n3\n4\n5"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n6\n7\n8\n9"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n10\n11\n12\n13"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n14\n15\n16\n17"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n18\n19\n20\n21"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n22\n23\n24\n25"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n26\n27\n28\n29"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n30\n31\n32\n33"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n34\n35\n36\n37"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n38\n39\n40\n41"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n42\n43\n44\n45"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n46\n47\n48\n49"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n50\n51\n52\n53"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n54\n55\n56\n57"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n58\n59\n60\n61"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n62\n63\n64\n65"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n66\n67\n68\n69"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n70\n71\n72\n73"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n74\n75\n76\n77"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n78\n79\n80\n81"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n82\n83\n84\n85"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n86\n87\n88\n89"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n90\n91\n92\n93"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n94\n95\n96\n97"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n98\n99\n100\n101"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n102\n103\n104\n105"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n106\n107\n108\n109"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n110\n111\n112\n113"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n114\n115\n116\n117"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n118\n119\n120\n121"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n122\n123\n124\n125"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n126\n127\n128\n129"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n130\n131\n132\n133"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n134\n135\n136\n137"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n138\n139\n140\n141"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n142\n143\n144\n145"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n146\n147\n148\n149"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n150\n151\n152\n153"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n154\n155\n156\n157"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n158\n159\n160\n161"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n162\n163\n164\n165"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n166\n167\n168\n169"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n170\n171\n172\n173"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n174\n175\n176\n177"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n178\n179\n180\n181"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n182\n183\n184\n185"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n186\n187\n188\n189"}
+{"type":"item/text/delta","item_id":"item_1","text":"\n190\n191\n192\n193"}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113\n114\n115\n116\n117\n118\n119\n120\n121\n122\n123\n124\n125\n126\n127\n128\n129\n130\n131\n132\n133\n134\n135\n136\n137\n138\n139\n140\n141\n142\n143\n144\n145\n146\n147\n148\n149\n150\n151\n152\n153\n154\n155\n156\n157\n158\n159\n160\n161\n162\n163\n164\n165\n166\n167\n168\n169\n170\n171\n172\n173\n174\n175\n176\n177\n178\n179\n180\n181\n182\n183\n184\n185\n186\n187\n188\n189\n190\n191\n192\n193"}}
+{"type":"turn/completed","turn_id":"turn_1","status":"interrupted"}
+{"type":"thread/status","status":"idle"}
+{"type":"input/submitted","text":"Reply with exactly: still here"}
+{"type":"turn/started","turn_id":"turn_2"}
+{"type":"thread/status","status":"active"}
+{"type":"item/started","turn_id":"turn_2","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_2","text":"still here"}
+{"type":"item/completed","turn_id":"turn_2","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"still here"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_2","status":"completed"}
+{"type":"thread/status","status":"idle"}
+{"type":"session/ended","reason":"stopped"}
+{"type":"input/submitted","text":"What exact phrase did I ask you to reply with last time?"}
+{"type":"session/started","provider_session":"e7942166-5bb1-45d0-a9a7-8194f5ac9f1f","resumed":true}
+{"type":"turn/started","turn_id":"turn_3"}
+{"type":"thread/status","status":"active"}
+{"type":"item/started","turn_id":"turn_3","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_3","text":"still here"}
+{"type":"item/completed","turn_id":"turn_3","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"still here"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_3","status":"completed"}
+{"type":"thread/status","status":"idle"}

@@ -63,11 +63,7 @@ fn text_close() -> Delta {
 }
 
 fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary {
-        status,
-        error,
-        claim_if_idle: false,
-    })
+    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
 }
 
 fn completed() -> Delta {
@@ -84,11 +80,7 @@ fn command_item(command: &str, exit_code: Option<i32>) -> ItemShape {
 }
 
 fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
-    InteractionOption {
-        id: id.into(),
-        label: label.into(),
-        kind,
-    }
+    InteractionOption { id: id.into(), label: label.into(), kind }
 }
 
 fn words(text: &str) -> u64 {
@@ -109,11 +101,7 @@ impl Session {
             output_tokens: self.output_tokens,
             cached_input_tokens: None,
         };
-        Delta::Usage(UsageSnapshot {
-            total,
-            last,
-            model_context_window: None,
-        })
+        Delta::Usage(UsageSnapshot { total, last, model_context_window: None })
     }
 
     fn request_id(&mut self) -> String {
@@ -125,10 +113,7 @@ impl Session {
 impl Echo {
     /// Run one prompt. Opens a turn and either settles it or leaves it waiting.
     fn run(&mut self, thread: &str, prompt: &str) -> Result<(), String> {
-        let session = self
-            .sessions
-            .get_mut(thread)
-            .ok_or("the session was not started")?;
+        let session = self.sessions.get_mut(thread).ok_or("the session was not started")?;
         if session.turn.is_some() {
             return Err("a turn is already running".into());
         }
@@ -146,17 +131,10 @@ impl Echo {
             "/tool" => {
                 let key = ItemKey::Provider(format!("call-{}", session.request_id()));
                 let tool = |output: Option<String>| {
-                    ItemShape::Tool(ToolItem {
-                        name: rest.to_owned(),
-                        input: "{}".into(),
-                        output,
-                    })
+                    ItemShape::Tool(ToolItem { name: rest.to_owned(), input: "{}".into(), output })
                 };
                 out.push(text("Calling a tool."));
-                out.push(Delta::ItemOpen(ItemOpen {
-                    key: key.clone(),
-                    shape: tool(None),
-                }));
+                out.push(Delta::ItemOpen(ItemOpen { key: key.clone(), shape: tool(None) }));
                 out.push(Delta::ItemClose(ItemClose {
                     key,
                     shape: tool(Some(format!("{rest} ok"))),
@@ -201,10 +179,7 @@ impl Echo {
                         ],
                     }),
                 }));
-                session.turn = Some(Turn::Approving {
-                    request_id,
-                    command: rest.to_owned(),
-                });
+                session.turn = Some(Turn::Approving { request_id, command: rest.to_owned() });
             }
             "/exec" => {
                 let mut args = rest.split_whitespace().map(str::to_owned);
@@ -240,11 +215,7 @@ impl Echo {
             "/crash" => panic!("echo provider was asked to crash"),
             _ => {
                 for (index, word) in prompt.split_whitespace().enumerate() {
-                    out.push(text(if index == 0 {
-                        word.to_owned()
-                    } else {
-                        format!(" {word}")
-                    }));
+                    out.push(text(if index == 0 { word.to_owned() } else { format!(" {word}") }));
                 }
                 out.push(text_close());
                 out.push(session.usage(prompt, prompt));
@@ -273,12 +244,10 @@ impl Echo {
     }
 
     fn thread_of_process(&self, process: u64) -> Option<String> {
-        self.sessions
-            .iter()
-            .find_map(|(thread, session)| match session.turn {
-                Some(Turn::Exec { process: running }) if running == process => Some(thread.clone()),
-                _ => None,
-            })
+        self.sessions.iter().find_map(|(thread, session)| match session.turn {
+            Some(Turn::Exec { process: running }) if running == process => Some(thread.clone()),
+            _ => None,
+        })
     }
 }
 
@@ -287,17 +256,12 @@ impl Provider for Echo {
         ProviderInfo {
             id: "echo".into(),
             name: "Echo".into(),
-            capabilities: ProviderCapabilities {
-                resume: true,
-                fork: false,
-                steer: false,
-            },
+            capabilities: ProviderCapabilities { resume: true, fork: false, steer: false },
         }
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
-        self.sessions
-            .insert(start.thread.clone(), Session::default());
+        self.sessions.insert(start.thread.clone(), Session::default());
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt)?;
@@ -324,10 +288,7 @@ impl Provider for Echo {
     }
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
-        let session = self
-            .sessions
-            .get_mut(&answer.thread)
-            .ok_or("the session was not started")?;
+        let session = self.sessions.get_mut(&answer.thread).ok_or("the session was not started")?;
         let out = match session.turn.take() {
             Some(Turn::Asking { request_id }) if request_id == answer.request_id => {
                 let reply = match &answer.resolution {
@@ -337,10 +298,7 @@ impl Provider for Echo {
                 };
                 vec![text(reply), text_close(), completed()]
             }
-            Some(Turn::Approving {
-                request_id,
-                command,
-            }) if request_id == answer.request_id => {
+            Some(Turn::Approving { request_id, command }) if request_id == answer.request_id => {
                 let allowed = matches!(&answer.resolution, InteractionResolution::Selected(id) if id == "allow");
                 let (status, exit_code) = if allowed {
                     (ItemStatus::Completed, Some(0))
@@ -365,10 +323,7 @@ impl Provider for Echo {
     }
 
     fn models(&mut self) -> Result<Vec<ModelInfo>, String> {
-        Ok(vec![ModelInfo {
-            id: "echo-1".into(),
-            name: "Echo 1".into(),
-        }])
+        Ok(vec![ModelInfo { id: "echo-1".into(), name: "Echo 1".into() }])
     }
 }
 
@@ -415,10 +370,7 @@ impl Plugin for Echo {
                 (process, vec![text(String::from_utf8_lossy(&data))])
             }
             ProcessEvent::Stderr { process, data } => {
-                log::warn(format!(
-                    "process {process}: {}",
-                    String::from_utf8_lossy(&data)
-                ));
+                log::warn(format!("process {process}: {}", String::from_utf8_lossy(&data)));
                 return;
             }
             ProcessEvent::Exit { process, code } => {

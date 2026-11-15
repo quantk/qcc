@@ -63,10 +63,7 @@ impl ItemShape {
     }
 
     pub fn is_text(&self) -> bool {
-        matches!(
-            self,
-            Self::AgentMessage { .. } | Self::Reasoning { .. } | Self::Plan { .. }
-        )
+        matches!(self, Self::AgentMessage { .. } | Self::Reasoning { .. } | Self::Plan { .. })
     }
 }
 

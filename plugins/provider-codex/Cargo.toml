@@ -1,0 +1,22 @@
+[package]
+name = "provider-codex"
+description = "Codex provider: bridges `codex app-server` to the delta grammar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qcc-plugin-sdk = { workspace = true, features = ["jsonrpc"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+qcc-domain.workspace = true
+qcc-plugin-testkit.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

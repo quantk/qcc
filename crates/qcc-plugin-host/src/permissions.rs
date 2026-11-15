@@ -20,12 +20,7 @@ impl Permissions {
             deltas: self.deltas && other.deltas,
             kv: self.kv && other.kv,
             timers: self.timers && other.timers,
-            process: self
-                .process
-                .iter()
-                .filter(|p| other.process.contains(p))
-                .cloned()
-                .collect(),
+            process: self.process.iter().filter(|p| other.process.contains(p)).cloned().collect(),
         }
     }
 

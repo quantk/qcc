@@ -47,7 +47,7 @@ pub(crate) fn load_all(
     let plugins_dir = config.plugins_dir();
     qcc_plugins_bundle::install(&plugins_dir)?;
 
-    let mut host = PluginHost::new()?;
+    let mut host = PluginHost::with_cache(Some(&config.cache_dir.join("wasm")))?;
     let mut dirs: Vec<_> = std::fs::read_dir(&plugins_dir)?
         .filter_map(|entry| Some(entry.ok()?.path()))
         .filter(|path| path.join(MANIFEST_FILE).is_file())

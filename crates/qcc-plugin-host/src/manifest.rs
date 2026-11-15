@@ -55,17 +55,12 @@ impl Manifest {
         let id_ok = !self.id.is_empty()
             && self.id.len() <= 64
             && !self.id.starts_with('-')
-            && self
-                .id
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+            && self.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
         if !id_ok {
             return Err(ManifestError::InvalidId(self.id.clone()));
         }
         if self.api != API_VERSION {
-            return Err(ManifestError::ApiMismatch {
-                found: self.api.clone(),
-            });
+            return Err(ManifestError::ApiMismatch { found: self.api.clone() });
         }
         for path in std::iter::once(&self.wasm).chain(&self.web) {
             let inside = path.components().all(|c| matches!(c, Component::Normal(_)));
@@ -99,31 +94,19 @@ mod tests {
         assert!(!manifest.permissions.kv);
         assert!(manifest.permissions.allows_process("claude"));
         assert!(!manifest.permissions.allows_process("/usr/bin/claude"));
-        assert_eq!(
-            Manifest::parse(BASE).unwrap().permissions,
-            Permissions::default()
-        );
+        assert_eq!(Manifest::parse(BASE).unwrap().permissions, Permissions::default());
     }
 
     #[test]
     fn rejects_bad_manifests() {
         let with = |from: &str, to: &str| Manifest::parse(&BASE.replace(from, to));
-        assert!(matches!(
-            with("provider-echo", "Echo!"),
-            Err(ManifestError::InvalidId(_))
-        ));
+        assert!(matches!(with("provider-echo", "Echo!"), Err(ManifestError::InvalidId(_))));
         assert!(matches!(
             with("api = \"0.1\"", "api = \"9.0\""),
             Err(ManifestError::ApiMismatch { .. })
         ));
-        assert!(matches!(
-            with("plugin.wasm", "../evil.wasm"),
-            Err(ManifestError::PathEscapes(_))
-        ));
-        assert!(matches!(
-            with("plugin.wasm", "/abs.wasm"),
-            Err(ManifestError::PathEscapes(_))
-        ));
+        assert!(matches!(with("plugin.wasm", "../evil.wasm"), Err(ManifestError::PathEscapes(_))));
+        assert!(matches!(with("plugin.wasm", "/abs.wasm"), Err(ManifestError::PathEscapes(_))));
         assert!(matches!(
             Manifest::parse(&format!("{BASE}\nsurprise = 1\n")),
             Err(ManifestError::Syntax(_))

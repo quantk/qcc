@@ -37,6 +37,10 @@ pub enum EventPayload {
         resumed: bool,
     },
 
+    /// The provider named its session after it had started.
+    #[serde(rename = "session/identified")]
+    SessionIdentified { provider_session: String },
+
     #[serde(rename = "session/ended")]
     SessionEnded {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -82,10 +86,7 @@ pub enum EventPayload {
     },
 
     #[serde(rename = "interaction/resolved")]
-    InteractionResolved {
-        interaction_id: InteractionId,
-        resolution: InteractionResolution,
-    },
+    InteractionResolved { interaction_id: InteractionId, resolution: InteractionResolution },
 
     #[serde(rename = "provider/error")]
     ProviderError { message: String },

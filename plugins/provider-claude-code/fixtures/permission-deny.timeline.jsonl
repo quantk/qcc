@@ -1,0 +1,33 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"claude-code","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"Create a file named made.txt"}
+{"type":"session/started","resumed":false}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"session/identified","provider_session":"b2d79fc3-af16-4aa5-9a79-3a4f4887d6c1"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"fileChange","path":"/work/made.txt"}}
+{"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_1","request":{"type":"approval","title":"Allow Write?","detail":"/work/made.txt","options":[{"id":"allow","label":"Allow","kind":"allow"},{"id":"deny","label":"Deny","kind":"deny"}]}}
+{"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"deny"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"declined","type":"fileChange","path":"/work/made.txt"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_2","text":"I did"}
+{"type":"item/text/delta","item_id":"item_2","text":"n't create `"}
+{"type":"item/text/delta","item_id":"item_2","text":"made.txt`. The"}
+{"type":"item/text/delta","item_id":"item_2","text":" Write call"}
+{"type":"item/text/delta","item_id":"item_2","text":" was declined, so I ha"}
+{"type":"item/text/delta","item_id":"item_2","text":"ven't retried it or"}
+{"type":"item/text/delta","item_id":"item_2","text":" tried another"}
+{"type":"item/text/delta","item_id":"item_2","text":" method"}
+{"type":"item/text/delta","item_id":"item_2","text":". Not done"}
+{"type":"item/text/delta","item_id":"item_2","text":".\n\nIf you want the"}
+{"type":"item/text/delta","item_id":"item_2","text":" file created"}
+{"type":"item/text/delta","item_id":"item_2","text":", appro"}
+{"type":"item/text/delta","item_id":"item_2","text":"ve the"}
+{"type":"item/text/delta","item_id":"item_2","text":" Write again"}
+{"type":"item/text/delta","item_id":"item_2","text":", or tell me to"}
+{"type":"item/text/delta","item_id":"item_2","text":" use a different method"}
+{"type":"item/text/delta","item_id":"item_2","text":" such"}
+{"type":"item/text/delta","item_id":"item_2","text":" as Bash."}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"I didn't create `made.txt`. The Write call was declined, so I haven't retried it or tried another method. Not done.\n\nIf you want the file created, approve the Write again, or tell me to use a different method such as Bash."}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":551,"cached_input_tokens":50725},"last":{"input_tokens":4,"output_tokens":551,"cached_input_tokens":50725},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

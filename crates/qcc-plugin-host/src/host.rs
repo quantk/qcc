@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use qcc_domain::{ProviderId, ProviderInfo};
 use wasmtime::component::Component;
-use wasmtime::{Config, Engine};
+use wasmtime::{Cache, CacheConfig, Config, Engine};
 
 use crate::actor::{self, PluginHandle};
 use crate::api::Contribution;
@@ -27,11 +27,7 @@ pub enum LoadError {
     #[error(
         "plugin {plugin:?} contributes provider {provider:?}, which {owner:?} already provides"
     )]
-    DuplicateProvider {
-        plugin: String,
-        provider: ProviderId,
-        owner: String,
-    },
+    DuplicateProvider { plugin: String, provider: ProviderId, owner: String },
     #[error("plugin {plugin:?} is not a valid component: {error}")]
     Component { plugin: String, error: String },
     #[error("plugin {plugin:?} failed to start: {error}")]
@@ -49,9 +45,26 @@ pub struct PluginHost {
 
 impl PluginHost {
     pub fn new() -> Result<Self, LoadError> {
+        Self::with_cache(None)
+    }
+
+    /// Like [`PluginHost::new`], keeping compiled components in `cache_dir` so that a
+    /// plugin is compiled once per version instead of on every start.
+    pub fn with_cache(cache_dir: Option<&Path>) -> Result<Self, LoadError> {
         let mut config = Config::new();
         config.wasm_component_model(true);
         config.epoch_interruption(true);
+        if let Some(dir) = cache_dir {
+            let mut cache = CacheConfig::new();
+            cache.with_directory(dir);
+            // A cache that cannot be set up costs time, not correctness.
+            match Cache::new(cache) {
+                Ok(cache) => {
+                    config.cache(Some(cache));
+                }
+                Err(error) => tracing::warn!(%error, "compiling plugins without a cache"),
+            }
+        }
         let engine = Engine::new(&config).map_err(|error| LoadError::Engine(error.to_string()))?;
 
         let ticker_stop = Arc::new(AtomicBool::new(false));
@@ -66,11 +79,7 @@ impl PluginHost {
             })
             .map_err(|error| LoadError::Engine(error.to_string()))?;
 
-        Ok(Self {
-            engine,
-            plugins: Vec::new(),
-            ticker_stop,
-        })
+        Ok(Self { engine, plugins: Vec::new(), ticker_stop })
     }
 
     /// Load a plugin from its manifest and component bytes, and run its `init`.
@@ -85,17 +94,12 @@ impl PluginHost {
         if self.plugin(&id).is_some() {
             return Err(LoadError::DuplicatePlugin(id));
         }
-        let component =
-            Component::new(&self.engine, wasm).map_err(|error| LoadError::Component {
-                plugin: id.clone(),
-                error: format!("{error:#}"),
-            })?;
+        let component = Component::new(&self.engine, wasm).map_err(|error| {
+            LoadError::Component { plugin: id.clone(), error: format!("{error:#}") }
+        })?;
         let permissions = grant.effective(&manifest.permissions);
         let handle = actor::spawn(&self.engine, component, manifest, permissions, services)
-            .map_err(|error| LoadError::Start {
-                plugin: id.clone(),
-                error,
-            })?;
+            .map_err(|error| LoadError::Start { plugin: id.clone(), error })?;
 
         for contribution in handle.contributions() {
             if let Contribution::Provider(info) = contribution
@@ -120,10 +124,8 @@ impl PluginHost {
         services: impl FnOnce(&Manifest) -> Services,
     ) -> Result<PluginHandle, LoadError> {
         let read = |path: &Path| {
-            std::fs::read(path).map_err(|error| LoadError::Io {
-                path: path.display().to_string(),
-                error,
-            })
+            std::fs::read(path)
+                .map_err(|error| LoadError::Io { path: path.display().to_string(), error })
         };
         let manifest_text = String::from_utf8_lossy(&read(&dir.join(MANIFEST_FILE))?).into_owned();
         let manifest = Manifest::parse(&manifest_text)?;
@@ -143,25 +145,19 @@ impl PluginHost {
     /// The plugin that contributes a provider.
     pub fn provider(&self, id: &ProviderId) -> Option<(&PluginHandle, &ProviderInfo)> {
         self.plugins.iter().find_map(|plugin| {
-            plugin
-                .contributions()
-                .iter()
-                .find_map(|contribution| match contribution {
-                    Contribution::Provider(info) if &info.id == id => Some((plugin, info)),
-                    _ => None,
-                })
+            plugin.contributions().iter().find_map(|contribution| match contribution {
+                Contribution::Provider(info) if &info.id == id => Some((plugin, info)),
+                _ => None,
+            })
         })
     }
 
     pub fn providers(&self) -> impl Iterator<Item = (&PluginHandle, &ProviderInfo)> {
         self.plugins.iter().flat_map(|plugin| {
-            plugin
-                .contributions()
-                .iter()
-                .filter_map(move |contribution| match contribution {
-                    Contribution::Provider(info) => Some((plugin, info)),
-                    Contribution::Environment(_) => None,
-                })
+            plugin.contributions().iter().filter_map(move |contribution| match contribution {
+                Contribution::Provider(info) => Some((plugin, info)),
+                Contribution::Environment(_) => None,
+            })
         })
     }
 }

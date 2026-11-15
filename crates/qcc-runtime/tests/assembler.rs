@@ -28,15 +28,8 @@ fn assemble(value: serde_json::Value) -> (Vec<String>, Vec<GrammarViolation>) {
     for delta in deltas(value) {
         payloads.extend(assembler.apply(delta));
     }
-    assert_eq!(
-        Timeline::check(&payloads),
-        vec![],
-        "assembled timeline breaks the grammar"
-    );
-    (
-        payloads.iter().map(render).collect(),
-        assembler.take_violations(),
-    )
+    assert_eq!(Timeline::check(&payloads), vec![], "assembled timeline breaks the grammar");
+    (payloads.iter().map(render).collect(), assembler.take_violations())
 }
 
 fn item(item: &Item) -> String {
@@ -44,9 +37,7 @@ fn item(item: &Item) -> String {
         ItemShape::AgentMessage { text } => format!("agentMessage {text:?}"),
         ItemShape::Reasoning { text } => format!("reasoning {text:?}"),
         ItemShape::Tool { name, output, .. } => format!("tool {name} -> {output:?}"),
-        ItemShape::Command {
-            command, exit_code, ..
-        } => {
+        ItemShape::Command { command, exit_code, .. } => {
             format!("command {command:?} -> {exit_code:?}")
         }
         other => format!("{other:?}"),
@@ -57,11 +48,7 @@ fn item(item: &Item) -> String {
 fn render(payload: &EventPayload) -> String {
     match payload {
         EventPayload::TurnStarted { turn_id } => format!("turn/started {turn_id}"),
-        EventPayload::TurnCompleted {
-            turn_id,
-            status,
-            error,
-        } => match error {
+        EventPayload::TurnCompleted { turn_id, status, error } => match error {
             Some(error) => format!("turn/completed {turn_id} {status:?} {error:?}"),
             None => format!("turn/completed {turn_id} {status:?}"),
         },
@@ -70,17 +57,10 @@ fn render(payload: &EventPayload) -> String {
             format!("item/text/delta {item_id} {text:?}")
         }
         EventPayload::ItemCompleted { item: i, .. } => format!("item/completed {}", item(i)),
-        EventPayload::InteractionRequested {
-            interaction_id,
-            item_id,
-            ..
-        } => {
+        EventPayload::InteractionRequested { interaction_id, item_id, .. } => {
             format!("interaction/requested {interaction_id} item={item_id:?}")
         }
-        EventPayload::InteractionResolved {
-            interaction_id,
-            resolution,
-        } => {
+        EventPayload::InteractionResolved { interaction_id, resolution } => {
             format!("interaction/resolved {interaction_id} {resolution:?}")
         }
         EventPayload::SessionEnded { reason } => format!("session/ended {reason:?}"),
@@ -130,10 +110,7 @@ fn provider_final_text_wins_over_the_stream() {
         {"kind": "item.text-close", "key": {"provider": "msg-1"}, "channel": "agentMessage", "text": "Hello"},
         {"kind": "turn.boundary", "status": "completed"},
     ]));
-    assert_eq!(
-        events[3],
-        "item/completed item_1 Completed agentMessage \"Hello\""
-    );
+    assert_eq!(events[3], "item/completed item_1 Completed agentMessage \"Hello\"");
 }
 
 #[test]
@@ -224,9 +201,7 @@ fn repeated_close_is_deduplicated_and_reopen_keeps_the_id() {
     ]));
     assert_eq!(
         violations,
-        [GrammarViolation::ItemAlreadyOpen(
-            qcc_domain::ItemKey::Provider("c".into())
-        )]
+        [GrammarViolation::ItemAlreadyOpen(qcc_domain::ItemKey::Provider("c".into()))]
     );
     assert_eq!(
         events,
@@ -254,10 +229,7 @@ fn session_reset_starts_a_fresh_provider_id_space() {
          "shape": {"type": "fileRead", "path": "b"}},
         {"kind": "turn.boundary", "status": "completed"},
     ]));
-    let completed: Vec<_> = events
-        .iter()
-        .filter(|e| e.starts_with("item/completed"))
-        .collect();
+    let completed: Vec<_> = events.iter().filter(|e| e.starts_with("item/completed")).collect();
     assert!(completed[0].starts_with("item/completed item_1 "));
     assert!(completed[1].starts_with("item/completed item_2 "));
 }
@@ -271,13 +243,7 @@ fn duplicate_turn_open_and_stray_boundary_are_dropped() {
         {"kind": "turn.boundary", "status": "failed", "error": "boom"},
         {"kind": "turn.boundary", "status": "completed"},
     ]));
-    assert_eq!(
-        events,
-        [
-            "turn/started turn_1",
-            "turn/completed turn_1 Failed \"boom\""
-        ]
-    );
+    assert_eq!(events, ["turn/started turn_1", "turn/completed turn_1 Failed \"boom\""]);
     assert_eq!(
         violations,
         [
@@ -340,16 +306,10 @@ fn interaction_is_mapped_and_cancelled_when_the_turn_settles() {
     );
 
     // The answer goes back with the provider's own handle, exactly once.
-    assert_eq!(
-        assembler.take_interaction(&"int_1".into()),
-        Some("perm-1".to_owned())
-    );
+    assert_eq!(assembler.take_interaction(&"int_1".into()), Some("perm-1".to_owned()));
     assert_eq!(assembler.take_interaction(&"int_1".into()), None);
 
-    let events = run(
-        &mut assembler,
-        json!([{"kind": "session.ended", "reason": "exit"}]),
-    );
+    let events = run(&mut assembler, json!([{"kind": "session.ended", "reason": "exit"}]));
     assert_eq!(
         events,
         [

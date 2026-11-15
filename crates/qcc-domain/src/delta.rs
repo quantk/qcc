@@ -66,19 +66,11 @@ pub enum Delta {
 
     /// Always carries the full terminal shape.
     #[serde(rename = "item.close")]
-    ItemClose {
-        key: ItemKey,
-        shape: ItemShape,
-        status: ItemStatus,
-    },
+    ItemClose { key: ItemKey, shape: ItemShape, status: ItemStatus },
 
     /// Streamed text. Opens the item on first sight of the key.
     #[serde(rename = "item.text-delta")]
-    ItemTextDelta {
-        key: ItemKey,
-        channel: TextChannel,
-        text: String,
-    },
+    ItemTextDelta { key: ItemKey, channel: TextChannel, text: String },
 
     /// Settles a text stream with the provider-final `text` or, absent that, with what
     /// was streamed.
@@ -103,6 +95,11 @@ pub enum Delta {
         item: Option<ItemKey>,
         request: InteractionRequest,
     },
+
+    /// The provider's durable handle for this session, for a bridge that learns it
+    /// only after `start` returned (the agent answers its handshake later).
+    #[serde(rename = "session.identity")]
+    SessionIdentity { provider_session: String },
 
     /// A fresh provider session was constructed: provider-native ids start over.
     #[serde(rename = "session.reset")]

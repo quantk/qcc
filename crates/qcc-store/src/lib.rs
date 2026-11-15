@@ -97,7 +97,7 @@ impl Store {
                     Some(thread) => thread,
                     None => match &event.payload {
                         EventPayload::ThreadCreated { thread } => {
-                            let mut thread = thread.clone();
+                            let mut thread = thread.as_ref().clone();
                             thread.last_seq = 0;
                             insert_thread(&tx, &thread)?;
                             thread

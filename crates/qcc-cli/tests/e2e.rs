@@ -821,3 +821,102 @@ fn a_thread_never_runs_in_the_source_when_its_environment_fails() {
     let failed = daemon.wait_for(&id, "environment/failed");
     assert!(failed["message"].as_str().unwrap().contains("\"nope\" does not name a commit"));
 }
+
+/// What the desktop app does: one raw connection that watches every thread and
+/// receives notifications untouched.
+#[test]
+fn a_watching_client_sees_threads_appear_and_change() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let before = daemon.spawn("first");
+    daemon.wait_for(&before, "turn/completed");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (client, mut notifications) = Client::connect_raw(&daemon.socket).await.unwrap();
+        let listed = client.call_raw("thread.watch", json!({ "subscription": 7 })).await.unwrap();
+        let ids: Vec<&str> = listed["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, [before.as_str()]);
+        assert_eq!(listed["threads"][0]["last_turn_status"], "completed");
+        assert_eq!(listed["threads"][0]["activity"]["kind"], "agentMessage");
+
+        // A thread that asks for approval: the watcher learns about the thread,
+        // then about the request, with everything needed to answer it.
+        let spawned = client
+            .call_raw(
+                "thread.spawn",
+                json!({ "provider": "echo", "cwd": dir.path(), "prompt": "/approve rm -rf build" }),
+            )
+            .await
+            .unwrap();
+        let id = spawned["thread"]["id"].as_str().unwrap().to_owned();
+        let pending = loop {
+            let notification = tokio::time::timeout(Duration::from_secs(30), notifications.recv())
+                .await
+                .expect("the watcher is told about the approval")
+                .expect("the connection stays open");
+            assert_eq!(notification.method, "thread.updated");
+            assert_eq!(notification.params["subscription"], 7);
+            let thread = &notification.params["thread"];
+            assert_eq!(thread["id"], id.as_str());
+            if let Some(pending) = thread["pending_interactions"].as_array() {
+                assert!(thread["turn_started_at"].is_u64());
+                break pending[0].clone();
+            }
+        };
+        assert_eq!(pending["request"]["type"], "approval");
+        let allow = pending["request"]["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["kind"] == "allow")
+            .unwrap();
+
+        client
+            .call_raw(
+                "interaction.resolve",
+                json!({
+                    "thread_id": id,
+                    "interaction_id": pending["id"],
+                    "resolution": { "type": "selected", "option_id": allow["id"] },
+                }),
+            )
+            .await
+            .unwrap();
+        loop {
+            let notification = tokio::time::timeout(Duration::from_secs(30), notifications.recv())
+                .await
+                .expect("the watcher is told when the turn ends")
+                .unwrap();
+            let thread = &notification.params["thread"];
+            if thread["last_turn_status"] == "completed" {
+                assert!(thread.get("pending_interactions").is_none());
+                assert!(thread.get("turn_started_at").is_none());
+                break;
+            }
+        }
+
+        // After unsubscribing, nothing more arrives.
+        client.call_raw("thread.unsubscribe", json!({ "subscription": 7 })).await.unwrap();
+        // Whatever was sent before the unsubscribe was answered is already here.
+        while notifications.try_recv().is_ok() {}
+        client
+            .call_raw(
+                "thread.spawn",
+                json!({ "provider": "echo", "cwd": dir.path(), "prompt": "x" }),
+            )
+            .await
+            .unwrap();
+        let quiet = tokio::time::timeout(Duration::from_millis(400), notifications.recv()).await;
+        assert!(quiet.is_err(), "an unsubscribed watcher got {quiet:?}");
+    });
+    daemon.stop();
+}

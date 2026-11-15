@@ -22,7 +22,7 @@ macro_rules! method {
 }
 
 /// Parameters or result of a method that carries none.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct Empty {}
 
 // ----- daemon -----------------------------------------------------------------------
@@ -32,7 +32,7 @@ method!(
     DaemonStatus, "daemon.status", Empty => DaemonStatusResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct DaemonStatusResult {
     pub version: String,
     pub protocol: u32,
@@ -49,7 +49,7 @@ method!(
     ThreadSpawn, "thread.spawn", ThreadSpawnParams => ThreadResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadSpawnParams {
     pub provider: ProviderId,
     /// Working directory of the thread, or what its environment is made from.
@@ -74,7 +74,7 @@ pub struct ThreadSpawnParams {
     pub permission_mode: Option<PermissionMode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadResult {
     pub thread: Thread,
 }
@@ -87,7 +87,7 @@ method!(
 );
 
 /// What to do with a message that arrives while a turn is running.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum SendMode {
     /// Deliver it as its own turn once the running one ends.
@@ -98,7 +98,7 @@ pub enum SendMode {
     Steer,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadSendParams {
     pub thread_id: ThreadId,
     pub text: String,
@@ -107,7 +107,7 @@ pub struct ThreadSendParams {
 }
 
 /// What became of a sent message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum Delivery {
     /// It started a turn.
@@ -118,7 +118,7 @@ pub enum Delivery {
     Queued,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadSendResult {
     pub delivery: Delivery,
     /// Set when queued: the `queue_id` its `input/submitted` event will carry.
@@ -132,7 +132,7 @@ method!(
     ThreadSetMode, "thread.set_mode", ThreadSetModeParams => ThreadResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadSetModeParams {
     pub thread_id: ThreadId,
     /// Absent: back to the agent's own configuration.
@@ -146,7 +146,7 @@ method!(
     ThreadStop, "thread.stop", ThreadStopParams => Empty
 );
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum StopMode {
     /// Settle the running turn as interrupted; the session stays attached.
@@ -156,7 +156,7 @@ pub enum StopMode {
     Release,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadStopParams {
     pub thread_id: ThreadId,
     #[serde(default)]
@@ -165,21 +165,44 @@ pub struct ThreadStopParams {
 
 method!(ThreadList, "thread.list", ThreadListParams => ThreadListResult);
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadListParams {
     #[serde(default)]
     pub include_archived: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadListResult {
     /// Oldest first.
     pub threads: Vec<Thread>,
 }
 
+method!(
+    /// List every thread, archived ones included, and keep following them: whenever
+    /// a thread appears or its projection changes, a [`THREAD_UPDATED`] notification
+    /// carries the new projection, until [`ThreadUnsubscribe`] or the connection
+    /// closes. Streamed text does not count as a change.
+    ThreadWatch, "thread.watch", ThreadWatchParams => ThreadListResult
+);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadWatchParams {
+    /// A client-chosen id, echoed in every notification.
+    pub subscription: u64,
+}
+
+/// Notification: a watched thread appeared or changed.
+pub const THREAD_UPDATED: &str = "thread.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadUpdatedNotification {
+    pub subscription: u64,
+    pub thread: Thread,
+}
+
 method!(ThreadGet, "thread.get", ThreadGetParams => ThreadResult);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadGetParams {
     pub thread_id: ThreadId,
 }
@@ -191,7 +214,7 @@ method!(
     ThreadArchive, "thread.archive", ThreadArchiveParams => ThreadResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadArchiveParams {
     pub thread_id: ThreadId,
     #[serde(default)]
@@ -203,7 +226,7 @@ method!(
     ThreadChanges, "thread.changes", ThreadGetParams => ThreadChangesResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadChangesResult {
     pub changes: EnvironmentChanges,
 }
@@ -213,7 +236,7 @@ method!(
     ThreadDiff, "thread.diff", ThreadGetParams => ThreadDiffResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadDiffResult {
     pub diff: String,
     /// The diff was cut short because it is too large.
@@ -226,7 +249,7 @@ method!(
     ThreadEvents, "thread.events", ThreadEventsParams => ThreadEventsResult
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadEventsParams {
     pub thread_id: ThreadId,
     /// Return events with `seq > after`. Zero reads from the beginning.
@@ -239,14 +262,14 @@ pub struct ThreadEventsParams {
     pub subscription: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadEventsResult {
     pub events: Vec<ThreadEvent>,
 }
 
 method!(ThreadUnsubscribe, "thread.unsubscribe", ThreadUnsubscribeParams => Empty);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadUnsubscribeParams {
     pub subscription: u64,
 }
@@ -254,7 +277,7 @@ pub struct ThreadUnsubscribeParams {
 /// Notification: one event of a followed thread.
 pub const THREAD_EVENT: &str = "thread.event";
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadEventNotification {
     pub subscription: u64,
     pub event: ThreadEvent,
@@ -267,7 +290,7 @@ method!(
     InteractionResolve, "interaction.resolve", InteractionResolveParams => Empty
 );
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct InteractionResolveParams {
     pub thread_id: ThreadId,
     pub interaction_id: InteractionId,
@@ -278,12 +301,12 @@ pub struct InteractionResolveParams {
 
 method!(PluginList, "plugin.list", Empty => PluginListResult);
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct PluginListResult {
     pub plugins: Vec<PluginInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct PluginInfo {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -297,7 +320,7 @@ pub struct PluginInfo {
     pub environments: Vec<EnvironmentInfo>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct PluginPermissions {
     pub deltas: bool,
     pub kv: bool,

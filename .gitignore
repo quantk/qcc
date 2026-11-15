@@ -4,3 +4,4 @@
 node_modules
 dist
 /.dev
+/apps/desktop/src-tauri/gen

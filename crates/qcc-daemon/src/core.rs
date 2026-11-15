@@ -16,12 +16,13 @@ use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
     DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
-    SendMode, StopMode, THREAD_EVENT, ThreadArchive, ThreadArchiveParams, ThreadChanges,
-    ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents,
-    ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
+    SendMode, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
+    ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
+    ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
     ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
     ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
     ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
+    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -171,6 +172,8 @@ pub(crate) struct Core {
     /// Threads on their way to the archive. They take no input meanwhile.
     archiving: HashSet<ThreadId>,
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
+    /// Connections following the list of threads.
+    watchers: Vec<Subscriber>,
     /// Set when the journal cannot be written. The daemon stops rather than let
     /// memory and disk disagree.
     fatal: Option<anyhow::Error>,
@@ -234,6 +237,7 @@ impl Core {
             queued,
             archiving: HashSet::new(),
             subscribers: HashMap::new(),
+            watchers: Vec::new(),
             fatal: None,
         })
     }
@@ -278,6 +282,7 @@ impl Core {
                 for subscribers in self.subscribers.values_mut() {
                     subscribers.retain(|subscriber| subscriber.connection != connection);
                 }
+                self.watchers.retain(|watcher| watcher.connection != connection);
             }
             Command::Deltas { plugin, thread, deltas } => self.deltas(&plugin, thread, deltas),
             Command::PluginCrashed { plugin, reason } => self.plugin_crashed(&plugin, &reason),
@@ -338,6 +343,17 @@ impl Core {
                     });
                 responder.reply(result);
             }
+            ThreadWatch::NAME => match params::<ThreadWatch>(raw) {
+                Ok(ThreadWatchParams { subscription }) => {
+                    let out = responder.out.clone();
+                    let mut threads: Vec<_> = self.supervisor.threads().cloned().collect();
+                    threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+                    responder.reply(Ok(ThreadListResult { threads }));
+                    // Registered in the same step as the listing, so no change is missed.
+                    self.watchers.push(Subscriber { connection, subscription, out });
+                }
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             ThreadArchive::NAME => match params::<ThreadArchive>(raw) {
                 Ok(p) => self.thread_archive(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
@@ -369,6 +385,9 @@ impl Core {
                                 s.connection != connection || s.subscription != subscription
                             });
                         }
+                        self.watchers.retain(|watcher| {
+                            watcher.connection != connection || watcher.subscription != subscription
+                        });
                         Empty {}
                     },
                 );
@@ -1174,6 +1193,33 @@ impl Core {
         if let Err(error) = self.store.append(&events) {
             self.fatal = Some(anyhow::Error::new(error).context("cannot write the journal"));
             return;
+        }
+        if !self.watchers.is_empty() {
+            let mut changed: Vec<&ThreadId> = Vec::new();
+            for event in &events {
+                let streamed = matches!(event.payload, EventPayload::ItemTextDelta { .. });
+                if !streamed && !changed.contains(&&event.thread_id) {
+                    changed.push(&event.thread_id);
+                }
+            }
+            for id in changed {
+                let Some(thread) = self.supervisor.thread(id) else {
+                    continue;
+                };
+                self.watchers.retain(|watcher| {
+                    let notification = Request::notification(
+                        THREAD_UPDATED,
+                        serde_json::to_value(ThreadUpdatedNotification {
+                            subscription: watcher.subscription,
+                            thread: thread.clone(),
+                        })
+                        .expect("threads serialize"),
+                    );
+                    let line =
+                        serde_json::to_string(&notification).expect("notifications serialize");
+                    watcher.out.send(line).is_ok()
+                });
+            }
         }
         for event in events {
             let Some(subscribers) = self.subscribers.get_mut(&event.thread_id) else {

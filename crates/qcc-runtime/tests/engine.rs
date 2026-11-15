@@ -46,7 +46,7 @@ fn assert_projection(journal: &[ThreadEvent], thread: &Thread) {
     for event in journal {
         replayed.apply(event);
     }
-    assert_eq!(&replayed, thread);
+    assert_eq!(replayed.as_ref(), thread);
     for (index, event) in journal.iter().enumerate() {
         assert_eq!(event.seq, index as u64 + 1, "seq has no gaps");
     }

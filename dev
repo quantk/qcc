@@ -5,11 +5,17 @@
 #   ./dev             build and run qccd in the foreground (data in ./.dev)
 #   ./dev demo        start a daemon, run a few echo threads through it, stop it
 #   ./dev qcc ARGS    run the CLI against the dev daemon, e.g. ./dev qcc thread list
+#   ./dev desktop     build and open the desktop app against the dev daemon
 #   ./dev check       fmt, clippy and all tests
 #   ./dev test [ARGS] cargo test --workspace [ARGS]
 #   ./dev clean       remove ./.dev (the dev daemon's journal and plugins)
 set -euo pipefail
 cd "$(dirname "$0")"
+
+# The desktop app needs the GUI libraries of its own shell.
+if [[ "${1:-}" == desktop && -z "${QCC_DESKTOP_SHELL:-}" ]] && command -v nix >/dev/null; then
+  exec nix develop .#desktop --command env QCC_DESKTOP_SHELL=1 "$0" "$@"
+fi
 
 if [[ -z "${IN_NIX_SHELL:-}" ]] && command -v nix >/dev/null; then
   exec nix develop --command "$0" "$@"
@@ -64,11 +70,18 @@ case "$command" in
     run thread spawn --provider echo --prompt '/exec echo output of a real process' --follow
     run thread list
     ;;
+  desktop)
+    # The app starts the qccd that sits next to its own binary.
+    build
+    cd apps/desktop
+    pnpm install --frozen-lockfile
+    exec cargo tauri dev "$@"
+    ;;
   check)
     exec ./scripts/check.sh
     ;;
   test)
-    exec cargo test --workspace "$@"
+    exec cargo test --workspace --exclude qcc-desktop "$@"
     ;;
   clean)
     if qcc daemon status >/dev/null 2>&1; then
@@ -78,7 +91,7 @@ case "$command" in
     rm -rf "$QCC_DATA_DIR"
     ;;
   *)
-    sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

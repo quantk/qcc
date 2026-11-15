@@ -34,7 +34,7 @@ impl ThreadEngine {
         thread.last_seq = 0;
         thread.created_at = now;
         thread.updated_at = now;
-        let created = EventPayload::ThreadCreated { thread: thread.clone() };
+        let created = EventPayload::ThreadCreated { thread: Box::new(thread.clone()) };
         let mut engine = Self {
             thread,
             assembler: DeltaAssembler::new(mint),

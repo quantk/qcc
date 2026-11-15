@@ -10,7 +10,7 @@ use crate::provider::PermissionMode;
 use crate::thread::{Thread, ThreadStatus, TurnStatus};
 use crate::usage::UsageSnapshot;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadEvent {
     pub thread_id: ThreadId,
     /// Starts at 1 and has no gaps within a thread.
@@ -21,12 +21,12 @@ pub struct ThreadEvent {
     pub payload: EventPayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "type")]
 pub enum EventPayload {
     /// Always the first event of a thread; carries the initial projection.
     #[serde(rename = "thread/created")]
-    ThreadCreated { thread: Thread },
+    ThreadCreated { thread: Box<Thread> },
 
     #[serde(rename = "thread/status")]
     ThreadStatusChanged { status: ThreadStatus },

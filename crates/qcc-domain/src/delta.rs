@@ -13,7 +13,9 @@ use crate::thread::TurnStatus;
 use crate::usage::UsageSnapshot;
 
 /// Provider-side identity of an item within a session.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, specta::Type,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum ItemKey {
     /// The provider names its items (tool-call id, message id).
@@ -23,7 +25,7 @@ pub enum ItemKey {
     Stream(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum TextChannel {
     AgentMessage,
@@ -41,7 +43,7 @@ impl TextChannel {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "kind")]
 pub enum Delta {
     /// The provider took a prompt (or started work on its own). Only this delta and a

@@ -61,6 +61,10 @@ impl Supervisor {
             updated_at: now,
             last_seq: 0,
             queued_inputs: 0,
+            pending_interactions: Vec::new(),
+            activity: None,
+            turn_started_at: None,
+            last_turn_status: None,
             archived: false,
         };
         let (engine, events) = ThreadEngine::create(thread, (self.mint)(), now);

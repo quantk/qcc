@@ -103,6 +103,10 @@ impl HarnessBuilder {
             updated_at: 0,
             last_seq: 0,
             queued_inputs: 0,
+            pending_interactions: Vec::new(),
+            activity: None,
+            turn_started_at: None,
+            last_turn_status: None,
             environment: None,
             archived: false,
         };

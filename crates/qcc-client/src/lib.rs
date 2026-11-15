@@ -38,6 +38,13 @@ pub enum ClientError {
 type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
 type Subscriptions = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ThreadEvent>>>>;
 
+/// A notification as the daemon sent it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notification {
+    pub method: String,
+    pub params: Value,
+}
+
 /// One connection to the daemon. Requests may be issued concurrently.
 pub struct Client {
     writer: tokio::sync::Mutex<OwnedWriteHalf>,
@@ -48,7 +55,23 @@ pub struct Client {
 
 impl Client {
     pub async fn connect(socket: impl AsRef<Path>) -> Result<Arc<Self>, ClientError> {
-        let socket = socket.as_ref();
+        Self::open(socket.as_ref(), None).await
+    }
+
+    /// Connect as a proxy: every notification is handed over untouched instead of
+    /// being routed to an [`EventStream`], and requests go through
+    /// [`Client::call_raw`]. The receiver ends when the connection does.
+    pub async fn connect_raw(
+        socket: impl AsRef<Path>,
+    ) -> Result<(Arc<Self>, mpsc::UnboundedReceiver<Notification>), ClientError> {
+        let (tap, notifications) = mpsc::unbounded_channel();
+        Ok((Self::open(socket.as_ref(), Some(tap)).await?, notifications))
+    }
+
+    async fn open(
+        socket: &Path,
+        tap: Option<mpsc::UnboundedSender<Notification>>,
+    ) -> Result<Arc<Self>, ClientError> {
         let stream = UnixStream::connect(socket)
             .await
             .map_err(|error| ClientError::Connect { path: socket.display().to_string(), error })?;
@@ -77,6 +100,14 @@ impl Client {
                             let _ = reply.send(result);
                         }
                     }
+                    Ok(Incoming::Request(notification)) if tap.is_some() => {
+                        let Request { method, params, .. } = notification;
+                        if let Some(tap) = &tap
+                            && tap.send(Notification { method, params }).is_err()
+                        {
+                            break;
+                        }
+                    }
                     Ok(Incoming::Request(notification)) if notification.method == THREAD_EVENT => {
                         let Ok(ThreadEventNotification { subscription, event }) =
                             serde_json::from_value(notification.params)
@@ -103,11 +134,17 @@ impl Client {
 
     /// Call a method and wait for its result.
     pub async fn call<M: Method>(&self, params: M::Params) -> Result<M::Result, ClientError> {
+        let result = self.call_raw(M::NAME, serde_json::to_value(params)?).await?;
+        Ok(serde_json::from_value(result)?)
+    }
+
+    /// Call a method by name, passing parameters and result through as JSON.
+    pub async fn call_raw(&self, method: &str, params: Value) -> Result<Value, ClientError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (reply, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, reply);
 
-        let request = Request::new(id, M::NAME, serde_json::to_value(params)?);
+        let request = Request::new(id, method, params);
         let mut line = serde_json::to_string(&request)?;
         line.push('\n');
         if let Err(error) = self.writer.lock().await.write_all(line.as_bytes()).await {
@@ -115,8 +152,7 @@ impl Client {
             return Err(error.into());
         }
 
-        let result = receiver.await.map_err(|_| ClientError::Disconnected)??;
-        Ok(serde_json::from_value(result)?)
+        Ok(receiver.await.map_err(|_| ClientError::Disconnected)??)
     }
 
     /// Read a thread's events after `after`. With `follow`, the stream continues with

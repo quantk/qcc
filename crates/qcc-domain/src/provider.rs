@@ -6,7 +6,7 @@ use crate::ids::ProviderId;
 
 /// How much an agent may do without asking the user. A thread without a mode runs
 /// with the agent's own configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
     /// Everything the agent wants approved is asked of the user.
@@ -43,7 +43,7 @@ impl std::str::FromStr for PermissionMode {
 }
 
 /// Session-behaviour facts reported by the provider's own code.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ProviderCapabilities {
     /// A session can be resumed from its provider session handle.
     pub resume: bool,
@@ -55,27 +55,27 @@ pub struct ProviderCapabilities {
     pub permission_modes: Vec<PermissionMode>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ProviderInfo {
     pub id: ProviderId,
     pub name: String,
     pub capabilities: ProviderCapabilities,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct EnvironmentInfo {
     pub id: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ModelInfo {
     pub id: String,
     pub name: String,
 }
 
 /// How a file differs from what an environment started from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ChangeKind {
     Added,
@@ -85,7 +85,7 @@ pub enum ChangeKind {
     Untracked,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ChangedFile {
     /// Relative to the root of the environment.
     pub path: String,
@@ -98,7 +98,7 @@ pub struct ChangedFile {
 }
 
 /// What a thread changed in its environment.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct EnvironmentChanges {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,

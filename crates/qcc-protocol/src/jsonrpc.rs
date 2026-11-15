@@ -6,7 +6,7 @@ use serde_json::Value;
 
 pub const VERSION: &str = "2.0";
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct Request {
     pub jsonrpc: String,
     /// Absent on notifications.
@@ -27,7 +27,7 @@ impl Request {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct Response {
     pub jsonrpc: String,
     pub id: Value,
@@ -47,7 +47,7 @@ impl Response {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct RpcError {
     pub code: i32,
     pub message: String,

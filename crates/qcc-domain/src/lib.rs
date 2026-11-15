@@ -27,5 +27,8 @@ pub use provider::{
     ChangeKind, ChangedFile, EnvironmentChanges, EnvironmentInfo, ModelInfo, PermissionMode,
     ProviderCapabilities, ProviderInfo,
 };
-pub use thread::{EnvironmentState, Thread, ThreadEnvironment, ThreadStatus, TurnStatus};
+pub use thread::{
+    ActivityKind, EnvironmentState, PendingInteraction, Thread, ThreadActivity, ThreadEnvironment,
+    ThreadStatus, TurnStatus,
+};
 pub use usage::{TokenUsage, UsageSnapshot};

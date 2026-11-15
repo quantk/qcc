@@ -4,7 +4,7 @@ use serde_json::Value;
 use crate::ids::ItemId;
 
 /// What an item is. Bridges send full shapes; the assembler never invents content.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ItemShape {
     AgentMessage {
@@ -67,7 +67,7 @@ impl ItemShape {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub enum ItemStatus {
     Pending,
@@ -86,7 +86,7 @@ impl ItemStatus {
 }
 
 /// A canonical timeline item.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct Item {
     pub id: ItemId,
     pub status: ItemStatus,

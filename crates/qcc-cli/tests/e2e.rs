@@ -773,6 +773,131 @@ fn repo(dir: &Path, files: &[(&str, &str)]) -> PathBuf {
     repo
 }
 
+#[test]
+fn a_worktree_gives_its_work_back_applied_or_merged() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("README.md", "hello\n"), ("src/a.txt", "one\n")]);
+    // The merge commits in the worktree; the repository knows who commits.
+    git(&repo, &["config", "user.name", "Test"]);
+    git(&repo, &["config", "user.email", "test@example.invalid"]);
+    let daemon = Daemon::start(&data);
+
+    let spawned = |daemon: &Daemon| {
+        let output = spawn_in_worktree(daemon, &repo, &["--prompt", "hi", "--follow"]);
+        assert!(output.ok, "{}", output.stderr);
+        let id = output.json_lines()[0]["thread_id"].as_str().unwrap().to_owned();
+        let worktree = data.join("environments/git-worktree").join(&id).join("app");
+        (id, worktree)
+    };
+
+    // Applied: a commit, an uncommitted edit and a new file arrive uncommitted.
+    let (id, worktree) = spawned(&daemon);
+    write(worktree.join("src/a.txt"), "one\ntwo\n");
+    git(&worktree, &["commit", "--quiet", "--all", "--message", "two"]);
+    write(worktree.join("README.md"), "hello\nworld\n");
+    write(worktree.join("docs/new.md"), "new\n");
+    let applied = daemon.qcc(&["thread", "deliver", &id]);
+    assert!(applied.ok, "{}", applied.stderr);
+    assert!(applied.stdout.contains("Applied the changes to 3 files"), "{}", applied.stdout);
+    assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "one\ntwo\n");
+    assert_eq!(std::fs::read_to_string(repo.join("docs/new.md")).unwrap(), "new\n");
+    assert_eq!(git(&repo, &["log", "--oneline"]).lines().count(), 1, "nothing was committed");
+    // The worktree is as it was: its own index untouched.
+    assert!(git(&worktree, &["status", "--porcelain"]).contains("?? docs/"));
+
+    // A second time it no longer fits: refused, and nothing changes.
+    let again = daemon.qcc(&["thread", "deliver", &id]);
+    assert!(!again.ok);
+    assert!(again.stderr.contains("do not apply"), "{}", again.stderr);
+    git(&repo, &["checkout", "--quiet", "--", "."]);
+    git(&repo, &["clean", "--quiet", "-fd"]);
+
+    // Merged: uncommitted work is committed on the branch, which is merged.
+    let (id, worktree) = spawned(&daemon);
+    write(worktree.join("README.md"), "hello\nmerged\n");
+    let merged = daemon.qcc(&["thread", "deliver", &id, "--merge"]);
+    assert!(merged.ok, "{}", merged.stderr);
+    assert!(merged.stdout.contains(&format!("Merged qcc/{id} into main")), "{}", merged.stdout);
+    assert_eq!(std::fs::read_to_string(repo.join("README.md")).unwrap(), "hello\nmerged\n");
+    assert!(git(&repo, &["log", "--oneline", "-3"]).contains(&format!("work of thread {id}")));
+
+    // A conflict leaves the source as it was.
+    let (id, worktree) = spawned(&daemon);
+    write(worktree.join("README.md"), "theirs\n");
+    write(repo.join("README.md"), "ours\n");
+    git(&repo, &["commit", "--quiet", "--all", "--message", "ours"]);
+    let conflict = daemon.qcc(&["thread", "deliver", &id, "--merge"]);
+    assert!(!conflict.ok);
+    assert!(conflict.stderr.contains("conflicts in: README.md"), "{}", conflict.stderr);
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+
+    // A thread without a worktree has nothing to give back.
+    let plain = daemon.spawn("hi");
+    assert!(!daemon.qcc(&["thread", "deliver", &plain]).ok);
+}
+
+#[test]
+fn a_thread_moves_into_a_worktree_with_its_uncommitted_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("README.md", "hello\n")]);
+    let daemon = Daemon::start(&data);
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--cwd",
+        repo.to_str().unwrap(),
+        "--prompt",
+        "hi",
+        "--json",
+        "--follow",
+    ]);
+    assert!(output.ok, "{}", output.stderr);
+    let id = output.json_lines()[0]["thread_id"].as_str().unwrap().to_owned();
+
+    // Work in the source checkout, some of it new.
+    write(repo.join("README.md"), "hello\nedited\n");
+    write(repo.join("notes.md"), "draft\n");
+
+    let moved = daemon.qcc(&["thread", "isolate", &id, "--carry"]);
+    assert!(moved.ok, "{}", moved.stderr);
+    daemon.wait_for(&id, "environment/ready");
+    let worktree = data.join("environments/git-worktree").join(&id).join("app");
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["cwd"], worktree.to_str().unwrap());
+    assert_eq!(thread["handover"], true, "the next session is told the conversation");
+    assert_eq!(std::fs::read_to_string(worktree.join("README.md")).unwrap(), "hello\nedited\n");
+    assert_eq!(std::fs::read_to_string(worktree.join("notes.md")).unwrap(), "draft\n");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "", "the work left the source");
+
+    // The next message starts a session in the worktree, told what came before.
+    let next = daemon.qcc(&["thread", "send", &id, "go on", "--follow", "--json"]);
+    assert!(next.ok, "{} {}", next.stderr, next.stdout);
+    let reply = daemon.qcc(&["thread", "show", &id]).stdout;
+    assert!(reply.contains("moved into a working directory of its own"), "{reply}");
+
+    // Only once; and a directory that is no repository leaves the thread where it is.
+    assert!(!daemon.qcc(&["thread", "isolate", &id]).ok);
+    let loose = dir.path().join("loose");
+    std::fs::create_dir_all(&loose).unwrap();
+    let plain = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--cwd",
+        loose.to_str().unwrap(),
+        "--json",
+    ]);
+    let plain = plain.json()["thread"]["id"].as_str().unwrap().to_owned();
+    assert!(daemon.qcc(&["thread", "isolate", &plain]).ok);
+    daemon.wait_for(&plain, "environment/detached");
+    assert!(daemon.thread(&plain).get("environment").is_none());
+}
+
 fn spawn_in_worktree(daemon: &Daemon, repo: &Path, extra: &[&str]) -> Output {
     let mut args =
         vec!["thread", "spawn", "--provider", "echo", "--env", "git-worktree", "--json", "--cwd"];

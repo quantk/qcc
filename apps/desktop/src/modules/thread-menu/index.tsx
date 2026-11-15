@@ -7,6 +7,7 @@ import { folderOf } from "../../state/selectors";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
 import { ArchiveDialog } from "./ArchiveDialog";
+import { IsolateDialog } from "./IsolateDialog";
 import { RenameDialog } from "./RenameDialog";
 
 function copy(text: string, what: string) {
@@ -53,6 +54,14 @@ export const threadMenuModule: UiModule = {
       group: "copy",
       when: (thread) => folderOf(thread) !== thread.cwd,
       run: (thread) => copy(folderOf(thread), "source folder path"),
+    });
+    ui.threadMenuItem({
+      id: "isolate",
+      title: "Move into a worktree…",
+      order: 25,
+      group: "edit",
+      when: (thread) => !thread.archived && !thread.environment && thread.status !== "active",
+      run: (thread) => ui.showDialog(({ close }) => <IsolateDialog thread={thread} close={close} />),
     });
     ui.threadMenuItem({
       id: "stop",

@@ -184,6 +184,8 @@ impl Timeline {
             }
             EventPayload::ThreadCreated { .. }
             | EventPayload::ThreadArchived
+            | EventPayload::EnvironmentAttached { .. }
+            | EventPayload::EnvironmentDetached { .. }
             | EventPayload::EnvironmentPreparing
             | EventPayload::EnvironmentReady { .. }
             | EventPayload::EnvironmentFailed { .. }

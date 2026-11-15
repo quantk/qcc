@@ -145,6 +145,14 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     case "thread/archived":
       notice("info", "Thread archived");
       break;
+    case "environment/attached":
+      notice("info", event.environment.carry_changes
+        ? "Moving into a worktree, with the uncommitted changes…"
+        : "Moving into a worktree…");
+      break;
+    case "environment/detached":
+      notice("error", `Could not move into a worktree: ${event.message}`);
+      break;
     case "environment/preparing":
       notice("info", "Preparing the environment…");
       break;

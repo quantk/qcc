@@ -301,6 +301,12 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::EnvironmentRemoved => "(the working directory was removed)".to_owned(),
         EventPayload::ThreadArchived => "(archived)".to_owned(),
         EventPayload::TitleChanged { title } => format!("(renamed: {title})"),
+        EventPayload::EnvironmentDetached { message } => {
+            format!("could not move into the environment: {message}")
+        }
+        EventPayload::EnvironmentAttached { environment } => {
+            format!("(moving into a new {} environment)", environment.id)
+        }
         EventPayload::ProjectChanged { project } => match project {
             Some(project) => format!("(project {project})"),
             None => "(no project)".to_owned(),

@@ -18,17 +18,17 @@ use qcc_client::protocol::methods::{
     ProjectDeleteParams, ProjectList, ProjectListResult, ProjectUpdate, ProjectUpdateParams,
     ProviderModels, ProviderModelsParams, ProviderSettings, SendMode, SettingsGet, SettingsResult,
     SettingsSet, SettingsSetParams, StopMode, ThreadArchive, ThreadArchiveParams, ThreadChanges,
-    ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadRename,
-    ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
-    ThreadSetMode, ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
-    ThreadWait, ThreadWaitParams,
+    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams, ThreadIsolate,
+    ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams,
+    ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
-    EventPayload, InteractionId, InteractionResolution, PermissionMode, Project, ProviderId,
-    ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
+    DeliverMode, EventPayload, InteractionId, InteractionResolution, PermissionMode, Project,
+    ProviderId, ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
@@ -149,6 +149,22 @@ enum ThreadCommand {
     Mode { thread: String, mode: String },
     /// Name a thread.
     Rename { thread: String, title: String },
+    /// Bring what a thread did in its worktree back to the directory it was made
+    /// from: as uncommitted changes, or with --merge as a merge of its branch.
+    Deliver {
+        thread: String,
+        #[arg(long)]
+        merge: bool,
+    },
+    /// Move a thread that works in its directory into a worktree of its own, between
+    /// turns. With --carry its uncommitted changes go along and leave the directory.
+    Isolate {
+        thread: String,
+        #[arg(long, value_name = "ENVIRONMENT", default_value = "git-worktree")]
+        env: String,
+        #[arg(long)]
+        carry: bool,
+    },
     /// Put a thread into a project (id or name), or take it out with `none`.
     Project { thread: String, project: String },
     /// Take a queued message back before it is delivered and print it. The id is the
@@ -488,6 +504,29 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     permission_mode,
                 })
                 .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::Deliver { thread, merge }) => {
+            let mode = if merge { DeliverMode::Merge } else { DeliverMode::Apply };
+            let params = ThreadDeliverParams { thread_id: ThreadId::new(thread), mode };
+            let result = client.call::<ThreadDeliver>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(result.message);
+            }
+        }
+
+        Command::Thread(ThreadCommand::Isolate { thread, env, carry }) => {
+            let params = ThreadIsolateParams {
+                thread_id: ThreadId::new(thread),
+                environment: env,
+                carry_changes: carry,
+            };
+            let result = client.call::<ThreadIsolate>(params).await?;
             if json {
                 print_json(&result)?;
             }

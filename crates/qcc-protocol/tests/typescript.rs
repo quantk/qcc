@@ -55,6 +55,8 @@ fn generate() -> String {
         .method::<ThreadArchive>()
         .method::<ThreadChanges>()
         .method::<ThreadDiff>()
+        .method::<ThreadDeliver>()
+        .method::<ThreadIsolate>()
         .method::<ThreadWait>()
         .method::<ThreadEvents>()
         .method::<ThreadUnsubscribe>()

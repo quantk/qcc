@@ -1,11 +1,11 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
 use qcc_domain::{
-    ChangeKind, ChangedFile, CommandInfo, CommandParam, Delta, EnvironmentChanges, EnvironmentInfo,
-    InteractionOption, InteractionRequest, InteractionResolution, ItemKey, ItemShape, ItemStatus,
-    ModelInfo, OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, Role, SkillInfo,
-    TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement,
-    UiScope, UiViewInfo, UsageSnapshot,
+    ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
+    EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
+    ItemShape, ItemStatus, ModelInfo, OptionKind, PermissionMode, ProviderCapabilities,
+    ProviderInfo, Role, SkillInfo, TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry,
+    TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
 };
 
 use crate::api::{
@@ -325,6 +325,7 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                     .collect(),
             })
         }
+        wit::Outcome::EnvironmentDelivered(summary) => Outcome::EnvironmentDelivered(summary),
         wit::Outcome::EnvironmentDiff(diff) => {
             Outcome::EnvironmentDiff { diff: diff.diff, truncated: diff.truncated }
         }
@@ -422,14 +423,19 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
             wit::Event::Environment(wit::EnvironmentCall {
                 environment,
                 request: match request {
-                    EnvironmentRequest::Prepare { thread, source_dir, root, base } => {
-                        wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
-                            thread: thread.0,
-                            source_dir,
-                            root,
-                            base,
-                        })
-                    }
+                    EnvironmentRequest::Prepare {
+                        thread,
+                        source_dir,
+                        root,
+                        base,
+                        carry_changes,
+                    } => wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
+                        thread: thread.0,
+                        source_dir,
+                        root,
+                        base,
+                        carry_changes,
+                    }),
                     EnvironmentRequest::Remove { thread, cwd, force } => {
                         wit::EnvironmentRequest::Remove(wit::EnvironmentRemove {
                             thread: thread.0,
@@ -447,6 +453,16 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                         wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
+                        })
+                    }
+                    EnvironmentRequest::Deliver { thread, cwd, mode } => {
+                        wit::EnvironmentRequest::Deliver(wit::EnvironmentDeliver {
+                            thread: thread.0,
+                            cwd,
+                            mode: match mode {
+                                DeliverMode::Apply => wit::DeliverMode::Apply,
+                                DeliverMode::Merge => wit::DeliverMode::Merge,
+                            },
                         })
                     }
                 },

@@ -66,6 +66,13 @@ export type DaemonStatusResult = {
 	socket: string,
 };
 
+/**  How the work of an environment goes back to the directory it was made from. */
+export type DeliverMode = 
+/**  As changes not yet saved there (uncommitted, for git). */
+"apply" | 
+/**  Saved in the environment and merged (a commit and a git merge). */
+"merge";
+
 /**  What became of a sent message. */
 export type Delivery = 
 /**  It started a turn. */
@@ -118,6 +125,10 @@ export type EventPayload =
 { type: "thread/project"; project?: ProjectId | null } | 
 /**  The thread was put away. Always its last state change. */
 { type: "thread/archived" } | 
+/**  A thread that worked without an environment gets one. Preparing it follows. */
+{ type: "environment/attached"; environment: ThreadEnvironment } | 
+/**  Moving into an environment failed; the thread stays where it worked. */
+{ type: "environment/detached"; message: string } | 
 /**  The environment plugin was asked (again) to make the working directory. */
 { type: "environment/preparing" } | 
 /**  The working directory exists; the thread works in `cwd` from now on. */
@@ -468,6 +479,16 @@ export type ThreadChangesResult = {
 	changes: EnvironmentChanges,
 };
 
+export type ThreadDeliverParams = {
+	thread_id: ThreadId,
+	mode: DeliverMode,
+};
+
+export type ThreadDeliverResult = {
+	/**  What was done, in a sentence. */
+	message: string,
+};
+
 export type ThreadDiffResult = {
 	diff: string,
 	/**  The diff was cut short because it is too large. */
@@ -486,6 +507,11 @@ export type ThreadEnvironment = {
 	/**  What the environment starts from; its meaning belongs to the environment. */
 	base?: string | null,
 	state: EnvironmentState,
+	/**
+	 *  The thread worked in `source_dir` before and moves in: its uncommitted work
+	 *  goes along.
+	 */
+	carry_changes?: boolean,
 };
 
 export type ThreadEvent = {
@@ -523,6 +549,13 @@ export type ThreadGetParams = {
 
 /**  Minted by the daemon. Opaque to providers, echoed verbatim. */
 export type ThreadId = string;
+
+export type ThreadIsolateParams = {
+	thread_id: ThreadId,
+	/**  Id of a contributed environment (`git-worktree`). */
+	environment: string,
+	carry_changes?: boolean,
+};
 
 export type ThreadListParams = {
 	include_archived?: boolean,
@@ -797,6 +830,8 @@ export type Methods = {
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadResult },
 	"thread.changes": { params: ThreadGetParams; result: ThreadChangesResult },
 	"thread.diff": { params: ThreadGetParams; result: ThreadDiffResult },
+	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
+	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },
 	"thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult },
 	"thread.events": { params: ThreadEventsParams; result: ThreadEventsResult },
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },

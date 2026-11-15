@@ -51,6 +51,10 @@ pub struct ThreadEnvironment {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     pub state: EnvironmentState,
+    /// The thread worked in `source_dir` before and moves in: its uncommitted work
+    /// goes along.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carry_changes: bool,
 }
 
 /// Where a thread is, as far as someone waiting on it cares. Derived by the core
@@ -287,6 +291,15 @@ impl Thread {
             EventPayload::PermissionModeChanged { permission_mode } => {
                 self.permission_mode = *permission_mode;
             }
+            EventPayload::EnvironmentAttached { environment } => {
+                self.environment = Some(environment.clone());
+                // The session lives in the old directory; the next one starts in
+                // the new one and is told the conversation.
+                if self.provider_session.take().is_some() {
+                    self.handover = true;
+                }
+            }
+            EventPayload::EnvironmentDetached { .. } => self.environment = None,
             EventPayload::EnvironmentPreparing => self.set_environment(EnvironmentState::Pending),
             EventPayload::EnvironmentReady { cwd } => {
                 self.cwd.clone_from(cwd);

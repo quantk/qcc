@@ -111,6 +111,16 @@ pub struct ModelInfo {
     pub is_default: bool,
 }
 
+/// How the work of an environment goes back to the directory it was made from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum DeliverMode {
+    /// As changes not yet saved there (uncommitted, for git).
+    Apply,
+    /// Saved in the environment and merged (a commit and a git merge).
+    Merge,
+}
+
 /// How a file differs from what an environment started from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]

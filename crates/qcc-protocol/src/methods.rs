@@ -3,9 +3,9 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution,
-    ModelInfo, PermissionMode, Project, ProjectId, ProviderId, ProviderInfo, Thread, ThreadEvent,
-    ThreadId, ThreadState, UiViewInfo,
+    CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
+    InteractionResolution, ModelInfo, PermissionMode, Project, ProjectId, ProviderId, ProviderInfo,
+    Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -286,6 +286,43 @@ pub struct ThreadDiffResult {
     /// The diff was cut short because it is too large.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
+}
+
+method!(
+    /// Bring what a thread did in its environment back to the directory the
+    /// environment was made from: `apply` leaves it there uncommitted, `merge`
+    /// commits it on the thread's branch and merges that branch. Refused, changing
+    /// nothing, when it does not fit (conflicts) and while a turn runs.
+    ThreadDeliver, "thread.deliver", ThreadDeliverParams => ThreadDeliverResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadDeliverParams {
+    pub thread_id: ThreadId,
+    pub mode: DeliverMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadDeliverResult {
+    /// What was done, in a sentence.
+    pub message: String,
+}
+
+method!(
+    /// Move a thread that works in its directory into an environment of its own
+    /// (a git worktree), between turns. With `carry_changes` its uncommitted work
+    /// goes along and leaves the directory. The session is released; the next one
+    /// starts in the new directory and is told the conversation.
+    ThreadIsolate, "thread.isolate", ThreadIsolateParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadIsolateParams {
+    pub thread_id: ThreadId,
+    /// Id of a contributed environment (`git-worktree`).
+    pub environment: String,
+    #[serde(default)]
+    pub carry_changes: bool,
 }
 
 method!(

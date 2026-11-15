@@ -176,7 +176,12 @@ pub enum Answer {
     Ready(Record),
     Removed,
     Changes(EnvironmentChanges),
-    Diff { diff: String, truncated: bool },
+    Diff {
+        diff: String,
+        truncated: bool,
+    },
+    /// What delivering did, in a sentence.
+    Delivered(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +197,7 @@ pub enum Job {
     Remove(Remove),
     Changes(Changes),
     Diff(Diff),
+    Deliver(Deliver),
 }
 
 impl Job {
@@ -201,6 +207,7 @@ impl Job {
             Self::Remove(job) => job.start(),
             Self::Changes(job) => job.start(),
             Self::Diff(job) => job.start(),
+            Self::Deliver(job) => job.start(),
         }
     }
 
@@ -210,6 +217,7 @@ impl Job {
             Self::Remove(job) => job.on_exit(tag, exit),
             Self::Changes(job) => job.on_exit(tag, exit),
             Self::Diff(job) => job.on_exit(tag, exit),
+            Self::Deliver(job) => job.on_exit(tag, exit),
         }
     }
 }
@@ -228,10 +236,21 @@ mod prepare {
     pub const SETUP: u32 = 4;
     pub const UNDO_WORKTREE: u32 = 5;
     pub const UNDO_BRANCH: u32 = 6;
+    /// Set the source's uncommitted work aside, to carry it into the worktree.
+    pub const STASH: u32 = 7;
+    /// Bring that work into the worktree.
+    pub const POP: u32 = 8;
+    /// Give it back to the source when the worktree could not be made.
+    pub const RESTORE: u32 = 9;
 }
 
 /// `git worktree add` on a new branch, then the files `.worktreeinclude` names, then
 /// the repository's setup script. A failed setup takes the worktree down again.
+///
+/// A thread moving in from the source checkout takes its uncommitted work along:
+/// it is stashed in the source before the worktree is made and popped in the
+/// worktree after setup. If anything fails, the worktree goes and the stash is
+/// popped back where it came from.
 pub struct Prepare {
     thread: String,
     source: String,
@@ -242,9 +261,32 @@ pub struct Prepare {
     prefix: String,
     record: Record,
     failure: Option<String>,
+    carry: bool,
+    /// Something was stashed in the source and is not back anywhere yet.
+    stashed: bool,
 }
 
 impl Prepare {
+    /// Carry the source's uncommitted work into the worktree.
+    pub fn carrying(mut self, carry: bool) -> Self {
+        self.carry = carry;
+        self
+    }
+
+    /// Take the worktree down again, give the stash back, and fail with `reason`.
+    fn undo(&mut self, reason: String) -> Step {
+        self.failure = Some(reason);
+        Step::Run(vec![git(
+            prepare::UNDO_WORKTREE,
+            &self.record.toplevel,
+            &["worktree", "remove", "--force", &self.record.worktree],
+        )])
+    }
+
+    fn fail(&mut self) -> Step {
+        Step::Finish(Err(self.failure.take().unwrap_or_else(|| "setup failed".into())))
+    }
+
     pub fn new(thread: String, source: String, root: String, base: Option<String>) -> Self {
         let record = Record {
             toplevel: String::new(),
@@ -253,7 +295,17 @@ impl Prepare {
             branch: format!("qcc/{thread}"),
             base: String::new(),
         };
-        Self { thread, source, root, base, prefix: String::new(), record, failure: None }
+        Self {
+            thread,
+            source,
+            root,
+            base,
+            prefix: String::new(),
+            record,
+            failure: None,
+            carry: false,
+            stashed: false,
+        }
     }
 
     fn start(&mut self) -> Step {
@@ -313,25 +365,38 @@ impl Prepare {
                     }));
                 }
                 record.base = commit;
-                // `--no-track`: the branch is the thread's own, not a follower of its
-                // base, whatever `branch.autoSetupMerge` says.
-                Step::Run(vec![git(
-                    ADD,
-                    &record.toplevel,
-                    &[
-                        "worktree",
-                        "add",
-                        "--no-track",
-                        "-b",
-                        &record.branch,
-                        &record.worktree,
-                        &record.base,
-                    ],
-                )])
+                if self.carry {
+                    let message = format!("qcc: thread {} moves into a worktree", self.thread);
+                    return Step::Run(vec![git(
+                        STASH,
+                        &record.toplevel,
+                        &["stash", "push", "--include-untracked", "-m", &message],
+                    )]);
+                }
+                Step::Run(vec![self.add()])
+            }
+            STASH => {
+                if !exit.ok() {
+                    return Step::Finish(Err(format!(
+                        "cannot set the uncommitted changes aside: {}",
+                        exit.reason()
+                    )));
+                }
+                self.stashed = !exit.text().contains("No local changes to save");
+                Step::Run(vec![self.add()])
             }
             ADD => {
                 if !exit.ok() {
-                    return Step::Finish(Err(format!("git worktree add: {}", exit.reason())));
+                    let reason = format!("git worktree add: {}", exit.reason());
+                    if self.stashed {
+                        self.failure = Some(reason);
+                        return Step::Run(vec![git(
+                            RESTORE,
+                            &self.record.toplevel,
+                            &["stash", "pop", "--index"],
+                        )]);
+                    }
+                    return Step::Finish(Err(reason));
                 }
                 Step::Run(vec![Cmd {
                     tag: INCLUDE,
@@ -359,23 +424,66 @@ impl Prepare {
                 Step::Run(vec![script(SETUP, &record.worktree, SETUP_SCRIPT, env)])
             }
             SETUP => {
-                if exit.ok() {
-                    return Step::Finish(Ok(Answer::Ready(record.clone())));
+                if !exit.ok() {
+                    return self.undo(format!("{SETUP_SCRIPT}: {}", exit.reason()));
                 }
-                self.failure = Some(format!("{SETUP_SCRIPT}: {}", exit.reason()));
-                Step::Run(vec![git(
-                    UNDO_WORKTREE,
-                    &record.toplevel,
-                    &["worktree", "remove", "--force", &record.worktree],
-                )])
+                if self.stashed {
+                    return Step::Run(vec![git(
+                        POP,
+                        &record.worktree,
+                        &["stash", "pop", "--index"],
+                    )]);
+                }
+                Step::Finish(Ok(Answer::Ready(record.clone())))
+            }
+            POP => {
+                if !exit.ok() {
+                    return self.undo(format!(
+                        "cannot bring the uncommitted changes into the worktree: {}",
+                        exit.reason()
+                    ));
+                }
+                self.stashed = false;
+                Step::Finish(Ok(Answer::Ready(record.clone())))
             }
             UNDO_WORKTREE => Step::Run(vec![git(
                 UNDO_BRANCH,
                 &record.toplevel,
                 &["branch", "-D", &record.branch],
             )]),
-            _ => Step::Finish(Err(self.failure.take().unwrap_or_else(|| "setup failed".into()))),
+            UNDO_BRANCH if self.stashed => {
+                Step::Run(vec![git(RESTORE, &record.toplevel, &["stash", "pop", "--index"])])
+            }
+            RESTORE if !exit.ok() => {
+                let reason = self.failure.take().unwrap_or_default();
+                Step::Finish(Err(format!(
+                    "{reason}; the uncommitted changes could not be put back either ({}) \
+                     and are kept in `git stash` of {}",
+                    exit.reason(),
+                    record.toplevel
+                )))
+            }
+            _ => self.fail(),
         }
+    }
+
+    fn add(&self) -> Cmd {
+        let record = &self.record;
+        // `--no-track`: the branch is the thread's own, not a follower of its base,
+        // whatever `branch.autoSetupMerge` says.
+        git(
+            prepare::ADD,
+            &record.toplevel,
+            &[
+                "worktree",
+                "add",
+                "--no-track",
+                "-b",
+                &record.branch,
+                &record.worktree,
+                &record.base,
+            ],
+        )
     }
 }
 
@@ -591,6 +699,126 @@ impl Changes {
                 .then_some(branch),
             base: Some(self.record.base.clone()),
             files,
+        })))
+    }
+}
+
+// ----- deliver ------------------------------------------------------------------------
+
+/// Applies everything the worktree has since its base (commits, uncommitted and new
+/// files) to the source checkout as uncommitted changes: all of it or, when it does
+/// not fit, nothing. The worktree's own index is left alone: new files are added to
+/// a copy of it. `$1` worktree, `$2` base commit, `$3` source checkout. The last
+/// line of output says how many files changed.
+const APPLY_SCRIPT: &str = r#"
+set -euo pipefail
+wt=$1; base=$2; src=$3
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+cp "$(git -C "$wt" rev-parse --path-format=absolute --git-path index)" "$tmp/index"
+GIT_INDEX_FILE="$tmp/index" git -C "$wt" add -A
+GIT_INDEX_FILE="$tmp/index" git -C "$wt" diff --cached --binary --no-color --no-ext-diff --no-renames "$base" >"$tmp/patch"
+if [ ! -s "$tmp/patch" ]; then echo 0; exit 0; fi
+if ! git -C "$src" apply --check "$tmp/patch" 2>"$tmp/err"; then
+  echo "the changes do not apply to $src as it is now: $(tail -n 3 "$tmp/err" | tr '
+' ' ')" >&2
+  exit 3
+fi
+git -C "$src" apply "$tmp/patch"
+git -C "$src" apply --numstat "$tmp/patch" | wc -l
+"#;
+
+/// Commits what the worktree has uncommitted on the thread's branch, then merges
+/// the branch into whatever the source checkout has checked out. A conflict undoes
+/// the merge. `$1` worktree, `$2` branch, `$3` source checkout, `$4` thread. The
+/// last line of output names the branch merged into.
+const MERGE_SCRIPT: &str = r#"
+set -euo pipefail
+wt=$1; branch=$2; src=$3; thread=$4
+target=$(git -C "$src" symbolic-ref --quiet --short HEAD) || {
+  echo "$src has no branch checked out (detached HEAD); check one out to merge into" >&2
+  exit 3
+}
+if [ -n "$(git -C "$wt" status --porcelain)" ]; then
+  git -C "$wt" add -A
+  git -C "$wt" commit --quiet -m "qcc: work of thread $thread" || {
+    echo "cannot commit the uncommitted work in the worktree (is git user.name/user.email set?)" >&2
+    exit 3
+  }
+fi
+if ! out=$(git -C "$src" merge --no-ff --no-edit "$branch" 2>&1); then
+  files=$(git -C "$src" diff --name-only --diff-filter=U | head -n 10 | tr '
+' ' ')
+  git -C "$src" merge --abort >/dev/null 2>&1 || true
+  if [ -n "$files" ]; then
+    echo "merging $branch into $target conflicts in: $files; nothing was merged" >&2
+  else
+    echo "git merge refused: $(printf '%s' "$out" | tail -n 3 | tr '
+' ' ')" >&2
+  fi
+  exit 3
+fi
+echo "$target"
+"#;
+
+/// Brings the worktree's work back to the source checkout. See [`APPLY_SCRIPT`] and
+/// [`MERGE_SCRIPT`].
+pub struct Deliver {
+    record: Record,
+    thread: String,
+    merge: bool,
+}
+
+impl Deliver {
+    pub fn new(record: Record, thread: String, merge: bool) -> Self {
+        Self { record, thread, merge }
+    }
+
+    fn start(&mut self) -> Step {
+        let record = &self.record;
+        let (script, args) = if self.merge {
+            (
+                MERGE_SCRIPT,
+                vec![
+                    record.worktree.clone(),
+                    record.branch.clone(),
+                    record.toplevel.clone(),
+                    self.thread.clone(),
+                ],
+            )
+        } else {
+            (
+                APPLY_SCRIPT,
+                vec![record.worktree.clone(), record.base.clone(), record.toplevel.clone()],
+            )
+        };
+        let mut all = vec!["-c".to_owned(), script.to_owned(), "qcc".to_owned()];
+        all.extend(args);
+        Step::Run(vec![Cmd {
+            tag: 0,
+            program: "bash",
+            args: all,
+            cwd: None,
+            env: vec![("LC_ALL".to_owned(), "C".to_owned())],
+            limit: OUTPUT_LIMIT,
+            timeout_ms: GIT_TIMEOUT_MS,
+        }])
+    }
+
+    fn on_exit(&mut self, _tag: u32, exit: Exit) -> Step {
+        if !exit.ok() {
+            return Step::Finish(Err(exit.reason()));
+        }
+        let text = exit.text();
+        let last = text.lines().last().unwrap_or("").trim();
+        let source = &self.record.toplevel;
+        Step::Finish(Ok(Answer::Delivered(if self.merge {
+            format!("Merged {} into {last} in {source}", self.record.branch)
+        } else {
+            match last.parse::<u32>().unwrap_or(0) {
+                0 => "Nothing to apply: the thread changed no files".to_owned(),
+                1 => format!("Applied the changes to 1 file in {source}, uncommitted"),
+                count => format!("Applied the changes to {count} files in {source}, uncommitted"),
+            }
         })))
     }
 }
@@ -823,6 +1051,72 @@ mod tests {
         let timed_out = Exit { timed_out: true, ..Exit::default() };
         let step = job.on_exit(prepare::BASE, timed_out);
         assert_eq!(step, Step::Finish(Err("git rev-parse: timed out".into())));
+    }
+
+    #[test]
+    fn carried_changes_go_into_the_worktree_or_back_where_they_were() {
+        let carrying = || {
+            let mut job = Prepare::new("thr_1".into(), "/src/app".into(), "/data".into(), None)
+                .carrying(true);
+            job.start();
+            job.on_exit(prepare::TOPLEVEL, out("/src/app\n\n"));
+            job
+        };
+        let mut job = carrying();
+        let stash = run(job.on_exit(prepare::BASE, out("abc123\n")));
+        assert_eq!(&stash[0].args[2..5], ["stash", "push", "--include-untracked"]);
+        run(job.on_exit(prepare::STASH, out("Saved working directory and index state")));
+        run(job.on_exit(prepare::ADD, out("")));
+        run(job.on_exit(prepare::INCLUDE, out("")));
+        // Popped in the worktree, after its setup.
+        let pop = run(job.on_exit(prepare::SETUP, out("")));
+        assert_eq!(pop[0].args, ["-C", "/data/thr_1/app", "stash", "pop", "--index"]);
+        assert!(matches!(job.on_exit(prepare::POP, out("")), Step::Finish(Ok(Answer::Ready(_)))));
+
+        // Nothing to carry: no pop.
+        let mut job = carrying();
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        job.on_exit(prepare::STASH, out("No local changes to save\n"));
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        assert!(matches!(job.on_exit(prepare::SETUP, out("")), Step::Finish(Ok(Answer::Ready(_)))));
+
+        // A failed pop takes the worktree down and gives the work back to the source.
+        let mut job = carrying();
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        job.on_exit(prepare::STASH, out("Saved"));
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        job.on_exit(prepare::SETUP, out(""));
+        let undo = run(job.on_exit(prepare::POP, failed("conflict")));
+        assert_eq!(&undo[0].args[2..4], ["worktree", "remove"]);
+        run(job.on_exit(prepare::UNDO_WORKTREE, out("")));
+        let restore = run(job.on_exit(prepare::UNDO_BRANCH, out("")));
+        assert_eq!(restore[0].args, ["-C", "/src/app", "stash", "pop", "--index"]);
+        let Step::Finish(Err(message)) = job.on_exit(prepare::RESTORE, out("")) else {
+            panic!("a failed pop was accepted");
+        };
+        assert!(message.contains("cannot bring the uncommitted changes"), "{message}");
+    }
+
+    #[test]
+    fn deliver_says_what_it_did() {
+        let mut apply = Deliver::new(record(), "thr_1".into(), false);
+        let script = run(apply.start());
+        assert_eq!(&script[0].args[3..], ["/data/thr_1/app", "abc123", "/src/app"]);
+        let Step::Finish(Ok(Answer::Delivered(said))) = apply.on_exit(0, out("2\n")) else {
+            panic!("not delivered");
+        };
+        assert_eq!(said, "Applied the changes to 2 files in /src/app, uncommitted");
+
+        let mut merge = Deliver::new(record(), "thr_1".into(), true);
+        merge.start();
+        let Step::Finish(Ok(Answer::Delivered(said))) = merge.on_exit(0, out("main\n")) else {
+            panic!("not merged");
+        };
+        assert_eq!(said, "Merged qcc/thr_1 into main in /src/app");
+        let refused = merge.on_exit(0, failed("conflicts in: a.txt"));
+        assert_eq!(refused, Step::Finish(Err("conflicts in: a.txt".into())));
     }
 
     #[test]

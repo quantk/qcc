@@ -7,6 +7,7 @@ import { store } from "../../state/store";
 import { plural } from "../../util/format";
 import { DiffView, fileAnchor } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
+import { DeliverButtons } from "./DeliverButtons";
 
 type Loaded = { changes: EnvironmentChanges; files: DiffFile[]; truncated: boolean };
 
@@ -58,7 +59,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
 
   return (
     <div className="changes">
-      <div className="changes-head">
+      <div className="changes-head flex-wrap gap-y-2">
         {loaded ? (
           <span>
             {plural(loaded.changes.files.length, "file")} changed
@@ -85,6 +86,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
           <span>{loading ? "Reading changes…" : ""}</span>
         )}
         <span className="spacer" />
+        <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={() => setRefresh(refresh + 1)} />
         <Button variant="outline" size="sm" disabled={loading} onClick={() => setRefresh(refresh + 1)}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           {loading ? "Refreshing…" : "Refresh"}

@@ -406,6 +406,25 @@ interface types {
     /// What the new directory starts from; its meaning belongs to the environment
     /// (a git ref, for a git one). Absent: the environment's default.
     base: option<string>,
+    /// The thread has been working in `source-dir` and moves into the new
+    /// directory: take the work not yet saved there along (uncommitted changes,
+    /// for git), leaving `source-dir` without it.
+    carry-changes: bool,
+  }
+
+  /// How the work of an environment goes back to the directory it was made from.
+  enum deliver-mode {
+    /// As changes not yet saved there (uncommitted, for git), for the user to look
+    /// at and keep or not.
+    apply,
+    /// Saved in the environment and merged (a commit and a git merge).
+    merge,
+  }
+
+  record environment-deliver {
+    thread: thread-id,
+    cwd: string,
+    mode: deliver-mode,
   }
 
   record environment-remove {
@@ -429,6 +448,9 @@ interface types {
     changes(environment-query),
     /// The same as one patch. Answered with `environment-diff`.
     diff(environment-query),
+    /// Bring the work back to the source directory. Answered with
+    /// `environment-delivered`; refused, changing nothing, when it does not fit.
+    deliver(environment-deliver),
   }
 
   record environment-call {
@@ -550,6 +572,8 @@ interface types {
     environment-ready(string),
     environment-changes(environment-changes),
     environment-diff(environment-diff),
+    /// What `deliver` did, in a sentence for the user.
+    environment-delivered(string),
     /// A tree of UI nodes, as JSON. A node is an object with a `type` out of a
     /// fixed set (`stack`, `row`, `heading`, `text`, `markdown`, `code`, `badge`,
     /// `keyValues`, `table`, `button`, `input`, `divider`); the app draws what it

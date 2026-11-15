@@ -78,6 +78,14 @@ pub enum EventPayload {
     #[serde(rename = "thread/archived")]
     ThreadArchived,
 
+    /// A thread that worked without an environment gets one. Preparing it follows.
+    #[serde(rename = "environment/attached")]
+    EnvironmentAttached { environment: crate::thread::ThreadEnvironment },
+
+    /// Moving into an environment failed; the thread stays where it worked.
+    #[serde(rename = "environment/detached")]
+    EnvironmentDetached { message: String },
+
     /// The environment plugin was asked (again) to make the working directory.
     #[serde(rename = "environment/preparing")]
     EnvironmentPreparing,

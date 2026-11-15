@@ -7,6 +7,7 @@ import { type Api, ApiError, type DaemonState, type Notification, codes } from "
 import type {
   CommandRunParams,
   CommandRunResult,
+  DeliverMode,
   InteractionId,
   InteractionResolution,
   ModelInfo,
@@ -420,6 +421,22 @@ export class AppStore {
       this.api.call("thread.set_mode", { thread_id: threadId, permission_mode: mode }),
     );
     if (result) this.mergeThreads([result.thread]);
+  }
+
+  /** Bring a worktree's work back to its source. Resolves to what was done, or null. */
+  async deliver(threadId: ThreadId, mode: DeliverMode): Promise<string | null> {
+    const result = await this.attempt(() => this.api.call("thread.deliver", { thread_id: threadId, mode }));
+    if (result) this.notify(result.message);
+    return result?.message ?? null;
+  }
+
+  /** Move a thread into a worktree of its own. Resolves to whether the daemon took it. */
+  async isolate(threadId: ThreadId, environment: string, carryChanges: boolean): Promise<boolean> {
+    const result = await this.attempt(() =>
+      this.api.call("thread.isolate", { thread_id: threadId, environment, carry_changes: carryChanges }),
+    );
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
   }
 
   /** Resolves to whether the daemon took the name. */

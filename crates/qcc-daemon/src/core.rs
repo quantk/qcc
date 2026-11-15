@@ -26,8 +26,9 @@ use qcc_protocol::methods::{
     ProjectUpdateParams, ProjectsUpdatedNotification, ProviderModels, ProviderModelsParams,
     ProviderModelsResult, SendMode, Settings, SettingsGet, SettingsResult, SettingsSet,
     SettingsSetParams, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
-    ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
-    ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
+    ThreadChanges, ThreadChangesResult, ThreadDeliver, ThreadDeliverParams, ThreadDeliverResult,
+    ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
+    ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList,
     ThreadListParams, ThreadListResult, ThreadRename, ThreadRenameParams, ThreadResult, ThreadSend,
     ThreadSendParams, ThreadSendResult, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode,
     ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams,
@@ -215,6 +216,9 @@ struct Session {
     /// Deltas that arrived before the start was answered. They are applied after
     /// `session/started`, so the timeline reads in causal order.
     buffered: Vec<Delta>,
+    /// An environment the thread moves into once its session is released: prepared
+    /// earlier, the old session's last deltas would be taken for the new one's.
+    prepare_after_release: Option<ThreadEnvironment>,
 }
 
 struct Subscriber {
@@ -232,6 +236,9 @@ pub(crate) struct Core {
     sessions: HashMap<ThreadId, Session>,
     /// Threads with input waiting for their running turn to end.
     queued: HashSet<ThreadId>,
+    /// Threads moving into an environment: if preparing it fails they stay where
+    /// they were instead of failing.
+    isolating: HashSet<ThreadId>,
     /// Threads on their way to the archive. They take no input meanwhile.
     archiving: HashSet<ThreadId>,
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
@@ -323,6 +330,7 @@ impl Core {
             sessions: HashMap::new(),
             queued,
             archiving: HashSet::new(),
+            isolating: HashSet::new(),
             subscribers: HashMap::new(),
             watchers: Vec::new(),
             waiters: Vec::new(),
@@ -443,6 +451,14 @@ impl Core {
             SettingsGet::NAME => responder.reply(Ok(self.settings_result())),
             SettingsSet::NAME => {
                 let result = params::<SettingsSet>(raw).and_then(|p| self.settings_set(p));
+                responder.reply(result);
+            }
+            ThreadDeliver::NAME => match params::<ThreadDeliver>(raw) {
+                Ok(p) => self.thread_deliver(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ThreadIsolate::NAME => {
+                let result = params::<ThreadIsolate>(raw).and_then(|p| self.thread_isolate(p));
                 responder.reply(result);
             }
             ThreadRename::NAME => {
@@ -658,6 +674,7 @@ impl Core {
                     source_dir: p.cwd.clone(),
                     base: p.base,
                     state: EnvironmentState::Pending,
+                    carry_changes: false,
                 })
             }
             None if p.base.is_some() => {
@@ -848,6 +865,76 @@ impl Core {
         self.projects.iter().find(|project| &project.id == id).ok_or_else(|| {
             RpcError::new(codes::INVALID_PARAMS, format!("project {id} does not exist"))
         })
+    }
+
+    fn thread_isolate(&mut self, p: ThreadIsolateParams) -> Result<ThreadResult, RpcError> {
+        let ThreadIsolateParams { thread_id, environment, carry_changes } = p;
+        let thread =
+            self.supervisor.thread(&thread_id).ok_or_else(|| thread_not_found(&thread_id))?;
+        if thread.environment.is_some() {
+            return Err(environment_error(format!(
+                "thread {thread_id} already works in an environment of its own"
+            )));
+        }
+        if self.host.environment(&environment).is_none() {
+            return Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                format!("no plugin provides environment {environment:?}"),
+            ));
+        }
+        let attached = ThreadEnvironment {
+            id: environment,
+            source_dir: thread.cwd.clone(),
+            base: None,
+            state: EnvironmentState::Pending,
+            carry_changes,
+        };
+        let payload = EventPayload::EnvironmentAttached { environment: attached.clone() };
+        let result = self.reconfigure(&thread_id, "where the thread works", |engine, now| {
+            engine.record(payload, now)
+        })?;
+        self.isolating.insert(thread_id.clone());
+        let releasing = self.sessions.get(&thread_id).is_some_and(|session| session.stopping);
+        if releasing {
+            self.sessions.entry(thread_id.clone()).or_default().prepare_after_release =
+                Some(attached);
+        } else {
+            self.prepare_environment(&thread_id, attached, None);
+        }
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        Ok(thread.map(|thread| ThreadResult { thread }).unwrap_or(result))
+    }
+
+    /// `thread.deliver`: the environment plugin brings the work back, off the core task.
+    fn thread_deliver(&mut self, p: ThreadDeliverParams, responder: Responder) {
+        let ThreadDeliverParams { thread_id, mode } = p;
+        let busy = self.in_transition(&thread_id)
+            || self.supervisor.engine(&thread_id).is_ok_and(|engine| engine.busy());
+        if busy {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "a turn is running; let it finish before bringing its work back",
+            )));
+        }
+        let (plugin, environment, cwd) = match self.ready_environment(&thread_id) {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                return responder.reply::<Empty>(Err(environment_error(format!(
+                    "thread {thread_id} works in its source directory already; there is \
+                     nothing to bring back"
+                ))));
+            }
+            Err(error) => return responder.reply::<Empty>(Err(error)),
+        };
+        let request = EnvironmentRequest::Deliver { thread: thread_id, cwd, mode };
+        tokio::spawn(async move {
+            let result = match call_environment(plugin, environment, request, QUERY_TIMEOUT).await {
+                Ok(Outcome::EnvironmentDelivered(message)) => Ok(ThreadDeliverResult { message }),
+                Ok(other) => Err(environment_error(format!("the environment answered {other:?}"))),
+                Err(error) => Err(environment_error(error.to_string())),
+            };
+            responder.reply(result);
+        });
     }
 
     fn thread_rename(&mut self, p: ThreadRenameParams) -> Result<ThreadResult, RpcError> {
@@ -1729,20 +1816,41 @@ impl Core {
                 previous = current.replace(provider);
             }
         }
-        let previous = previous.map_or_else(
-            || "another agent".to_owned(),
-            |provider| {
-                self.host
-                    .provider(&provider)
-                    .map_or(provider.to_string(), |(_, info)| info.name.clone())
-            },
-        );
+        // Since the last session the thread either got another agent or moved into
+        // a directory of its own; the newer of the two says why it starts afresh.
+        let latest_session = events
+            .iter()
+            .rposition(|event| matches!(event.payload, EventPayload::SessionStarted { .. }))
+            .unwrap_or(0);
+        let moved = events[latest_session..]
+            .iter()
+            .rev()
+            .find_map(|event| match &event.payload {
+                EventPayload::EnvironmentAttached { .. } => Some(true),
+                EventPayload::AgentChanged { .. } => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false);
+        let reason = if moved {
+            let cwd =
+                self.supervisor.thread(id).map(|thread| thread.cwd.clone()).unwrap_or_default();
+            handover::Reason::Moved { cwd }
+        } else {
+            handover::Reason::OtherAgent(previous.map_or_else(
+                || "another agent".to_owned(),
+                |provider| {
+                    self.host
+                        .provider(&provider)
+                        .map_or(provider.to_string(), |(_, info)| info.name.clone())
+                },
+            ))
+        };
         let mut history = self.store.transcript(id, false).unwrap_or_default();
         // The message itself was journaled before the session was asked to start.
         if history.last().is_some_and(|last| last.role == Role::User && last.text == message) {
             history.pop();
         }
-        handover::prompt(&previous, &history, &message)
+        handover::prompt(&reason, &history, &message)
     }
 
     fn session_start_finished(
@@ -1814,6 +1922,7 @@ impl Core {
             source_dir: environment.source_dir,
             root: root.display().to_string(),
             base: environment.base,
+            carry_changes: environment.carry_changes,
         };
         // Until the directory exists the thread is as busy as one whose provider is
         // starting: input queues behind it.
@@ -1837,11 +1946,17 @@ impl Core {
         }
         match result {
             Ok(Outcome::EnvironmentReady { cwd }) => {
+                self.isolating.remove(&id);
                 if let Ok(engine) = self.supervisor.engine(&id) {
                     let events = engine.record(EventPayload::EnvironmentReady { cwd }, now_ms());
                     self.commit(events);
                 }
-                self.start_session(&id, prompt);
+                // A thread that moved in waits for its next message: that is what
+                // the new session is handed the conversation with.
+                let moved = self.supervisor.thread(&id).is_some_and(|thread| thread.handover);
+                if prompt.is_some() || !moved {
+                    self.start_session(&id, prompt);
+                }
             }
             Ok(other) => {
                 self.environment_failed(
@@ -1854,6 +1969,13 @@ impl Core {
     }
 
     fn environment_failed(&mut self, id: &ThreadId, message: String) {
+        if self.isolating.remove(id) {
+            if let Ok(engine) = self.supervisor.engine(id) {
+                let events = engine.record(EventPayload::EnvironmentDetached { message }, now_ms());
+                self.commit(events);
+            }
+            return;
+        }
         if let Ok(engine) = self.supervisor.engine(id) {
             let failed = EventPayload::EnvironmentFailed { message: message.clone() };
             let events = engine.record(failed, now_ms());
@@ -2089,6 +2211,12 @@ impl Core {
                     self.commit(events);
                 }
             }
+        }
+        if matches!(action, Action::Release)
+            && let Some(environment) =
+                self.sessions.get_mut(&id).and_then(|session| session.prepare_after_release.take())
+        {
+            self.prepare_environment(&id, environment, None);
         }
         if let Action::Archive { force } = action {
             if let Some(responder) = responder {

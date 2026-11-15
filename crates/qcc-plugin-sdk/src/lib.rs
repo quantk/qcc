@@ -72,11 +72,11 @@ pub use bindings::qcc::plugin::types;
 pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
 
 use types::{
-    CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDiff,
-    EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove, EnvironmentRequest,
-    Event, InteractionAnswer, ModelInfo, Outcome, ProviderInfo, ProviderRequest, SessionStart,
-    SessionStarted, SettledThread, SkillInfo, SkillRef, ThreadInput, UiAction, UiItem, UiRender,
-    UiRequest, UiViewInfo,
+    CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDeliver,
+    EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove,
+    EnvironmentRequest, Event, InteractionAnswer, ModelInfo, Outcome, ProviderInfo,
+    ProviderRequest, SessionStart, SessionStarted, SettledThread, SkillInfo, SkillRef, ThreadInput,
+    UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -192,6 +192,14 @@ pub trait Environment {
     fn diff(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentDiff>, String> {
         let _ = query;
         Err("this environment does not track changes".into())
+    }
+
+    /// Bring the thread's work back to the directory the environment was made from,
+    /// and say what was done. Refuse, changing nothing, when it does not fit. Answer
+    /// a deferred call with [`Outcome::EnvironmentDelivered`].
+    fn deliver(&mut self, request: EnvironmentDeliver) -> Result<Reply<String>, String> {
+        let _ = request;
+        Err("this environment cannot bring its work back".into())
     }
 }
 
@@ -442,6 +450,9 @@ pub mod __private {
                     EnvironmentRequest::Diff(query) => {
                         environment.diff(query).map(|r| reply(r, Outcome::EnvironmentDiff))
                     }
+                    EnvironmentRequest::Deliver(request) => environment
+                        .deliver(request)
+                        .map(|r| reply(r, Outcome::EnvironmentDelivered)),
                 }
             }
             Event::Ui(request) => {

@@ -149,6 +149,7 @@ impl Worktrees {
                     Outcome::Done
                 }
                 Answer::Changes(changes) => Outcome::EnvironmentChanges(changes),
+                Answer::Delivered(summary) => Outcome::EnvironmentDelivered(summary),
                 Answer::Diff { diff, truncated } => {
                     Outcome::EnvironmentDiff(EnvironmentDiff { diff, truncated })
                 }
@@ -179,7 +180,8 @@ impl Environment for Worktrees {
             request.source_dir,
             request.root,
             request.base,
-        );
+        )
+        .carrying(request.carry_changes);
         self.begin(request.thread, Job::Prepare(job))
     }
 
@@ -197,6 +199,13 @@ impl Environment for Worktrees {
     fn diff(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentDiff>, String> {
         let record = known(&query.thread)?;
         self.begin(query.thread, Job::Diff(jobs::Diff::new(record)))
+    }
+
+    fn deliver(&mut self, request: EnvironmentDeliver) -> Result<Reply<String>, String> {
+        let record = known(&request.thread)?;
+        let merge = request.mode == DeliverMode::Merge;
+        let job = jobs::Deliver::new(record, request.thread.clone(), merge);
+        self.begin(request.thread, Job::Deliver(job))
     }
 }
 

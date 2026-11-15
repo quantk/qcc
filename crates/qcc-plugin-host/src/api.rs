@@ -2,9 +2,9 @@
 //! crate.
 
 use qcc_domain::{
-    CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionResolution, ModelInfo,
-    PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread, ThreadId, ThreadState,
-    TranscriptEntry, UiViewInfo,
+    CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionResolution,
+    ModelInfo, PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread, ThreadId,
+    ThreadState, TranscriptEntry, UiViewInfo,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +69,8 @@ pub enum EnvironmentRequest {
         /// A directory set aside for the plugin's environments.
         root: String,
         base: Option<String>,
+        /// Take the uncommitted work of `source_dir` along into the new directory.
+        carry_changes: bool,
     },
     Remove {
         thread: ThreadId,
@@ -82,6 +84,12 @@ pub enum EnvironmentRequest {
     Diff {
         thread: ThreadId,
         cwd: String,
+    },
+    /// Answered with [`Outcome::EnvironmentDelivered`].
+    Deliver {
+        thread: ThreadId,
+        cwd: String,
+        mode: DeliverMode,
     },
 }
 
@@ -184,6 +192,8 @@ pub enum Outcome {
         diff: String,
         truncated: bool,
     },
+    /// What bringing the work back did, in a sentence.
+    EnvironmentDelivered(String),
     /// A tree of UI nodes, as the JSON the plugin wrote.
     UiTree(String),
     CommandResult {

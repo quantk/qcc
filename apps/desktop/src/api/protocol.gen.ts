@@ -123,6 +123,8 @@ export type EventPayload =
 { type: "thread/title"; title: string } | 
 /**  The thread was put into a project, moved to another or taken out of one. */
 { type: "thread/project"; project?: ProjectId | null } | 
+/**  The thread was placed under another thread, or taken out to stand on its own. */
+{ type: "thread/parent"; parent?: ThreadId | null } | 
 /**  The thread was put away. Always its last state change. */
 { type: "thread/archived" } | 
 /**  A thread that worked without an environment gets one. Preparing it follows. */
@@ -212,6 +214,10 @@ export type PendingInteraction = {
 /**
  *  How much an agent may do without asking the user. A thread without a mode runs
  *  with the agent's own configuration.
+ * 
+ *  The variants are declared from the strictest to the loosest, and the ordering
+ *  follows that: `Ask < AcceptEdits < Auto < Full`. A thread a thread started may
+ *  never run looser than its parent, and this order is what "looser" means.
  */
 export type PermissionMode = 
 /**  Everything the agent wants approved is asked of the user. */
@@ -600,6 +606,11 @@ export type ThreadSetModeParams = {
 	permission_mode?: PermissionMode | null,
 };
 
+export type ThreadSetParentParams = {
+	thread_id: ThreadId,
+	parent?: ThreadId | null,
+};
+
 export type ThreadSetProjectParams = {
 	thread_id: ThreadId,
 	project?: ProjectId | null,
@@ -818,6 +829,7 @@ export type Methods = {
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },
+	"thread.set_parent": { params: ThreadSetParentParams; result: ThreadResult },
 	"thread.rename": { params: ThreadRenameParams; result: ThreadResult },
 	"project.list": { params: Empty; result: ProjectListResult },
 	"project.create": { params: ProjectCreateParams; result: ProjectResult },

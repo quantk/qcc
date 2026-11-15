@@ -207,6 +207,17 @@ impl ThreadEngine {
         self.emit(vec![EventPayload::ProjectChanged { project }], now)
     }
 
+    pub fn set_parent(
+        &mut self,
+        parent: Option<qcc_domain::ThreadId>,
+        now: u64,
+    ) -> Vec<ThreadEvent> {
+        if self.thread.parent == parent {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::ParentChanged { parent }], now)
+    }
+
     /// Record a step in the life of the thread's environment or of the thread
     /// itself (`environment/*`, `thread/archived`). These carry no timeline grammar.
     pub fn record(&mut self, payload: EventPayload, now: u64) -> Vec<ThreadEvent> {

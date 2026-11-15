@@ -1524,6 +1524,95 @@ fn a_parent_waits_for_its_children_and_reads_their_answers() {
 }
 
 #[test]
+fn a_child_takes_after_its_parent_and_never_runs_looser() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let spawn = |args: &[&str]| daemon.qcc(&[&["thread", "spawn", "--json"], args].concat());
+    let id = |output: &Output| output.json()["thread"]["id"].as_str().unwrap().to_owned();
+
+    let parent =
+        spawn(&["--provider", "echo", "--permission-mode", "accept-edits", "--model", "echo-2"]);
+    assert!(parent.ok, "{}", parent.stderr);
+    let parent = id(&parent);
+
+    // Left unsaid, the mode and the model are the parent's, even over the user's
+    // defaults for the agent.
+    assert!(daemon.qcc(&["settings", "provider", "echo", "--permission-mode", "full"]).ok);
+    let child = spawn(&["--parent", &parent]);
+    assert!(child.ok, "{}", child.stderr);
+    assert_eq!(child.json()["thread"]["permission_mode"], "accept-edits");
+    assert_eq!(child.json()["thread"]["model"], "echo-2");
+    let child = id(&child);
+
+    // Stricter is fine; looser is refused, at spawn and later.
+    let strict = spawn(&["--parent", &parent, "--permission-mode", "ask"]);
+    assert!(strict.ok, "{}", strict.stderr);
+    for mode in ["auto", "full"] {
+        let loose = spawn(&["--parent", &parent, "--permission-mode", mode]);
+        assert!(!loose.ok);
+        assert!(loose.stderr.contains("may not run looser"), "{}", loose.stderr);
+    }
+    let loosened = daemon.qcc(&["thread", "mode", &child, "full"]);
+    assert!(!loosened.ok);
+    assert!(
+        loosened.stderr.contains("its children may use at most accept-edits"),
+        "{}",
+        loosened.stderr
+    );
+    // The agent's own configuration may allow anything, so it counts as looser too.
+    assert!(!daemon.qcc(&["thread", "mode", &child, "default"]).ok);
+    assert!(daemon.qcc(&["thread", "mode", &child, "ask"]).ok);
+
+    // A parent without a mode runs as its agent is configured; its children get
+    // nothing looser than `ask`, and the user's default is held to that.
+    assert!(daemon.qcc(&["settings", "provider", "echo", "--permission-mode", "default"]).ok);
+    let free = spawn(&["--provider", "echo"]);
+    assert!(free.ok, "{}", free.stderr);
+    let free = id(&free);
+    let child = spawn(&["--parent", &free]);
+    assert!(child.json()["thread"].get("permission_mode").is_none());
+    assert!(!spawn(&["--parent", &free, "--permission-mode", "accept-edits"]).ok);
+    assert!(daemon.qcc(&["settings", "provider", "echo", "--permission-mode", "full"]).ok);
+    let child = spawn(&["--parent", &free]);
+    assert_eq!(child.json()["thread"]["permission_mode"], "ask");
+}
+
+#[test]
+fn the_user_moves_threads_between_families() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let spawn = |args: &[&str]| {
+        let output =
+            daemon.qcc(&[&["thread", "spawn", "--provider", "echo", "--json"], args].concat());
+        assert!(output.ok, "{}", output.stderr);
+        output.json()["thread"]["id"].as_str().unwrap().to_owned()
+    };
+    let parent_of = |id: &str| daemon.thread(id).get("parent").cloned();
+    let a = spawn(&["--permission-mode", "accept-edits"]);
+    let child = spawn(&["--parent", &a]);
+    let b = spawn(&["--permission-mode", "ask"]);
+
+    // Out on its own, then under another thread, which the event log keeps.
+    assert!(daemon.qcc(&["thread", "parent", &child, "none"]).ok);
+    assert_eq!(parent_of(&child), None);
+    assert!(daemon.qcc(&["thread", "parent", &b, &a]).ok);
+    assert_eq!(parent_of(&b), Some(Value::from(a.clone())));
+    assert!(types(&daemon.events(&b)).contains(&"thread/parent"));
+
+    // Never under itself or under what it started.
+    for (thread, parent) in [(&a, &a), (&a, &b)] {
+        let looped = daemon.qcc(&["thread", "parent", thread, parent]);
+        assert!(!looped.ok);
+        assert!(looped.stderr.contains("was started under it"), "{}", looped.stderr);
+    }
+    // Never under a thread stricter than itself.
+    let strict = spawn(&["--permission-mode", "ask"]);
+    let looser = daemon.qcc(&["thread", "parent", &a, &strict]);
+    assert!(!looser.ok);
+    assert!(looser.stderr.contains("may not run looser"), "{}", looser.stderr);
+}
+
+#[test]
 fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

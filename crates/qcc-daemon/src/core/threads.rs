@@ -1,8 +1,8 @@
 //! Requests that create threads and change their input, mode or agent.
 
 use qcc_domain::{
-    EnvironmentState, EventPayload, PermissionMode, ProviderId, ThreadEnvironment, ThreadEvent,
-    ThreadId,
+    EnvironmentState, EventPayload, PermissionMode, ProviderId, Thread, ThreadEnvironment,
+    ThreadEvent, ThreadId,
 };
 use qcc_plugin_host::{EnvironmentRequest, Outcome, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
@@ -10,8 +10,8 @@ use qcc_protocol::methods::{
     Delivery, Empty, InteractionResolveParams, SendMode, StopMode, ThreadDeliverParams,
     ThreadDeliverResult, ThreadEventsParams, ThreadEventsResult, ThreadIsolateParams,
     ThreadRenameParams, ThreadResult, ThreadSendParams, ThreadSendResult, ThreadSetAgentParams,
-    ThreadSetModeParams, ThreadSetProjectParams, ThreadSpawnParams, ThreadStopParams,
-    ThreadUnqueueParams, ThreadUnqueueResult,
+    ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams, ThreadSpawnParams,
+    ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
 };
 use qcc_runtime::NewThread;
 
@@ -25,29 +25,61 @@ impl Core {
         &mut self,
         mut p: ThreadSpawnParams,
     ) -> Result<ThreadResult, RpcError> {
-        // What the user set for this agent fills in what the caller left out.
-        if let Some(defaults) = self.settings.providers.get(&p.provider) {
-            if p.model.is_none() {
-                p.model.clone_from(&defaults.model);
+        let parent = match &p.parent {
+            Some(parent) => {
+                let thread =
+                    self.supervisor.thread(parent).ok_or_else(|| thread_not_found(parent))?;
+                if self.depth(parent) >= MAX_SPAWN_DEPTH {
+                    return Err(RpcError::new(
+                        codes::INVALID_PARAMS,
+                        format!(
+                            "thread {parent} is {MAX_SPAWN_DEPTH} levels below the thread the \
+                             user started; agents may not delegate any deeper"
+                        ),
+                    ));
+                }
+                Some(thread.clone())
             }
-            if p.permission_mode.is_none() {
-                p.permission_mode = defaults.permission_mode;
-            }
+            None => None,
+        };
+        let defaults = self.settings.providers.get(&p.provider).cloned().unwrap_or_default();
+        // A child takes after its parent; what the user set for the agent fills in the rest.
+        // A model name means something only to the provider it was chosen for.
+        if p.model.is_none() {
+            p.model = parent
+                .as_ref()
+                .filter(|parent| parent.provider == p.provider)
+                .and_then(|parent| parent.model.clone())
+                .or(defaults.model);
         }
+        p.permission_mode = match (&parent, p.permission_mode) {
+            (_, Some(mode)) => Some(mode),
+            (None, None) => defaults.permission_mode,
+            (Some(parent), None) => {
+                let wanted = parent.permission_mode.or(defaults.permission_mode);
+                match wanted {
+                    // The parent's mode, or the user's default for this agent, tightened
+                    // to what the parent allows and then to what this agent can enforce.
+                    Some(wanted) => {
+                        let bound = wanted.min(ceiling(parent.permission_mode));
+                        Some(bound.fit(&self.permission_modes(&p.provider)?).ok_or_else(|| {
+                            RpcError::new(
+                                codes::INVALID_PARAMS,
+                                format!(
+                                    "provider {} cannot run as strictly as its parent ({})",
+                                    p.provider,
+                                    bound.as_str()
+                                ),
+                            )
+                        })?)
+                    }
+                    None => None,
+                }
+            }
+        };
         self.check_mode(&p.provider, p.permission_mode)?;
-        if let Some(parent) = &p.parent {
-            if self.supervisor.thread(parent).is_none() {
-                return Err(thread_not_found(parent));
-            }
-            if self.depth(parent) >= MAX_SPAWN_DEPTH {
-                return Err(RpcError::new(
-                    codes::INVALID_PARAMS,
-                    format!(
-                        "thread {parent} is {MAX_SPAWN_DEPTH} levels below the thread the user \
-                         started; agents may not delegate any deeper"
-                    ),
-                ));
-            }
+        if let Some(parent) = &parent {
+            check_ceiling(parent, p.permission_mode)?;
         }
         let cwd = std::path::Path::new(&p.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
@@ -171,6 +203,25 @@ impl Core {
             }
             _ => Ok(()),
         }
+    }
+
+    /// The modes a provider can enforce.
+    fn permission_modes(&self, provider: &ProviderId) -> Result<Vec<PermissionMode>, RpcError> {
+        self.host
+            .provider(provider)
+            .map(|(_, info)| info.capabilities.permission_modes.clone())
+            .ok_or_else(|| {
+                RpcError::new(
+                    codes::PROVIDER_NOT_FOUND,
+                    format!("no plugin provides {:?}", provider.as_str()),
+                )
+            })
+    }
+
+    /// The thread that started `thread`, if it is still known.
+    fn parent_of(&self, thread: &ThreadId) -> Option<Thread> {
+        let parent = self.supervisor.thread(thread)?.parent.clone()?;
+        self.supervisor.thread(&parent).cloned()
     }
 
     pub(super) fn thread_send(
@@ -326,6 +377,44 @@ impl Core {
         thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
     }
 
+    pub(super) fn thread_set_parent(
+        &mut self,
+        p: ThreadSetParentParams,
+    ) -> Result<ThreadResult, RpcError> {
+        let ThreadSetParentParams { thread_id, parent } = p;
+        let thread = self
+            .supervisor
+            .thread(&thread_id)
+            .cloned()
+            .ok_or_else(|| thread_not_found(&thread_id))?;
+        if let Some(parent_id) = &parent {
+            let parent = self
+                .supervisor
+                .thread(parent_id)
+                .cloned()
+                .ok_or_else(|| thread_not_found(parent_id))?;
+            // Walk up from the new parent: meeting the thread would close a loop.
+            let mut current = Some(parent.id.clone());
+            while let Some(id) = current {
+                if id == thread_id {
+                    return Err(RpcError::new(
+                        codes::INVALID_PARAMS,
+                        format!("thread {parent_id} is {thread_id} or was started under it"),
+                    ));
+                }
+                current = self.supervisor.thread(&id).and_then(|t| t.parent.clone());
+            }
+            // Its own children are already held to its mode, so only it is checked.
+            check_ceiling(&parent, thread.permission_mode)?;
+        }
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        let events = engine.set_parent(parent, now_ms());
+        self.commit(events);
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+    }
+
     pub(super) fn thread_unqueue(
         &mut self,
         p: ThreadUnqueueParams,
@@ -414,6 +503,9 @@ impl Core {
             .map(|thread| thread.provider.clone())
             .ok_or_else(|| thread_not_found(&thread_id))?;
         self.check_mode(&provider, permission_mode)?;
+        if let Some(parent) = self.parent_of(&thread_id) {
+            check_ceiling(&parent, permission_mode)?;
+        }
         self.reconfigure(&thread_id, "the permission mode", |engine, now| {
             engine.set_permission_mode(permission_mode, now)
         })
@@ -424,18 +516,17 @@ impl Core {
         p: ThreadSetAgentParams,
     ) -> Result<ThreadResult, RpcError> {
         let ThreadSetAgentParams { thread_id, provider, model } = p;
-        self.check_mode(&provider, None)?;
-        let supported = self
-            .host
-            .provider(&provider)
-            .map(|(_, info)| info.capabilities.permission_modes.clone())
-            .unwrap_or_default();
+        let supported = self.permission_modes(&provider)?;
         let model = model.filter(|model| !model.trim().is_empty());
         self.reconfigure(&thread_id, "the agent", |engine, now| {
             let mut events = Vec::new();
-            // A mode the new agent cannot enforce would fail every start.
-            if engine.thread().permission_mode.is_some_and(|mode| !supported.contains(&mode)) {
-                events.extend(engine.set_permission_mode(None, now));
+            // A mode the new agent cannot enforce would fail every start. The nearest
+            // stricter one keeps the user's intent; dropping the mode would hand the
+            // thread to the agent's own configuration, which may allow anything.
+            if let Some(mode) = engine.thread().permission_mode
+                && !supported.contains(&mode)
+            {
+                events.extend(engine.set_permission_mode(mode.fit(&supported), now));
             }
             events.extend(engine.set_agent(provider, model, now));
             events
@@ -557,4 +648,37 @@ impl Core {
         });
         Ok(Empty {})
     }
+}
+
+/// The loosest mode a child of `parent` may run in. A parent without a mode runs
+/// as its agent is configured, which qcc cannot see; only `ask` is sure to be no
+/// looser than that.
+fn ceiling(parent: Option<PermissionMode>) -> PermissionMode {
+    parent.unwrap_or(PermissionMode::Ask)
+}
+
+/// A thread may not run looser than the thread that started it: an agent must not
+/// gain through a child what its own mode does not allow it.
+fn check_ceiling(parent: &Thread, mode: Option<PermissionMode>) -> Result<(), RpcError> {
+    let allowed = match (parent.permission_mode, mode) {
+        (_, Some(mode)) => mode <= ceiling(parent.permission_mode),
+        // Without a mode the child runs as its agent is configured, which may allow
+        // anything; that is only as safe as a parent that does the same.
+        (parent_mode, None) => parent_mode.is_none(),
+    };
+    if allowed {
+        return Ok(());
+    }
+    let parent_mode =
+        parent.permission_mode.map_or("its agent's own configuration", |m| m.as_str());
+    Err(RpcError::new(
+        codes::INVALID_PARAMS,
+        format!(
+            "a thread may not run looser than the thread that started it; {} runs in {}, \
+             so its children may use at most {}",
+            parent.id,
+            parent_mode,
+            ceiling(parent.permission_mode).as_str()
+        ),
+    ))
 }

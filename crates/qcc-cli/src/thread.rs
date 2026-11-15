@@ -11,9 +11,9 @@ use qcc_client::protocol::methods::{
     ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams,
     ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename,
     ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
-    ThreadSetMode, ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
-    ThreadWait, ThreadWaitParams,
+    ThreadSetMode, ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
+    ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
+    ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -100,6 +100,8 @@ pub(crate) enum ThreadCommand {
     },
     /// Put a thread into a project (id or name), or take it out with `none`.
     Project { thread: String, project: String },
+    /// Place a thread under another thread, or let it stand on its own with `none`.
+    Parent { thread: String, parent: String },
     /// Take a queued message back before it is delivered and print it. The id is the
     /// `queue_id` that `thread send --json` printed.
     Unqueue { thread: String, queue_id: String },
@@ -335,6 +337,19 @@ pub(crate) async fn run(
                 .call::<ThreadSetProject>(ThreadSetProjectParams {
                     thread_id: ThreadId::new(thread),
                     project,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        ThreadCommand::Parent { thread, parent } => {
+            let parent = (parent != "none").then(|| ThreadId::new(parent));
+            let result = client
+                .call::<ThreadSetParent>(ThreadSetParentParams {
+                    thread_id: ThreadId::new(thread),
+                    parent,
                 })
                 .await?;
             if json {

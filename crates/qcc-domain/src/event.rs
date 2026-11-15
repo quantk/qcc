@@ -74,6 +74,13 @@ pub enum EventPayload {
         project: Option<ProjectId>,
     },
 
+    /// The thread was placed under another thread, or taken out to stand on its own.
+    #[serde(rename = "thread/parent")]
+    ParentChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        parent: Option<ThreadId>,
+    },
+
     /// The thread was put away. Always its last state change.
     #[serde(rename = "thread/archived")]
     ThreadArchived,

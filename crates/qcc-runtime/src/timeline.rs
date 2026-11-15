@@ -193,6 +193,7 @@ impl Timeline {
             | EventPayload::PermissionModeChanged { .. }
             | EventPayload::AgentChanged { .. }
             | EventPayload::ProjectChanged { .. }
+            | EventPayload::ParentChanged { .. }
             | EventPayload::TitleChanged { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }

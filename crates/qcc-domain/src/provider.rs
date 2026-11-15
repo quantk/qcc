@@ -6,7 +6,13 @@ use crate::ids::ProviderId;
 
 /// How much an agent may do without asking the user. A thread without a mode runs
 /// with the agent's own configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, specta::Type)]
+///
+/// The variants are declared from the strictest to the loosest, and the ordering
+/// follows that: `Ask < AcceptEdits < Auto < Full`. A thread a thread started may
+/// never run looser than its parent, and this order is what "looser" means.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
     /// Everything the agent wants approved is asked of the user.
@@ -29,6 +35,12 @@ impl PermissionMode {
             Self::Auto => "auto",
             Self::Full => "full",
         }
+    }
+
+    /// The loosest of `supported` that allows no more than `self`: how a mode is
+    /// carried over to an agent that cannot enforce it exactly.
+    pub fn fit(self, supported: &[Self]) -> Option<Self> {
+        supported.iter().copied().filter(|mode| *mode <= self).max()
     }
 }
 
@@ -193,4 +205,22 @@ pub struct SkillRef {
     pub description: String,
     /// Absolute path of the skill's `SKILL.md`.
     pub path: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PermissionMode::{AcceptEdits, Ask, Auto, Full};
+
+    #[test]
+    fn modes_are_ordered_from_strictest_to_loosest() {
+        assert!(Ask < AcceptEdits && AcceptEdits < Auto && Auto < Full);
+    }
+
+    #[test]
+    fn a_mode_fits_an_agent_that_cannot_enforce_it_by_tightening() {
+        let without_auto = [Ask, AcceptEdits, Full];
+        assert_eq!(Auto.fit(&without_auto), Some(AcceptEdits));
+        assert_eq!(Full.fit(&without_auto), Some(Full));
+        assert_eq!(Ask.fit(&[AcceptEdits, Full]), None);
+    }
 }

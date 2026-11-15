@@ -1,7 +1,7 @@
-import { ArrowLeftIcon, ArrowRightIcon, FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { activityText, attentionLabel, attentionOf, findProvider, threadGroups, threadTree } from "../state/selectors";
+import { activityText, attentionLabel, attentionOf, findProvider, threadGroups, threadTree, type TreeRow } from "../state/selectors";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
 import { NEW_THREAD, openNewThread } from "../modules/new-thread";
@@ -10,6 +10,7 @@ import { useUi } from "../ui/registry";
 import { ThreadMenu } from "../ui/kit";
 import { baseName, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
+import { type DragState, useThreadDrag } from "./useThreadDrag";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
@@ -21,11 +22,13 @@ export function Sidebar() {
   const history = useApp((state) => state.history);
   const seen = useApp((state) => state.seen);
   const selected = useApp((state) => state.selected);
+  const collapsed = useApp((state) => state.collapsed);
   const connected = useApp((state) => state.daemon.status === "connected");
   const views = useUi((snapshot) => snapshot.views);
   const viewId = useApp((state) => state.view) ?? views[0]?.id;
   const [showArchived, setShowArchived] = useState(false);
   const now = useNow(30_000);
+  const { drag, start, wasDragged } = useThreadDrag();
 
   const all = useMemo(() => Object.values(threads), [threads]);
   const archivedCount = all.filter((thread) => thread.archived).length;
@@ -94,7 +97,13 @@ export function Sidebar() {
         {groups.length === 0 && <p className="hint">No threads yet.</p>}
         {groups.map((group) => (
           <section key={group.key} className="group/section">
-            <div className="flex items-center gap-1 pr-1">
+            <div
+              data-group-top
+              data-group={group.key}
+              className={`flex items-center gap-1 rounded-md pr-1${
+                drag?.over?.target === null && drag.drop && "parent" in drag.drop ? " bg-primary/15" : ""
+              }`}
+            >
               <h2 className="min-w-0 flex-1 truncate" title={group.kind === "project" ? group.project.folders.join("\n") : `${group.folder}\nNot in a project`}>
                 {group.kind === "project" ? group.project.name : baseName(group.folder)}
               </h2>
@@ -136,38 +145,82 @@ export function Sidebar() {
               )}
             </div>
             {group.kind === "project" && group.threads.length === 0 && <p className="hint">No threads yet.</p>}
-            {threadTree(group.threads).map(({ thread, depth, children }) => {
+            {threadTree(group.threads, collapsed, selected).map((row) => {
+              const { thread, depth, children } = row;
               const attention = attentionOf(thread);
               const unread = isUnread(thread, seen);
               const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
+              const indent = Math.min(depth, MAX_INDENT);
+              const over = drag?.over?.target === thread.id ? drag.over : null;
+              const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
               return (
-                <ThreadMenu
+                <div
                   key={thread.id}
-                  thread={thread}
-                  render={
-                    <button
-                      className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
-                      style={depth > 0 ? { paddingLeft: `${8 + Math.min(depth, 4) * 14}px` } : undefined}
-                      title={children > 0 ? `Started ${children} other thread${children === 1 ? "" : "s"}` : undefined}
-                      onClick={() => store().select(thread.id)}
-                    />
-                  }
+                  data-thread-id={thread.id}
+                  data-group={group.key}
+                  className={`relative touch-none select-none${drag?.id === thread.id ? " opacity-40" : ""}${
+                    landing === "into" ? " rounded-md bg-primary/15 outline outline-1 outline-primary" : ""
+                  }`}
+                  onPointerDown={(event) => start(event, thread, group.threads, group.key)}
                 >
-                  <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-                  <span className={`thread-title${unread ? " font-semibold" : ""}`}>{thread.title ?? "New thread"}</span>
-                  <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
-                  <span className="thread-meta">
-                    {attention === "waiting"
-                      ? "Needs your answer"
-                      : unread && attention === "idle"
-                        ? "New reply"
-                      : attention === "failed"
-                        ? "Failed"
-                        : attention === "active" && thread.activity
-                          ? activityText(thread)
-                          : `${provider}${thread.environment ? " · worktree" : ""}`}
-                  </span>
-                </ThreadMenu>
+                  {landing === "beside" && (
+                    // Where it lands among the threads next to this one.
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute right-1 bottom-0 z-10 h-0.5 rounded bg-primary"
+                      style={{ left: `${8 + indent * INDENT}px` }}
+                    />
+                  )}
+                  {/* A line down from each ancestor's dot ties a family together. */}
+                  {Array.from({ length: indent }, (_, level) => (
+                    <span
+                      key={level}
+                      aria-hidden
+                      className="pointer-events-none absolute inset-y-0 border-l border-muted-foreground/30"
+                      style={{ left: `${GUIDE_X + level * INDENT}px` }}
+                    />
+                  ))}
+                  {indent > 0 && (
+                    // The elbow from the parent's line to this thread's dot.
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute border-t border-muted-foreground/30"
+                      style={{ left: `${GUIDE_X + (indent - 1) * INDENT}px`, top: `${DOT_Y}px`, width: `${INDENT - 6}px` }}
+                    />
+                  )}
+                  <ThreadMenu
+                    thread={thread}
+                    render={
+                      <button
+                        className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
+                        style={depth > 0 ? { paddingLeft: `${8 + indent * INDENT}px` } : undefined}
+                        onClick={() => {
+                          if (!wasDragged()) store().select(thread.id);
+                        }}
+                      />
+                    }
+                  >
+                    <span className={`dot ${attention}`} title={attentionLabel[attention]} />
+                    <span
+                      className={`thread-title${unread ? " font-semibold" : ""}${depth > 0 ? " text-[13px]" : ""}${depth > 0 && !unread && thread.id !== selected ? " text-foreground/80" : ""}`}
+                    >
+                      {thread.title ?? "New thread"}
+                    </span>
+                    <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
+                    <span className={`thread-meta${children > 0 ? " mr-11" : ""}`}>
+                      {attention === "waiting"
+                        ? "Needs your answer"
+                        : unread && attention === "idle"
+                          ? "New reply"
+                        : attention === "failed"
+                          ? "Failed"
+                          : attention === "active" && thread.activity
+                            ? activityText(thread)
+                            : `${provider}${thread.environment ? " · worktree" : ""}`}
+                    </span>
+                  </ThreadMenu>
+                  {children > 0 && <FamilyToggle row={row} />}
+                </div>
               );
             })}
           </section>
@@ -179,6 +232,65 @@ export function Sidebar() {
           Show archived ({archivedCount})
         </label>
       )}
+      {drag && <DragGhost drag={drag} />}
     </aside>
+  );
+}
+
+/** Indentation per level of delegation, and how deep it goes before it stops. */
+const INDENT = 14;
+const MAX_INDENT = 4;
+/** Where the middle of a root's dot is: its padding, its border, half the dot. */
+const GUIDE_X = 8 + 1 + 4 - 0.5;
+/** How far down a row the middle of its dot is: border, padding, half a line. */
+const DOT_Y = 1 + 6 + 10;
+
+/**
+ * Folds or unfolds the threads a thread started. Folded, it counts every hidden
+ * thread and shows the most pressing state among them, so a child asking for an
+ * answer is not lost under a collapsed parent.
+ */
+function FamilyToggle({ row }: { row: TreeRow }) {
+  const { thread, children, collapsed, hidden, hiddenAttention } = row;
+  const Chevron = collapsed ? ChevronRightIcon : ChevronDownIcon;
+  const count = collapsed ? hidden : children;
+  const label = `${collapsed ? "Show" : "Hide"} ${count} thread${count === 1 ? "" : "s"} it started`;
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      className="absolute right-1 bottom-1 h-5 gap-1 px-1 text-muted-foreground tabular-nums"
+      aria-label={label}
+      aria-expanded={!collapsed}
+      title={hiddenAttention && hiddenAttention !== "idle" ? `${label}\nAmong them: ${attentionLabel[hiddenAttention].toLowerCase()}` : label}
+      // A press on the toggle is not the start of dragging its row.
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => store().toggleCollapsed(thread.id)}
+    >
+      <Chevron />
+      {collapsed && hiddenAttention && hiddenAttention !== "idle" && <span className={`dot ${hiddenAttention}`} />}
+      {count}
+    </Button>
+  );
+}
+
+/** What follows the pointer while a thread is dragged: its name and what letting go does. */
+function DragGhost({ drag }: { drag: DragState }) {
+  const { drop } = drag;
+  const what = !drop
+    ? "Drop on a thread to put it under that one, between threads to move it next to them"
+    : "refused" in drop
+      ? drop.refused
+      : drop.parent === null
+        ? "Make it a thread of its own"
+        : "Put it under this thread";
+  return (
+    <div
+      className="pointer-events-none fixed z-50 max-w-72 rounded-md border border-border bg-popover px-2 py-1 text-xs shadow-md"
+      style={{ left: drag.x + 14, top: drag.y + 10 }}
+    >
+      <div className="truncate font-medium text-foreground">{drag.title}</div>
+      <div className={drop && "refused" in drop ? "text-destructive" : "text-muted-foreground"}>{what}</div>
+    </div>
   );
 }

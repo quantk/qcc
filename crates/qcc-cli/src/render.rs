@@ -311,6 +311,10 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
             Some(project) => format!("(project {project})"),
             None => "(no project)".to_owned(),
         },
+        EventPayload::ParentChanged { parent } => match parent {
+            Some(parent) => format!("(moved under {parent})"),
+            None => "(no longer under another thread)".to_owned(),
+        },
         // The failure follows as a provider error, in full.
         EventPayload::EnvironmentFailed { .. }
         | EventPayload::EnvironmentPreparing

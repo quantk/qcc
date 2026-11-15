@@ -31,6 +31,7 @@ import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
+const COLLAPSED = "qcc.collapsed-families";
 
 /** Null when nothing was ever recorded: the first run of the app. */
 function readSeen(): Seen | null {
@@ -53,6 +54,15 @@ function saveSeen(seen: Seen) {
 /** Whether the user can be looking at the window right now. */
 function windowInView(): boolean {
   return typeof document === "undefined" || (document.visibilityState === "visible" && document.hasFocus());
+}
+
+function readCollapsed(): ReadonlySet<ThreadId> {
+  try {
+    const ids: unknown = JSON.parse(globalThis.localStorage?.getItem(COLLAPSED) ?? "[]");
+    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
 }
 
 function readShowExamples(): boolean {
@@ -94,6 +104,8 @@ export type AppState = {
   seen: Seen;
   /** Where the user has been, for back and forward. */
   history: History;
+  /** Threads whose children the sidebar keeps folded under them. */
+  collapsed: ReadonlySet<ThreadId>;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -121,6 +133,7 @@ export class AppStore {
     settings: null,
     seen: readSeen() ?? {},
     history: startHistory,
+    collapsed: readCollapsed(),
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -350,6 +363,20 @@ export class AppStore {
     this.set({ showExamples: show, plugins: visiblePlugins(this.state.allPlugins, show) });
   };
 
+  /** Fold the threads a thread started under it in the sidebar, or unfold them. */
+  toggleCollapsed = (threadId: ThreadId) => {
+    const collapsed = new Set(this.state.collapsed);
+    if (!collapsed.delete(threadId)) collapsed.add(threadId);
+    // Threads that are gone need not be remembered.
+    for (const id of collapsed) if (!this.state.threads[id]) collapsed.delete(id);
+    try {
+      globalThis.localStorage?.setItem(COLLAPSED, JSON.stringify([...collapsed]));
+    } catch {
+      // Not remembered past this window.
+    }
+    this.set({ collapsed });
+  };
+
   select = (threadId: ThreadId | null) => {
     this.go({ thread: threadId, view: this.state.view }, true);
   };
@@ -485,6 +512,14 @@ export class AppStore {
   async deleteProject(id: ProjectId) {
     const done = await this.attempt(() => this.api.call("project.delete", { id }));
     if (done) this.set({ projects: this.state.projects.filter((project) => project.id !== id) });
+  }
+
+  /** Place a thread under another, or let it stand on its own. */
+  async setParent(threadId: ThreadId, parent: ThreadId | null) {
+    const result = await this.attempt(() =>
+      this.api.call("thread.set_parent", { thread_id: threadId, parent }),
+    );
+    if (result) this.mergeThreads([result.thread]);
   }
 
   async setProject(threadId: ThreadId, project: ProjectId | null) {

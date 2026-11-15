@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PluginInfo, Project, Thread } from "../api/protocol.gen";
-import { childrenOf, rootOf, threadGroups, threadTree, visiblePlugins } from "./selectors";
+import { allowedModes, childrenOf, dropOf, rootOf, threadGroups, threadTree, visiblePlugins } from "./selectors";
 
 function thread(id: string, created_at: number, parent?: string): Thread {
   return {
@@ -29,6 +29,22 @@ describe("thread families", () => {
   it("puts children under their parent, in the order they were started", () => {
     const rows = threadTree(threads).map((row) => `${"-".repeat(row.depth)}${row.thread.id}:${row.children}`);
     expect(rows).toEqual(["orphan:0", "b:0", "a:2", "-a1:1", "--a1x:0", "-a2:0"]);
+  });
+
+  it("hides the family of a collapsed thread, and tells what the hidden ones need", () => {
+    const asking = { ...thread("a1x", 4, "a1"), pending_interactions: [{}] } as unknown as Thread;
+    const family = threads.map((t) => (t.id === "a1x" ? asking : t));
+    const rows = threadTree(family, new Set(["a"]));
+    expect(rows.map((row) => row.thread.id)).toEqual(["orphan", "b", "a"]);
+    const a = rows[2];
+    expect([a?.collapsed, a?.hidden, a?.hiddenAttention]).toEqual([true, 3, "waiting"]);
+    // A thread without children has nothing to collapse.
+    expect(threadTree(family, new Set(["b"]))[1]?.collapsed).toBe(false);
+  });
+
+  it("never hides the selected thread", () => {
+    const rows = threadTree(threads, new Set(["a", "a1"]), "a1x").map((row) => row.thread.id);
+    expect(rows).toEqual(["orphan", "b", "a", "a1", "a1x", "a2"]);
   });
 
   it("finds the root of a family and the children of a thread", () => {
@@ -70,5 +86,51 @@ describe("sidebar groups", () => {
       ["folder:/old", ["lost"]],
       ["folder:/tmp/repo", ["loose"]],
     ]);
+  });
+});
+
+describe("permission modes of a child", () => {
+  const all = ["ask", "accept-edits", "auto", "full"] as const;
+  const parent = (permission_mode?: string) => ({ ...thread("p", 1), permission_mode }) as unknown as Thread;
+
+  it("go no looser than the parent's", () => {
+    expect(allowedModes(all, undefined)).toEqual({ modes: [...all], agentDefault: true });
+    expect(allowedModes(all, parent("accept-edits"))).toEqual({ modes: ["ask", "accept-edits"], agentDefault: false });
+    expect(allowedModes(all, parent())).toEqual({ modes: ["ask"], agentDefault: true });
+  });
+});
+
+describe("dragging a thread in the sidebar", () => {
+  const mode = (t: Thread, permission_mode: string) => ({ ...t, permission_mode }) as unknown as Thread;
+  const group = [
+    mode(thread("a", 1), "full"),
+    mode(thread("a1", 2, "a"), "full"),
+    mode(thread("b", 3), "ask"),
+    thread("c", 4),
+    thread("x", 5, "elsewhere"),
+  ];
+
+  it("puts it under a thread, next to one, or on its own", () => {
+    expect(dropOf(group, "b", "a", "into")).toEqual({ parent: "a" });
+    expect(dropOf(group, "b", "a1", "beside")).toEqual({ parent: "a" });
+    expect(dropOf(group, "a1", "c", "beside")).toEqual({ parent: null });
+    expect(dropOf(group, "a1", null, "into")).toEqual({ parent: null });
+    // Next to a thread whose parent is in another group is the top of this one.
+    expect(dropOf(group, "a1", "x", "beside")).toEqual({ parent: null });
+  });
+
+  it("does nothing where it already is", () => {
+    expect(dropOf(group, "a1", "a", "into")).toBeNull();
+    expect(dropOf(group, "b", null, "into")).toBeNull();
+    expect(dropOf(group, "b", "missing", "into")).toBeNull();
+  });
+
+  it("refuses what the daemon would", () => {
+    expect(dropOf(group, "a", "a1", "into")).toHaveProperty("refused");
+    expect(dropOf(group, "a", "a", "into")).toHaveProperty("refused");
+    expect(dropOf(group, "a", "b", "into")).toHaveProperty("refused");
+    // Without a mode it may sit only under a thread without one.
+    expect(dropOf(group, "c", "b", "into")).toHaveProperty("refused");
+    expect(dropOf(group, "b", "c", "into")).toEqual({ parent: "c" });
   });
 });

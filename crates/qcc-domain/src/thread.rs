@@ -226,7 +226,9 @@ impl Thread {
         // Filing or naming a thread is not something it did.
         if !matches!(
             event.payload,
-            EventPayload::ProjectChanged { .. } | EventPayload::TitleChanged { .. }
+            EventPayload::ProjectChanged { .. }
+                | EventPayload::TitleChanged { .. }
+                | EventPayload::ParentChanged { .. }
         ) {
             self.updated_at = event.ts;
         }
@@ -250,6 +252,7 @@ impl Thread {
                 self.handover = false;
             }
             EventPayload::ProjectChanged { project } => self.project.clone_from(project),
+            EventPayload::ParentChanged { parent } => self.parent.clone_from(parent),
             EventPayload::TitleChanged { title } => self.title = Some(title.clone()),
             EventPayload::AgentChanged { provider, model } => {
                 if *provider != self.provider {

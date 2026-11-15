@@ -4,7 +4,7 @@
 import { useState } from "react";
 
 import type { PermissionMode, Thread } from "../../api/protocol.gen";
-import { modeLabel } from "../../state/selectors";
+import { allowedModes, modeLabel } from "../../state/selectors";
 import { store } from "../../state/store";
 import { Choice } from "../../ui/kit";
 import type { ThreadContext, UiModule } from "../../ui/registry";
@@ -21,8 +21,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentSwitch } from "./AgentSwitch";
 
-function ModeSelect({ thread, provider }: ThreadContext) {
-  const modes = provider?.capabilities.permission_modes ?? [];
+function ModeSelect({ thread, provider, parent }: ThreadContext) {
+  // A child may not run looser than its parent, so looser modes are not offered.
+  const { modes, agentDefault } = allowedModes(provider?.capabilities.permission_modes ?? [], parent);
   const active = thread.status === "active";
   return (
     <Choice
@@ -30,8 +31,17 @@ function ModeSelect({ thread, provider }: ThreadContext) {
       aria-label="Permission mode"
       value={thread.permission_mode ?? null}
       disabled={active}
-      title={active ? "Changes once the running turn ends" : "How much the agent may do unasked"}
-      options={[{ value: null, label: "Agent default" }, ...modes.map((mode) => ({ value: mode, label: modeLabel[mode] }))]}
+      title={
+        active
+          ? "Changes once the running turn ends"
+          : parent
+            ? "How much the agent may do unasked; no more than the thread that started it"
+            : "How much the agent may do unasked"
+      }
+      options={[
+        ...(agentDefault ? [{ value: null, label: "Agent default" }] : []),
+        ...modes.map((mode) => ({ value: mode, label: modeLabel[mode] })),
+      ]}
       onChange={(value) => void store().setMode(thread.id, value as PermissionMode | null)}
     />
   );

@@ -424,6 +424,20 @@ pub struct ThreadSetProjectParams {
     pub project: Option<ProjectId>,
 }
 
+method!(
+    /// Place a thread under another, or take it out to stand on its own (`None`).
+    /// Refused when it would make a thread its own ancestor, or leave a thread
+    /// running looser than the one it is placed under.
+    ThreadSetParent, "thread.set_parent", ThreadSetParentParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadSetParentParams {
+    pub thread_id: ThreadId,
+    #[serde(default)]
+    pub parent: Option<ThreadId>,
+}
+
 // ----- projects ---------------------------------------------------------------------
 
 method!(

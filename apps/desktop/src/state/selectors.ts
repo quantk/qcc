@@ -91,6 +91,26 @@ export const modeLabel: Record<PermissionMode, string> = {
   full: "Full access",
 };
 
+/** Modes from the strictest to the loosest, as the daemon orders them. */
+const MODE_ORDER: readonly PermissionMode[] = ["ask", "accept-edits", "auto", "full"];
+
+/**
+ * The modes a thread may be put in. A thread may not run looser than the thread
+ * that started it; a parent without a mode allows its children `ask` and the
+ * agent's own configuration, and nothing else (the daemon's `check_ceiling`).
+ */
+export function allowedModes(
+  modes: readonly PermissionMode[],
+  parent: Thread | undefined,
+): { modes: PermissionMode[]; agentDefault: boolean } {
+  if (!parent) return { modes: [...modes], agentDefault: true };
+  const ceiling = MODE_ORDER.indexOf(parent.permission_mode ?? "ask");
+  return {
+    modes: modes.filter((mode) => MODE_ORDER.indexOf(mode) <= ceiling),
+    agentDefault: !parent.permission_mode,
+  };
+}
+
 /** One line saying what the agent last did, or is doing. */
 export function activityText(thread: Thread): string {
   if (!thread.activity) return "";
@@ -137,24 +157,106 @@ export function childrenOf(threads: readonly Thread[], id: string): Thread[] {
   return threads.filter((thread) => thread.parent === id).sort((a, b) => a.created_at - b.created_at);
 }
 
-export type TreeRow = { thread: Thread; depth: number; children: number };
+export type TreeRow = {
+  thread: Thread;
+  depth: number;
+  /** Threads this one started, shown or not. */
+  children: number;
+  /** Its children are hidden under it. */
+  collapsed: boolean;
+  /** How many threads are hidden under a collapsed row, at every depth. */
+  hidden: number;
+  /** The most pressing state among the hidden ones, so a collapsed row still tells. */
+  hiddenAttention: Attention | null;
+};
+
+/** Which state a collapsed family shows when its members differ. */
+const URGENCY: readonly Attention[] = ["waiting", "failed", "active", "idle", "archived"];
 
 /**
  * Threads as a list in which delegated threads sit under the thread that started
  * them, in the order they were started. Threads without a parent in the list come
- * first, newest first.
+ * first, newest first. The children of a thread in `collapsed` are left out, unless
+ * `reveal` is among them: a selected thread is never hidden.
  */
-export function threadTree(threads: readonly Thread[]): TreeRow[] {
+export function threadTree(
+  threads: readonly Thread[],
+  collapsed: ReadonlySet<string> = new Set(),
+  reveal?: string | null,
+): TreeRow[] {
   const known = new Set(threads.map((thread) => thread.id));
+  const byId = new Map(threads.map((thread) => [thread.id, thread]));
+  // The ancestors of the revealed thread stay open.
+  const open = new Set<string>();
+  for (let id = reveal ? byId.get(reveal)?.parent : undefined, step = 0; id && step < MAX_ANCESTORS; step++) {
+    open.add(id);
+    id = byId.get(id)?.parent ?? undefined;
+  }
+  const descendants = (thread: Thread, depth: number): Thread[] =>
+    depth >= MAX_ANCESTORS
+      ? []
+      : childrenOf(threads, thread.id).flatMap((child) => [child, ...descendants(child, depth + 1)]);
+
   const rows: TreeRow[] = [];
   const visit = (thread: Thread, depth: number) => {
     const children = childrenOf(threads, thread.id);
-    rows.push({ thread, depth, children: children.length });
-    if (depth < MAX_ANCESTORS) for (const child of children) visit(child, depth + 1);
+    const folded = children.length > 0 && collapsed.has(thread.id) && !open.has(thread.id);
+    const hidden = folded ? descendants(thread, depth) : [];
+    const states = new Set(hidden.map(attentionOf));
+    rows.push({
+      thread,
+      depth,
+      children: children.length,
+      collapsed: folded,
+      hidden: hidden.length,
+      hiddenAttention: URGENCY.find((state) => states.has(state)) ?? null,
+    });
+    if (!folded && depth < MAX_ANCESTORS) for (const child of children) visit(child, depth + 1);
   };
   const roots = threads
     .filter((thread) => !thread.parent || !known.has(thread.parent))
     .sort((a, b) => b.created_at - a.created_at);
   for (const root of roots) visit(root, 0);
   return rows;
+}
+
+/** Dropped onto a thread: under it (`into`) or next to it, under its parent (`beside`). */
+export type DropZone = "into" | "beside";
+
+/** What dropping a thread somewhere would do. */
+export type Drop = { parent: string | null } | { refused: string };
+
+/**
+ * Where a thread dragged in the sidebar lands: `target` is the thread it is
+ * dropped on, or null for the top of its group. Null when nothing would change.
+ * Threads move only within their group, and the daemon's rules are checked here
+ * too, so a drop it would refuse says why before it is let go.
+ */
+export function dropOf(
+  group: readonly Thread[],
+  dragged: string,
+  target: string | null,
+  zone: DropZone,
+): Drop | null {
+  const byId = new Map(group.map((thread) => [thread.id, thread]));
+  const thread = byId.get(dragged);
+  if (!thread || (target !== null && !byId.has(target))) return null;
+  const onto = target === null ? undefined : byId.get(target);
+  let parent: string | null = onto ? (zone === "into" ? onto.id : (onto.parent ?? null)) : null;
+  // A parent outside the group is not shown above it: next to such a thread is the top.
+  if (parent !== null && !byId.has(parent)) parent = null;
+  const current = thread.parent && byId.has(thread.parent) ? thread.parent : null;
+  if (parent === current) return null;
+  if (parent === null) return { parent };
+  for (let id: string | null | undefined = parent, step = 0; id && step <= MAX_ANCESTORS; step++) {
+    if (id === dragged) return { refused: "A thread cannot go under itself or a thread it started" };
+    id = byId.get(id)?.parent;
+  }
+  const newParent = byId.get(parent);
+  const { modes, agentDefault } = allowedModes(MODE_ORDER, newParent);
+  const fits = thread.permission_mode ? modes.includes(thread.permission_mode) : agentDefault;
+  if (!fits) {
+    return { refused: `Runs looser than “${newParent?.title ?? "New thread"}” allows` };
+  }
+  return { parent };
 }

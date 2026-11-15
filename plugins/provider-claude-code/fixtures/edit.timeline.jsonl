@@ -1,0 +1,16 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"claude-code","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"In list.txt replace the line beta"}
+{"type":"session/started","resumed":false}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"session/identified","provider_session":"186972f7-7526-4056-82b9-e649b21ccbb3"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"fileRead","path":"/work/list.txt"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"fileRead","path":"/work/list.txt"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"fileChange","path":"/work/list.txt","diff":"-beta\n+BETA\n+delta"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"fileChange","path":"/work/list.txt","diff":"@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA\n+delta\n gamma"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_3","text":"done"}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"done"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":6,"output_tokens":423,"cached_input_tokens":77603},"last":{"input_tokens":6,"output_tokens":423,"cached_input_tokens":77603},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

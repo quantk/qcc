@@ -9,11 +9,13 @@
 //! | `/slow <text>`       | streams one word per timer tick; can be interrupted          |
 //! | `/tool <name>`       | a tool call that opens and closes                            |
 //! | `/ask <question>`    | asks the user a question and echoes the answer               |
-//! | `/approve <command>` | asks for approval of a command item                          |
+//! | `/approve <command>` | asks for approval of a command item (not in `auto`/`full`)   |
 //! | `/exec <prog> <args>`| runs a process and streams its stdout                        |
 //! | `/kv`                | counts invocations in the plugin's key-value store           |
 //! | `/fail <message>`    | the turn fails                                               |
 //! | `/crash`             | the plugin traps                                             |
+//!
+//! A message steered into a running `/slow` turn is appended to what it streams.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -32,6 +34,7 @@ struct Session {
     output_tokens: u64,
     turn: Option<Turn>,
     next_request: u64,
+    mode: Option<PermissionMode>,
 }
 
 /// What the running turn is waiting for.
@@ -160,6 +163,22 @@ impl Echo {
                 }));
                 session.turn = Some(Turn::Asking { request_id });
             }
+            "/approve"
+                if matches!(session.mode, Some(PermissionMode::Auto | PermissionMode::Full)) =>
+            {
+                // The mode says not to ask: the command just runs.
+                let key = ItemKey::Provider(session.request_id());
+                out.push(Delta::ItemOpen(ItemOpen {
+                    key: key.clone(),
+                    shape: command_item(rest, None),
+                }));
+                out.push(Delta::ItemClose(ItemClose {
+                    key,
+                    shape: command_item(rest, Some(0)),
+                    status: ItemStatus::Completed,
+                }));
+                out.push(completed());
+            }
             "/approve" => {
                 let request_id = session.request_id();
                 let key = ItemKey::Provider(request_id.clone());
@@ -256,12 +275,23 @@ impl Provider for Echo {
         ProviderInfo {
             id: "echo".into(),
             name: "Echo".into(),
-            capabilities: ProviderCapabilities { resume: true, fork: false, steer: false },
+            capabilities: ProviderCapabilities {
+                resume: true,
+                fork: false,
+                steer: true,
+                permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AcceptEdits,
+                    PermissionMode::Auto,
+                    PermissionMode::Full,
+                ],
+            },
         }
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
-        self.sessions.insert(start.thread.clone(), Session::default());
+        let session = Session { mode: start.permission_mode, ..Session::default() };
+        self.sessions.insert(start.thread.clone(), session);
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt)?;
@@ -273,6 +303,18 @@ impl Provider for Echo {
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
         self.run(&input.thread, &input.text)
+    }
+
+    fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
+        let session = self.sessions.get_mut(&input.thread).ok_or("the session was not started")?;
+        match &mut session.turn {
+            Some(Turn::Slow { words, .. }) => {
+                words.extend(input.text.split_whitespace().map(str::to_owned));
+                Ok(())
+            }
+            Some(_) => Err("this turn is waiting for an answer, not for more input".into()),
+            None => Err("no turn is running".into()),
+        }
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {

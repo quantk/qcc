@@ -102,7 +102,19 @@ impl Provider for AcpProvider {
         ProviderInfo {
             id: self.agent.id.into(),
             name: self.agent.name.into(),
-            capabilities: ProviderCapabilities { resume: true, fork: false, steer: false },
+            capabilities: ProviderCapabilities {
+                resume: true,
+                fork: false,
+                // The protocol has no way to add input to a running prompt.
+                steer: false,
+                // ACP has no automatic reviewer for `auto` to hand approvals to; the
+                // other modes are enforced by the bridge answering permission requests.
+                permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AcceptEdits,
+                    PermissionMode::Full,
+                ],
+            },
         }
     }
 
@@ -116,7 +128,8 @@ impl Provider for AcpProvider {
             env: start.env,
             cwd: Some(start.cwd.clone()),
         })?;
-        let (bridge, handshake) = Bridge::new(start.cwd, start.model, start.resume.clone());
+        let (bridge, handshake) =
+            Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
         let session =
             Session { process, stdout: LineBuffer::default(), stderr: Tail::new(4096), bridge };
         self.sessions.insert(start.thread.clone(), session);

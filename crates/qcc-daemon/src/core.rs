@@ -1,19 +1,22 @@
 //! The core task: the single owner of all daemon state.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
-use qcc_domain::{Delta, ThreadEvent, ThreadId, ThreadStatus};
+use qcc_domain::{
+    Delta, EventPayload, PermissionMode, ProviderId, ThreadEvent, ThreadId, ThreadStatus,
+};
 use qcc_plugin_host::{
     Contribution, Outcome, PluginError, PluginHost, PluginRequest, ProviderRequest, SessionStart,
 };
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
-    DaemonStatus, DaemonStatusResult, Empty, InteractionResolve, InteractionResolveParams,
-    PluginInfo, PluginList, PluginListResult, PluginPermissions, StopMode, THREAD_EVENT,
-    ThreadEventNotification, ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet,
-    ThreadGetParams, ThreadList, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
+    DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
+    InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
+    SendMode, StopMode, THREAD_EVENT, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
+    ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListResult, ThreadResult,
+    ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetMode, ThreadSetModeParams,
     ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnsubscribe,
     ThreadUnsubscribeParams,
 };
@@ -54,6 +57,7 @@ impl Responder {
 /// What a finished plugin call was for.
 pub(crate) enum Action {
     Input,
+    Steer,
     Resolve,
     Interrupt,
     Release,
@@ -101,8 +105,6 @@ struct Session {
     /// Deltas that arrived before the start was answered. They are applied after
     /// `session/started`, so the timeline reads in causal order.
     buffered: Vec<Delta>,
-    /// Input submitted while starting, delivered once the session is up.
-    queued_inputs: Vec<String>,
 }
 
 struct Subscriber {
@@ -118,6 +120,8 @@ pub(crate) struct Core {
     supervisor: Supervisor,
     host: PluginHost,
     sessions: HashMap<ThreadId, Session>,
+    /// Threads with input waiting for their running turn to end.
+    queued: HashSet<ThreadId>,
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
     /// Set when the journal cannot be written. The daemon stops rather than let
     /// memory and disk disagree.
@@ -150,10 +154,12 @@ impl Core {
         let host = plugins::load_all(config, &commands).context("cannot load plugins")?;
 
         let mut supervisor = Supervisor::new(|| Box::new(UuidMint));
+        let mut queued = HashSet::new();
         let now = now_ms();
         for thread in store.threads()? {
-            // Only a thread that was mid-turn can have anything open to settle.
-            let history = if thread.status == ThreadStatus::Active {
+            // Only a thread that was mid-turn has anything open to settle, and only one
+            // with queued messages has a queue to rebuild.
+            let history = if thread.status == ThreadStatus::Active || thread.queued_inputs > 0 {
                 store.events(&thread.id, 0)?
             } else {
                 Vec::new()
@@ -164,6 +170,10 @@ impl Core {
                 tracing::info!(thread = %id, "settled a turn interrupted by the last shutdown");
                 store.append(&settled)?;
             }
+            // Messages that were waiting behind the interrupted turn are still owed.
+            if supervisor.engine(&id).is_ok_and(|engine| engine.has_queued_input()) {
+                queued.insert(id);
+            }
         }
 
         Ok(Self {
@@ -173,17 +183,20 @@ impl Core {
             supervisor,
             host,
             sessions: HashMap::new(),
+            queued,
             subscribers: HashMap::new(),
             fatal: None,
         })
     }
 
     pub(crate) async fn run(mut self, mut queue: UnboundedReceiver<Command>) -> anyhow::Result<()> {
+        self.drain_queues();
         while let Some(command) = queue.recv().await {
             if matches!(command, Command::Shutdown) {
                 break;
             }
             self.handle(command);
+            self.drain_queues();
             if let Some(error) = self.fatal.take() {
                 return Err(error);
             }
@@ -248,6 +261,10 @@ impl Core {
                 let result = params::<ThreadSend>(raw).and_then(|p| self.thread_send(p));
                 responder.reply(result);
             }
+            ThreadSetMode::NAME => {
+                let result = params::<ThreadSetMode>(raw).and_then(|p| self.thread_set_mode(p));
+                responder.reply(result);
+            }
             ThreadStop::NAME => match params::<ThreadStop>(raw) {
                 Ok(p) => self.thread_stop(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
@@ -295,12 +312,7 @@ impl Core {
     }
 
     fn thread_spawn(&mut self, p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
-        if self.host.provider(&p.provider).is_none() {
-            return Err(RpcError::new(
-                codes::PROVIDER_NOT_FOUND,
-                format!("no plugin provides {:?}", p.provider.as_str()),
-            ));
-        }
+        self.check_mode(&p.provider, p.permission_mode)?;
         if let Some(parent) = &p.parent
             && self.supervisor.thread(parent).is_none()
         {
@@ -325,6 +337,7 @@ impl Core {
                     cwd: p.cwd,
                     model: p.model,
                     parent: p.parent,
+                    permission_mode: p.permission_mode,
                 },
                 now,
             )
@@ -341,26 +354,144 @@ impl Core {
         Ok(ThreadResult { thread })
     }
 
-    fn thread_send(&mut self, p: ThreadSendParams) -> Result<Empty, RpcError> {
-        let ThreadSendParams { thread_id, text } = p;
+    /// The provider must exist and must be able to enforce the mode.
+    fn check_mode(
+        &self,
+        provider: &ProviderId,
+        mode: Option<PermissionMode>,
+    ) -> Result<(), RpcError> {
+        let Some((_, info)) = self.host.provider(provider) else {
+            return Err(RpcError::new(
+                codes::PROVIDER_NOT_FOUND,
+                format!("no plugin provides {:?}", provider.as_str()),
+            ));
+        };
+        match mode {
+            Some(mode) if !info.capabilities.permission_modes.contains(&mode) => {
+                let supported: Vec<&str> =
+                    info.capabilities.permission_modes.iter().map(|m| m.as_str()).collect();
+                Err(RpcError::new(
+                    codes::INVALID_PARAMS,
+                    format!(
+                        "provider {} cannot enforce permission mode {:?}; it supports: {}",
+                        provider,
+                        mode.as_str(),
+                        supported.join(", ")
+                    ),
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn thread_send(&mut self, p: ThreadSendParams) -> Result<ThreadSendResult, RpcError> {
+        let ThreadSendParams { thread_id, text, delivery } = p;
+        let provider = self.supervisor.thread(&thread_id).map(|thread| thread.provider.clone());
+        let can_steer = provider
+            .and_then(|provider| self.host.provider(&provider))
+            .is_some_and(|(_, info)| info.capabilities.steer);
+        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
-        let live = engine.session_live();
-        let events = engine.submit_input(text.clone(), now_ms());
-        self.commit(events);
+        let now = now_ms();
 
-        let session = self.sessions.entry(thread_id.clone()).or_default();
-        if session.starting {
-            session.queued_inputs.push(text);
-        } else if live {
-            self.call_provider(&thread_id, Action::Input, None, |thread| ProviderRequest::Input {
+        // Nothing in the way: the message starts a turn. Queued messages go first.
+        if !engine.busy() && !starting && !engine.has_queued_input() {
+            let events = engine.submit_input(text.clone(), now);
+            self.commit(events);
+            self.deliver(&thread_id, text);
+            return Ok(ThreadSendResult { delivery: Delivery::Started, queue_id: None });
+        }
+
+        if delivery == SendMode::Steer && can_steer && engine.turn_open() && engine.session_live() {
+            let events = engine.steer_input(text.clone(), now);
+            self.commit(events);
+            self.call_provider(&thread_id, Action::Steer, None, |thread| ProviderRequest::Steer {
+                thread,
+                text,
+            });
+            return Ok(ThreadSendResult { delivery: Delivery::Steered, queue_id: None });
+        }
+
+        let events = engine.queue_input(text, now);
+        let queue_id = events.iter().find_map(|event| match &event.payload {
+            EventPayload::InputQueued { queue_id, .. } => Some(queue_id.clone()),
+            _ => None,
+        });
+        self.commit(events);
+        self.queued.insert(thread_id);
+        Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    /// Hand a submitted message to the provider, attaching a session first if needed.
+    fn deliver(&mut self, id: &ThreadId, text: String) {
+        let live = self.supervisor.engine(id).is_ok_and(|engine| engine.session_live());
+        if live {
+            self.call_provider(id, Action::Input, None, |thread| ProviderRequest::Input {
                 thread,
                 text,
             });
         } else {
-            self.start_session(&thread_id, Some(text));
+            self.start_session(id, Some(text));
         }
-        Ok(Empty {})
+    }
+
+    /// Deliver queued messages of every thread that has become free. One message per
+    /// thread: the next one waits for the turn this one starts.
+    fn drain_queues(&mut self) {
+        if self.queued.is_empty() {
+            return;
+        }
+        let now = now_ms();
+        for id in self.queued.clone() {
+            if self.sessions.get(&id).is_some_and(|session| session.starting) {
+                continue;
+            }
+            let Ok(engine) = self.supervisor.engine(&id) else {
+                self.queued.remove(&id);
+                continue;
+            };
+            let delivery = engine.deliver_queued(now);
+            if !engine.has_queued_input() {
+                self.queued.remove(&id);
+            }
+            if let Some((text, events)) = delivery {
+                self.commit(events);
+                self.deliver(&id, text);
+            }
+        }
+    }
+
+    fn thread_set_mode(&mut self, p: ThreadSetModeParams) -> Result<ThreadResult, RpcError> {
+        let ThreadSetModeParams { thread_id, permission_mode } = p;
+        let provider = self
+            .supervisor
+            .thread(&thread_id)
+            .map(|thread| thread.provider.clone())
+            .ok_or_else(|| thread_not_found(&thread_id))?;
+        self.check_mode(&provider, permission_mode)?;
+        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        if engine.busy() || starting {
+            return Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "a turn is running; stop it before changing the permission mode",
+            ));
+        }
+        let live = engine.session_live();
+        let events = engine.set_permission_mode(permission_mode, now_ms());
+        let changed = !events.is_empty();
+        self.commit(events);
+        if changed && live {
+            // A mode is fixed when a session is constructed. Release this one; the
+            // next message resumes the conversation in the new mode.
+            self.call_provider(&thread_id, Action::Release, None, |thread| ProviderRequest::Stop {
+                thread,
+            });
+        }
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
     }
 
     fn thread_stop(&mut self, p: ThreadStopParams, responder: Responder) {
@@ -370,11 +501,16 @@ impl Core {
         };
         if self.sessions.get(&thread_id).is_some_and(|session| session.starting) {
             return responder.reply::<Empty>(Err(RpcError::new(
-                codes::PROVIDER_ERROR,
+                codes::THREAD_BUSY,
                 "the provider session is still starting; try again",
             )));
         }
-        if !engine.session_live() {
+        // Stop means stop: what was waiting for this turn is not run after it.
+        let dropped = engine.drop_queued(now_ms());
+        let engine_live = engine.session_live();
+        self.commit(dropped);
+        self.queued.remove(&thread_id);
+        if !engine_live {
             // Nothing is attached, so nothing can be running.
             return responder.reply(Ok(Empty {}));
         }
@@ -488,6 +624,7 @@ impl Core {
                 model: thread.model,
                 resume,
                 prompt,
+                permission_mode: thread.permission_mode,
                 env: vec![
                     (paths::THREAD_ID_ENV.into(), id.to_string()),
                     (paths::SOCKET_ENV.into(), self.config.socket.display().to_string()),
@@ -523,12 +660,6 @@ impl Core {
                     self.commit(events);
                 }
                 self.apply_deltas(&id, session.buffered);
-                for text in session.queued_inputs {
-                    self.call_provider(&id, Action::Input, None, |thread| ProviderRequest::Input {
-                        thread,
-                        text,
-                    });
-                }
             }
             Ok(other) => {
                 self.apply_deltas(&id, session.buffered);
@@ -580,6 +711,12 @@ impl Core {
             Ok(_) => {}
             // The provider refused; it is still alive and the user should see why.
             Err(PluginError::Rejected(message)) => {
+                if matches!(action, Action::Input)
+                    && let Ok(engine) = self.supervisor.engine(&id)
+                {
+                    // No turn will open for this message; do not wait for one.
+                    engine.input_rejected();
+                }
                 self.apply_deltas(&id, vec![Delta::ProviderError { message: message.clone() }]);
             }
             // Reported separately through `PluginCrashed`, which settles every thread
@@ -589,7 +726,7 @@ impl Core {
         }
         let now = now_ms();
         match action {
-            Action::Input | Action::Resolve => {}
+            Action::Input | Action::Steer | Action::Resolve => {}
             Action::Interrupt => {
                 // The backstop: a bridge that settled its own turn makes this a no-op.
                 if let Ok(engine) = self.supervisor.engine(&id) {
@@ -645,8 +782,12 @@ impl Core {
 
     fn session_failed(&mut self, id: &ThreadId, message: String) {
         self.sessions.remove(id);
+        self.queued.remove(id);
         if let Ok(engine) = self.supervisor.engine(id) {
-            let events = engine.session_failed(message, now_ms());
+            let now = now_ms();
+            let mut events = engine.session_failed(message, now);
+            // Retrying the queue against a provider that just failed would loop.
+            events.extend(engine.drop_queued(now));
             self.commit(events);
         }
     }

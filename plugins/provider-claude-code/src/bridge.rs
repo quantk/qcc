@@ -3,7 +3,10 @@
 //! Verified against Claude Code 2.1.325; the recordings in `fixtures/` are what that
 //! version actually sent. What the bridge relies on:
 //!
-//! * every user message written to stdin is answered by exactly one `result`;
+//! * a user message written while no turn runs starts one, which ends with exactly
+//!   one `result`; a message written during a turn is taken into that turn at the
+//!   next step and gets no `result` of its own;
+//! * every turn starts with a `system` message of subtype `init`;
 //! * text streams as `stream_event` deltas, and each finished content block arrives
 //!   again, complete, in an `assistant` message;
 //! * a tool call is a `tool_use` block, its outcome a `tool_result` block in a `user`
@@ -33,8 +36,6 @@ pub struct Bridge {
     /// The session id already reported to the core.
     session: Option<String>,
     turn_open: bool,
-    /// Prompts written to the agent that wait behind the running turn.
-    queued: u32,
     /// Turns we settled ourselves on interrupt whose `result` is still to come;
     /// everything the agent says until then belongs to a turn that is over.
     draining: u32,
@@ -83,7 +84,7 @@ fn tool_shape(name: &str, input: &Value, output: Option<String>) -> ItemShape {
         "Read" => ItemShape::FileRead(str_field(input, "file_path").to_owned()),
         "Write" | "Edit" | "MultiEdit" => ItemShape::FileChange(FileChangeItem {
             path: str_field(input, "file_path").to_owned(),
-            diff: None,
+            diff: proposed_diff(name, input),
         }),
         "NotebookEdit" => ItemShape::FileChange(FileChangeItem {
             path: str_field(input, "notebook_path").to_owned(),
@@ -93,6 +94,46 @@ fn tool_shape(name: &str, input: &Value, output: Option<String>) -> ItemShape {
         "WebSearch" => ItemShape::Search(str_field(input, "query").to_owned()),
         _ => ItemShape::Tool(ToolItem { name: name.to_owned(), input: input.to_string(), output }),
     }
+}
+
+fn prefixed(prefix: char, text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines().map(move |line| format!("{prefix}{line}"))
+}
+
+/// What a file tool is about to do, from its input alone: the lines it removes and
+/// the lines it adds. This is all there is to show while the call waits for approval.
+fn proposed_diff(name: &str, input: &Value) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut edit = |edit: &Value| {
+        lines.extend(prefixed('-', str_field(edit, "old_string")));
+        lines.extend(prefixed('+', str_field(edit, "new_string")));
+    };
+    match name {
+        "Write" => lines.extend(prefixed('+', str_field(input, "content"))),
+        "Edit" => edit(input),
+        "MultiEdit" => input["edits"].as_array().into_iter().flatten().for_each(edit),
+        _ => {}
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
+/// The patch a file tool actually applied, as Claude Code reports it next to the tool
+/// result: real hunks with line numbers and context.
+fn applied_diff(tool_use_result: &Value) -> Option<String> {
+    let hunks = tool_use_result.get("structuredPatch")?.as_array()?;
+    let mut lines = Vec::new();
+    for hunk in hunks {
+        let number = |name: &str| hunk.get(name).and_then(Value::as_u64).unwrap_or(0);
+        lines.push(format!(
+            "@@ -{},{} +{},{} @@",
+            number("oldStart"),
+            number("oldLines"),
+            number("newStart"),
+            number("newLines")
+        ));
+        lines.extend(hunk["lines"].as_array()?.iter().filter_map(Value::as_str).map(str::to_owned));
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
 }
 
 fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
@@ -105,7 +146,6 @@ impl Bridge {
         Self {
             session,
             turn_open: false,
-            queued: 0,
             draining: 0,
             tools: HashMap::new(),
             approvals: HashMap::new(),
@@ -115,18 +155,21 @@ impl Bridge {
         }
     }
 
-    /// The user sent a message.
+    /// The user sent a message that starts a turn.
     pub fn prompt(&mut self, text: &str) -> Output {
-        let message = json!({"type": "user", "message": {"role": "user", "content": text}});
-        let mut output = Output { writes: vec![message.to_string()], deltas: Vec::new() };
-        if self.turn_open {
-            // The agent takes it after the running turn and answers with its own result.
-            self.queued += 1;
-        } else {
+        let mut output = self.steer(text);
+        if !self.turn_open {
             self.turn_open = true;
             output.deltas.push(Delta::TurnOpen);
         }
         output
+    }
+
+    /// The user sent a message for the running turn. On the wire it is the same
+    /// message as a prompt: the agent takes it into the turn at its next step.
+    pub fn steer(&mut self, text: &str) -> Output {
+        let message = json!({"type": "user", "message": {"role": "user", "content": text}});
+        Output { writes: vec![message.to_string()], deltas: Vec::new() }
     }
 
     /// Interrupt the running turn. The turn is settled right here: whatever the agent
@@ -224,6 +267,12 @@ impl Bridge {
                     self.session = Some(id.to_owned());
                     output.deltas.push(Delta::SessionIdentity(id.to_owned()));
                 }
+                // A turn we did not start: a steered message arrived after its turn
+                // had ended, so the agent runs it as a turn of its own.
+                if !self.turn_open && self.draining == 0 {
+                    self.turn_open = true;
+                    output.deltas.push(Delta::TurnOpen);
+                }
             }
             return output;
         }
@@ -245,7 +294,7 @@ impl Bridge {
             "user" => {
                 for block in message["message"]["content"].as_array().into_iter().flatten() {
                     if str_field(block, "type") == "tool_result" {
-                        self.tool_result(block, &mut output.deltas);
+                        self.tool_result(block, &message["tool_use_result"], &mut output.deltas);
                     }
                 }
             }
@@ -309,7 +358,7 @@ impl Bridge {
         }
     }
 
-    fn tool_result(&mut self, block: &Value, deltas: &mut Vec<Delta>) {
+    fn tool_result(&mut self, block: &Value, details: &Value, deltas: &mut Vec<Delta>) {
         let id = str_field(block, "tool_use_id");
         // A result for a call we never saw opened carries no shape to close with.
         let Some((name, input)) = self.tools.remove(id) else {
@@ -322,9 +371,15 @@ impl Bridge {
             (false, false) => ItemStatus::Completed,
         };
         let output = text_of(&block["content"]);
+        let mut shape = tool_shape(&name, &input, Some(output));
+        if let (ItemShape::FileChange(change), Some(applied)) = (&mut shape, applied_diff(details))
+        {
+            // The patch that was applied beats the one that was proposed.
+            change.diff = Some(applied);
+        }
         deltas.push(Delta::ItemClose(ItemClose {
             key: ItemKey::Provider(id.to_owned()),
-            shape: tool_shape(&name, &input, Some(output)),
+            shape,
             status,
         }));
     }
@@ -412,7 +467,7 @@ impl Bridge {
         }
     }
 
-    /// Close the running turn and, if a prompt was waiting behind it, open the next.
+    /// Close the running turn.
     fn settle(&mut self, status: TurnStatus, error: Option<String>, deltas: &mut Vec<Delta>) {
         self.tools.clear();
         self.approvals.clear();
@@ -422,13 +477,8 @@ impl Bridge {
             deltas.push(Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: true }));
             return;
         }
+        self.turn_open = false;
         deltas.push(boundary(status, error));
-        if self.queued > 0 {
-            self.queued -= 1;
-            deltas.push(Delta::TurnOpen);
-        } else {
-            self.turn_open = false;
-        }
     }
 }
 
@@ -472,29 +522,63 @@ mod tests {
     }
 
     #[test]
-    fn a_queued_prompt_gets_its_own_turn() {
+    fn a_steered_message_joins_the_running_turn() {
         let mut bridge = Bridge::new(None);
         assert_eq!(kinds(&bridge.prompt("one").deltas), ["turn.open"]);
-        let queued = bridge.prompt("two");
-        assert_eq!(queued.writes.len(), 1);
-        assert_eq!(kinds(&queued.deltas), Vec::<&str>::new());
-
-        // The first result closes the first turn and opens the queued one.
-        assert_eq!(
-            kinds(&bridge.on_line(&result(json!({}))).deltas),
-            ["usage", "boundary.completed", "turn.open"]
-        );
+        // Same wire message as a prompt, but no turn of its own.
+        let steered = bridge.steer("also this");
+        assert!(steered.writes[0].contains("also this"));
+        assert_eq!(kinds(&steered.deltas), Vec::<&str>::new());
+        // One result ends the turn both messages belong to.
         assert_eq!(
             kinds(&bridge.on_line(&result(json!({}))).deltas),
             ["usage", "boundary.completed"]
         );
+
         // Usage is summed across turns.
+        bridge.prompt("two");
         let Delta::Usage(usage) = &bridge.on_line(&result(json!({}))).deltas[0] else {
             panic!("expected usage");
         };
-        assert_eq!((usage.total.input_tokens, usage.last.input_tokens), (6, 2));
-        assert_eq!(usage.total.cached_input_tokens, Some(45));
+        assert_eq!((usage.total.input_tokens, usage.last.input_tokens), (4, 2));
+        assert_eq!(usage.total.cached_input_tokens, Some(30));
         assert_eq!(usage.model_context_window, Some(1000));
+    }
+
+    #[test]
+    fn a_steer_that_missed_its_turn_becomes_a_turn_of_its_own() {
+        let init = r#"{"type":"system","subtype":"init","session_id":"abc"}"#;
+        let mut bridge = Bridge::new(Some("abc".into()));
+        bridge.prompt("one");
+        assert_eq!(bridge.on_line(init), Output::default(), "the turn we opened");
+        bridge.steer("too late");
+        bridge.on_line(&result(json!({})));
+
+        // The agent starts over with the late message: its `init` opens the turn.
+        assert_eq!(kinds(&bridge.on_line(init).deltas), ["turn.open"]);
+        assert_eq!(
+            kinds(&bridge.on_line(&result(json!({}))).deltas),
+            ["usage", "boundary.completed"]
+        );
+    }
+
+    #[test]
+    fn file_changes_carry_a_diff() {
+        let write = json!({"file_path": "a.txt", "content": "one\ntwo"});
+        let edit = json!({"file_path": "a.txt", "old_string": "two", "new_string": "2\n3"});
+        let multi = json!({"file_path": "a.txt", "edits": [
+            {"old_string": "a", "new_string": "b"}, {"old_string": "c", "new_string": "d"}]});
+        assert_eq!(proposed_diff("Write", &write).as_deref(), Some("+one\n+two"));
+        assert_eq!(proposed_diff("Edit", &edit).as_deref(), Some("-two\n+2\n+3"));
+        assert_eq!(proposed_diff("MultiEdit", &multi).as_deref(), Some("-a\n+b\n-c\n+d"));
+        assert_eq!(proposed_diff("Read", &write), None);
+
+        let details = json!({"structuredPatch": [
+            {"oldStart": 1, "oldLines": 2, "newStart": 1, "newLines": 3, "lines": [" one", "-two", "+2", "+3"]}]});
+        assert_eq!(applied_diff(&details).as_deref(), Some("@@ -1,2 +1,3 @@\n one\n-two\n+2\n+3"));
+        // A new file has no hunks; the proposed diff stands.
+        assert_eq!(applied_diff(&json!({"structuredPatch": []})), None);
+        assert_eq!(applied_diff(&json!("Error: declined")), None);
     }
 
     #[test]
@@ -542,10 +626,13 @@ mod tests {
     fn session_identity_is_announced_once() {
         let init = r#"{"type":"system","subtype":"init","session_id":"abc"}"#;
         let mut fresh = Bridge::new(None);
+        fresh.prompt("hello");
         assert_eq!(fresh.on_line(init).deltas, [Delta::SessionIdentity("abc".into())]);
         // Claude repeats `init` at the start of every turn.
         assert_eq!(fresh.on_line(init), Output::default());
-        assert_eq!(Bridge::new(Some("abc".into())).on_line(init), Output::default());
+        let mut resumed = Bridge::new(Some("abc".into()));
+        resumed.prompt("hello");
+        assert_eq!(resumed.on_line(init), Output::default());
     }
 
     #[test]

@@ -12,15 +12,16 @@ use std::process::ExitCode;
 use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use qcc_client::protocol::methods::{
-    DaemonStatus, Empty, InteractionResolve, InteractionResolveParams, PluginList, StopMode,
-    ThreadGet, ThreadGetParams, ThreadList, ThreadSend, ThreadSendParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams,
+    DaemonStatus, Delivery, Empty, InteractionResolve, InteractionResolveParams, PluginList,
+    SendMode, StopMode, ThreadGet, ThreadGetParams, ThreadList, ThreadSend, ThreadSendParams,
+    ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
+    ThreadStopParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
-    EventPayload, InteractionId, InteractionResolution, ProviderId, ThreadEvent, ThreadId,
-    ThreadStatus, TurnStatus,
+    EventPayload, InteractionId, InteractionResolution, PermissionMode, ProviderId, ThreadEvent,
+    ThreadId, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
@@ -80,18 +81,30 @@ enum ThreadCommand {
         /// Parent thread [default: $QCC_THREAD_ID, set inside agent sessions].
         #[arg(long, env = paths::THREAD_ID_ENV)]
         parent: Option<String>,
+        /// How much the agent may do unasked: ask, accept-edits, auto or full
+        /// [default: the agent's own configuration].
+        #[arg(long, value_name = "MODE")]
+        permission_mode: Option<PermissionMode>,
         /// Stream the thread's events until the first turn settles.
         #[arg(long)]
         follow: bool,
     },
-    /// Send a message to a thread.
+    /// Send a message to a thread. While a turn is running the message is queued
+    /// behind it, or fed into it with --steer.
     Send {
         thread: String,
         text: String,
-        /// Stream the thread's events until the turn settles.
+        /// Feed the message into the running turn instead of queueing it. Queued
+        /// anyway if the provider cannot steer.
+        #[arg(long)]
+        steer: bool,
+        /// Stream the thread's events until the turn that takes this message settles.
         #[arg(long)]
         follow: bool,
     },
+    /// Change a thread's permission mode: ask, accept-edits, auto, full, or
+    /// `default` for the agent's own configuration.
+    Mode { thread: String, mode: String },
     /// Interrupt the running turn of a thread.
     Stop {
         thread: String,
@@ -196,7 +209,15 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::Spawn { provider, prompt, cwd, model, parent, follow }) => {
+        Command::Thread(ThreadCommand::Spawn {
+            provider,
+            prompt,
+            cwd,
+            model,
+            parent,
+            permission_mode,
+            follow,
+        }) => {
             let cwd = match cwd {
                 Some(cwd) => std::path::absolute(cwd)?,
                 None => std::env::current_dir()?,
@@ -210,6 +231,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     prompt,
                     model,
                     parent: parent.map(ThreadId::new),
+                    permission_mode,
                 })
                 .await?;
             if follow {
@@ -217,7 +239,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     eprintln!("thread {}", result.thread.id);
                 }
                 let stream = client.events(result.thread.id, 0, true).await?;
-                return follow_turn(stream, json).await;
+                return follow_turn(stream, json, None).await;
             }
             if json {
                 print_json(&result)?;
@@ -226,7 +248,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::Send { thread, text, follow }) => {
+        Command::Thread(ThreadCommand::Send { thread, text, steer, follow }) => {
             let thread_id = ThreadId::new(thread);
             // Read the cursor first so the stream starts at this message.
             let cursor = client
@@ -234,15 +256,44 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .await?
                 .thread
                 .last_seq;
-            client
-                .call::<ThreadSend>(ThreadSendParams { thread_id: thread_id.clone(), text })
+            let delivery = if steer { SendMode::Steer } else { SendMode::Queue };
+            let sent = client
+                .call::<ThreadSend>(ThreadSendParams {
+                    thread_id: thread_id.clone(),
+                    text,
+                    delivery,
+                })
                 .await?;
+            if !json {
+                match sent.delivery {
+                    Delivery::Started => {}
+                    Delivery::Steered => eprintln!("steered into the running turn"),
+                    Delivery::Queued => eprintln!("queued behind the running turn"),
+                }
+            }
             if follow {
                 let stream = client.events(thread_id, cursor, true).await?;
-                return follow_turn(stream, json).await;
+                // A queued message's turn is not the one running now.
+                return follow_turn(stream, json, sent.queue_id).await;
             }
             if json {
-                print_json(&Empty {})?;
+                print_json(&sent)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::Mode { thread, mode }) => {
+            let permission_mode = match mode.as_str() {
+                "default" => None,
+                mode => Some(mode.parse::<PermissionMode>().map_err(anyhow::Error::msg)?),
+            };
+            let result = client
+                .call::<ThreadSetMode>(ThreadSetModeParams {
+                    thread_id: ThreadId::new(thread),
+                    permission_mode,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
             }
         }
 
@@ -348,10 +399,28 @@ fn print_event(event: &ThreadEvent, json: bool) -> anyhow::Result<()> {
 
 /// Print events until the turn settles. The exit code says how it went, so scripts
 /// and agents can branch on it.
-async fn follow_turn(mut stream: EventStream, json: bool) -> anyhow::Result<ExitCode> {
+async fn follow_turn(
+    mut stream: EventStream,
+    json: bool,
+    queue_id: Option<String>,
+) -> anyhow::Result<ExitCode> {
+    // For a queued message, turns that settle before it is delivered are not its own.
+    let mut waiting_for = queue_id;
     while let Some(event) = stream.next().await {
         print_event(&event, json)?;
         match &event.payload {
+            EventPayload::InputSubmitted { queue_id: Some(delivered), .. }
+                if waiting_for.as_ref() == Some(delivered) =>
+            {
+                waiting_for = None;
+            }
+            EventPayload::InputDropped { queue_id: dropped }
+                if waiting_for.as_ref() == Some(dropped) =>
+            {
+                stream.close().await;
+                return Ok(ExitCode::FAILURE);
+            }
+            EventPayload::TurnCompleted { .. } if waiting_for.is_some() => {}
             EventPayload::TurnCompleted { status, .. } => {
                 stream.close().await;
                 return Ok(match status {

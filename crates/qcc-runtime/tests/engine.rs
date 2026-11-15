@@ -15,6 +15,7 @@ fn new_thread(id: &str) -> NewThread {
         cwd: "/work".into(),
         model: None,
         parent: None,
+        permission_mode: None,
     }
 }
 
@@ -237,4 +238,133 @@ fn unknown_thread() {
         supervisor.engine(&"nope".into()),
         Err(SupervisorError::UnknownThread(id)) if id.as_str() == "nope"
     ));
+}
+
+fn boundary() -> Delta {
+    Delta::TurnBoundary { status: TurnStatus::Completed, error: None, claim_if_idle: false }
+}
+
+#[test]
+fn queued_input_is_delivered_one_turn_at_a_time() {
+    let mut supervisor = supervisor();
+    let mut journal = supervisor.create(new_thread("t1"), 1).unwrap();
+    let engine = supervisor.engine(&"t1".into()).unwrap();
+    journal.extend(engine.session_started(None, false, 2));
+
+    assert!(!engine.busy());
+    journal.extend(engine.submit_input("first".into(), 3));
+    // Handed to the provider, turn not open yet: already busy.
+    assert!(engine.busy() && !engine.turn_open());
+    journal.extend(engine.queue_input("second".into(), 4));
+    journal.extend(engine.queue_input("third".into(), 5));
+    assert_eq!(engine.deliver_queued(6), None, "nothing is delivered behind pending input");
+
+    journal.extend(engine.apply_deltas([Delta::TurnOpen], 7));
+    journal.extend(engine.steer_input("a nudge".into(), 8));
+    assert_eq!(engine.deliver_queued(9), None, "nothing is delivered into a running turn");
+    journal.extend(engine.apply_deltas([boundary()], 10));
+
+    let (text, events) = engine.deliver_queued(11).expect("the turn is over");
+    assert_eq!(text, "second");
+    assert!(matches!(
+        &events[0].payload,
+        EventPayload::InputSubmitted { text, steered: false, queue_id: Some(id) }
+            if text == "second" && id == "q_1"
+    ));
+    journal.extend(events);
+    assert_eq!(engine.deliver_queued(12), None, "one message per turn");
+    assert!(engine.has_queued_input());
+
+    // The provider refuses it: the queue must not be stuck behind a turn that never opens.
+    engine.input_rejected();
+    let (text, events) = engine.deliver_queued(13).unwrap();
+    assert_eq!(text, "third");
+    journal.extend(events);
+    assert!(!engine.has_queued_input());
+    journal.extend(engine.apply_deltas([Delta::TurnOpen, boundary()], 14));
+    assert_eq!(engine.deliver_queued(15), None);
+
+    let wire = serde_json::to_value(&journal).unwrap();
+    let inputs: Vec<String> = wire
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["type"].as_str().unwrap().starts_with("input/"))
+        .map(|e| {
+            format!(
+                "{} {}{}",
+                e["type"],
+                e["text"],
+                if e["steered"] == true { " steered" } else { "" }
+            )
+        })
+        .collect();
+    assert_eq!(
+        inputs,
+        [
+            "\"input/submitted\" \"first\"",
+            "\"input/queued\" \"second\"",
+            "\"input/queued\" \"third\"",
+            "\"input/submitted\" \"a nudge\" steered",
+            "\"input/submitted\" \"second\"",
+            "\"input/submitted\" \"third\"",
+        ]
+    );
+    assert_projection(&journal, &engine.thread().clone());
+}
+
+#[test]
+fn stopping_drops_the_queue_and_a_restart_keeps_it() {
+    let mut first = supervisor();
+    let mut journal = first.create(new_thread("t1"), 1).unwrap();
+    let engine = first.engine(&"t1".into()).unwrap();
+    journal.extend(engine.session_started(None, false, 2));
+    journal.extend(engine.submit_input("first".into(), 3));
+    journal.extend(engine.apply_deltas([Delta::TurnOpen], 4));
+    journal.extend(engine.queue_input("later".into(), 5));
+    let persisted = engine.thread().clone();
+
+    // The daemon dies mid-turn: the queued message survives in the journal.
+    let mut second = Supervisor::new(|| Box::new(SequentialMint::starting_after(100)));
+    journal.extend(second.recover(persisted, journal.iter().map(|e| &e.payload), 50));
+    let engine = second.engine(&"t1".into()).unwrap();
+    assert!(engine.has_queued_input() && !engine.busy());
+    let (text, events) = engine.deliver_queued(51).unwrap();
+    assert_eq!(text, "later");
+    journal.extend(events);
+
+    journal.extend(engine.session_started(None, true, 52));
+    journal.extend(engine.apply_deltas([Delta::TurnOpen], 53));
+    journal.extend(engine.queue_input("never mind".into(), 54));
+    let dropped = engine.drop_queued(55);
+    assert_eq!(types(&dropped), ["input/dropped"]);
+    journal.extend(dropped);
+    assert!(!engine.has_queued_input());
+    assert_eq!(engine.drop_queued(56), vec![]);
+    assert_projection(&journal, &engine.thread().clone());
+}
+
+#[test]
+fn permission_mode_is_part_of_the_projection() {
+    use qcc_domain::PermissionMode;
+    let mut supervisor = supervisor();
+    let mut new = new_thread("t1");
+    new.permission_mode = Some(PermissionMode::Ask);
+    let mut journal = supervisor.create(new, 1).unwrap();
+    let engine = supervisor.engine(&"t1".into()).unwrap();
+    assert_eq!(engine.thread().permission_mode, Some(PermissionMode::Ask));
+
+    assert_eq!(engine.set_permission_mode(Some(PermissionMode::Ask), 2), vec![]);
+    let events = engine.set_permission_mode(Some(PermissionMode::AcceptEdits), 3);
+    assert_eq!(
+        serde_json::to_value(&events[0]).unwrap()["permission_mode"],
+        "accept-edits",
+        "the wire name is kebab-case"
+    );
+    journal.extend(events);
+    journal.extend(engine.set_permission_mode(None, 4));
+    assert_eq!(engine.thread().permission_mode, None);
+    assert_projection(&journal, &engine.thread().clone());
+    assert_eq!("auto".parse::<PermissionMode>(), Ok(PermissionMode::Auto));
+    assert!("yolo".parse::<PermissionMode>().is_err());
 }

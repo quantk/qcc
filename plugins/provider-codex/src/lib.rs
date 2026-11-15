@@ -76,7 +76,17 @@ impl Provider for Codex {
         ProviderInfo {
             id: "codex".into(),
             name: "Codex".into(),
-            capabilities: ProviderCapabilities { resume: true, fork: false, steer: false },
+            capabilities: ProviderCapabilities {
+                resume: true,
+                fork: false,
+                steer: true,
+                permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AcceptEdits,
+                    PermissionMode::Auto,
+                    PermissionMode::Full,
+                ],
+            },
         }
     }
 
@@ -90,7 +100,8 @@ impl Provider for Codex {
             env: start.env,
             cwd: Some(start.cwd.clone()),
         })?;
-        let (bridge, handshake) = Bridge::new(start.cwd, start.model, start.resume.clone());
+        let (bridge, handshake) =
+            Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
         let session =
             Session { process, stdout: LineBuffer::default(), stderr: Tail::new(4096), bridge };
         self.sessions.insert(start.thread.clone(), session);
@@ -110,6 +121,12 @@ impl Provider for Codex {
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
         let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
         let output = session.bridge.prompt(&input.text);
+        self.apply(&input.thread, output)
+    }
+
+    fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
+        let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
+        let output = session.bridge.steer(&input.text);
         self.apply(&input.thread, output)
     }
 

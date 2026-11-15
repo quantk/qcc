@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use qcc_domain::{EventPayload, ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus};
+use qcc_domain::{
+    EventPayload, PermissionMode, ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus,
+};
 
 use crate::engine::ThreadEngine;
 use crate::mint::IdMint;
@@ -19,6 +21,7 @@ pub struct NewThread {
     pub cwd: String,
     pub model: Option<String>,
     pub parent: Option<ThreadId>,
+    pub permission_mode: Option<PermissionMode>,
 }
 
 /// All threads of a daemon. Owns one [`ThreadEngine`] per thread.
@@ -47,12 +50,14 @@ impl Supervisor {
             cwd: new.cwd,
             model: new.model,
             parent: new.parent,
+            permission_mode: new.permission_mode,
             title: None,
             status: ThreadStatus::Idle,
             provider_session: None,
             created_at: now,
             updated_at: now,
             last_seq: 0,
+            queued_inputs: 0,
         };
         let (engine, events) = ThreadEngine::create(thread, (self.mint)(), now);
         self.engines.insert(new.id, engine);

@@ -32,6 +32,8 @@ pub enum TimelineViolation {
     InteractionRequestedTwice(InteractionId),
     #[error("interaction {0} resolved but it is not pending")]
     InteractionNotPending(InteractionId),
+    #[error("queued input {0} delivered or dropped but it is not queued")]
+    InputNotQueued(String),
 }
 
 /// What is open on a thread right now: the fold of its events.
@@ -46,6 +48,8 @@ pub struct Timeline {
     next_item_ordinal: u64,
     pending_interactions: Vec<InteractionId>,
     seen_turns: HashSet<TurnId>,
+    /// Inputs waiting for the running turn to end: `(queue id, text)`, oldest first.
+    queued: Vec<(String, String)>,
 }
 
 impl Timeline {
@@ -59,6 +63,11 @@ impl Timeline {
 
     pub fn pending_interactions(&self) -> &[InteractionId] {
         &self.pending_interactions
+    }
+
+    /// Inputs waiting for delivery: `(queue id, text)`, oldest first.
+    pub fn queued_inputs(&self) -> &[(String, String)] {
+        &self.queued
     }
 
     /// Apply one event. A violating event is still applied on a best-effort basis so
@@ -160,7 +169,21 @@ impl Timeline {
                 }
                 Ok(())
             }
+            EventPayload::InputQueued { queue_id, text } => {
+                self.queued.push((queue_id.clone(), text.clone()));
+                Ok(())
+            }
+            EventPayload::InputSubmitted { queue_id: Some(queue_id), .. }
+            | EventPayload::InputDropped { queue_id } => {
+                let before = self.queued.len();
+                self.queued.retain(|(id, _)| id != queue_id);
+                if self.queued.len() == before {
+                    return Err(TimelineViolation::InputNotQueued(queue_id.clone()));
+                }
+                Ok(())
+            }
             EventPayload::ThreadCreated { .. }
+            | EventPayload::PermissionModeChanged { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }
             | EventPayload::SessionIdentified { .. }

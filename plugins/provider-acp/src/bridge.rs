@@ -6,7 +6,9 @@
 //! * `initialize`, then `session/new` (or `session/resume`, or `session/load`, to
 //!   continue one), then one `session/prompt` per turn, answered when the turn ends;
 //! * everything in between arrives as `session/update` notifications;
-//! * the agent asks for permission with a `session/request_permission` request;
+//! * the agent asks for permission with a `session/request_permission` request —
+//!   whether it asks at all is the agent's own configuration; the bridge answers for
+//!   the user where the thread's permission mode says so;
 //! * `session/cancel` is a notification, and the cancelled prompt still gets its
 //!   response.
 
@@ -85,6 +87,7 @@ pub struct Bridge {
     peer: Peer<Call>,
     cwd: String,
     model: Option<String>,
+    mode: Option<PermissionMode>,
     /// The session being continued, until the agent accepted or refused it.
     resume: Option<String>,
     session: Option<String>,
@@ -199,11 +202,17 @@ fn is_empty(value: &Value) -> bool {
 
 impl Bridge {
     /// A bridge for a new agent process, and the handshake to send it.
-    pub fn new(cwd: String, model: Option<String>, resume: Option<String>) -> (Self, Output) {
+    pub fn new(
+        cwd: String,
+        model: Option<String>,
+        resume: Option<String>,
+        mode: Option<PermissionMode>,
+    ) -> (Self, Output) {
         let mut bridge = Self {
             peer: Peer::default(),
             cwd,
             model,
+            mode,
             resume,
             session: None,
             ready: false,
@@ -625,6 +634,28 @@ impl Bridge {
             }));
         }
 
+        // The permission mode may answer for the user.
+        let approved = match self.mode {
+            Some(PermissionMode::Full | PermissionMode::Auto) => true,
+            Some(PermissionMode::AcceptEdits) => {
+                matches!(tool.kind.as_str(), "edit" | "delete" | "move")
+            }
+            Some(PermissionMode::Ask) | None => false,
+        };
+        let allow = ["allow_once", "allow_always"].iter().find_map(|kind| {
+            params["options"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|offered| str_field(offered, "kind") == *kind)
+                .map(|offered| str_field(offered, "optionId").to_owned())
+        });
+        if let (true, Some(option)) = (approved, allow) {
+            let outcome = json!({"outcome": {"outcome": "selected", "optionId": option}});
+            output.writes.push(self.peer.respond(&id, outcome));
+            return;
+        }
+
         let mut options = Vec::new();
         let mut rejecting = Vec::new();
         for offered in params["options"].as_array().into_iter().flatten() {
@@ -684,7 +715,7 @@ mod tests {
 
     /// A bridge with a ready session `s` and a running turn (prompt request id 3).
     fn running() -> Bridge {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None);
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
         bridge.on_line(INIT);
         bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
@@ -693,7 +724,7 @@ mod tests {
 
     #[test]
     fn a_prompt_waits_for_the_handshake() {
-        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("m1".into()), None);
+        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("m1".into()), None, None);
         assert_eq!(methods(&handshake), ["initialize"]);
         // Nothing is sent and no turn opens before the agent has a session.
         assert_eq!(bridge.prompt("hello"), Output::default());
@@ -717,7 +748,7 @@ mod tests {
 
     #[test]
     fn continuing_prefers_resume_then_load_then_a_new_session() {
-        let resume = || Bridge::new("/work".into(), None, Some("old".into())).0;
+        let resume = || Bridge::new("/work".into(), None, Some("old".into()), None).0;
 
         let mut bridge = resume();
         let request = bridge.on_line(INIT);
@@ -753,7 +784,7 @@ mod tests {
 
     #[test]
     fn a_refused_handshake_ends_the_session() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None);
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
         bridge.prompt("hello");
         let refused = bridge.on_line(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Authentication required"}}"#);
         assert!(refused.fatal);
@@ -822,6 +853,44 @@ mod tests {
             bridge.on_line(r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"cancelled"}}"#);
         assert_eq!(methods(&caught_up), ["session/prompt"]);
         assert_eq!(caught_up.deltas, [Delta::TurnOpen]);
+    }
+
+    #[test]
+    fn the_permission_mode_answers_for_the_user() {
+        let ask = |kind: &str| {
+            json!({"jsonrpc": "2.0", "id": 5, "method": "session/request_permission", "params": {
+            "toolCall": {"toolCallId": "t", "kind": kind, "title": "x"},
+            "options": [
+                {"optionId": "always", "kind": "allow_always", "name": "Always"},
+                {"optionId": "once", "kind": "allow_once", "name": "Once"},
+                {"optionId": "no", "kind": "reject_once", "name": "No"},
+            ]}})
+            .to_string()
+        };
+        let with_mode = |mode| {
+            let (mut bridge, _) = Bridge::new("/work".into(), None, None, mode);
+            bridge.on_line(INIT);
+            bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
+            bridge.prompt("go");
+            bridge
+        };
+        let answered = |output: &Output| {
+            // Allowed once, never "always": a mode is not a standing rule in the agent.
+            output.writes.len() == 1
+                && output.writes[0].contains("\"optionId\":\"once\"")
+                && !output.deltas.iter().any(|d| matches!(d, Delta::InteractionRequest(_)))
+        };
+        let asked = |output: &Output| {
+            output.writes.is_empty()
+                && output.deltas.iter().any(|d| matches!(d, Delta::InteractionRequest(_)))
+        };
+
+        assert!(answered(&with_mode(Some(PermissionMode::Full)).on_line(&ask("execute"))));
+        let mut edits = with_mode(Some(PermissionMode::AcceptEdits));
+        assert!(answered(&edits.on_line(&ask("edit"))));
+        assert!(asked(&edits.on_line(&ask("execute"))));
+        assert!(asked(&with_mode(Some(PermissionMode::Ask)).on_line(&ask("edit"))));
+        assert!(asked(&with_mode(None).on_line(&ask("edit"))));
     }
 
     #[test]

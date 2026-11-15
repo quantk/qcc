@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use qcc_domain::{
-    Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, ProviderId, Thread,
-    ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
+    Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, PermissionMode,
+    ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
 };
 use qcc_plugin_host::services::{KvStore, ProcessBackend};
 use qcc_plugin_host::{
@@ -95,12 +95,14 @@ impl HarnessBuilder {
             cwd: "/work".into(),
             model: None,
             parent: None,
+            permission_mode: None,
             title: None,
             status: ThreadStatus::Idle,
             provider_session: None,
             created_at: 0,
             updated_at: 0,
             last_seq: 0,
+            queued_inputs: 0,
         };
         let (engine, events) = ThreadEngine::create(thread, Box::new(SequentialMint::default()), 0);
         Harness {
@@ -115,6 +117,7 @@ impl HarnessBuilder {
             crash,
             foreign_deltas: 0,
             model: None,
+            permission_mode: None,
         }
     }
 }
@@ -133,6 +136,7 @@ pub struct Harness {
     crash: Arc<Mutex<Option<String>>>,
     foreign_deltas: usize,
     model: Option<String>,
+    permission_mode: Option<PermissionMode>,
 }
 
 impl Harness {
@@ -182,6 +186,11 @@ impl Harness {
         self.model = model.map(str::to_owned);
     }
 
+    /// The permission mode the next session start asks for.
+    pub fn set_permission_mode(&mut self, mode: Option<PermissionMode>) {
+        self.permission_mode = mode;
+    }
+
     /// Start a session, optionally with a first prompt, the way the daemon does.
     pub fn start(&mut self, prompt: Option<&str>) -> Result<(), PluginError> {
         self.start_with(prompt, None)
@@ -209,6 +218,7 @@ impl Harness {
             model: self.model.clone(),
             resume,
             prompt: prompt.map(str::to_owned),
+            permission_mode: self.permission_mode,
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
         }));
         match outcome {
@@ -232,6 +242,16 @@ impl Harness {
         self.events.extend(events);
         let thread = self.thread_id.clone();
         self.call(ProviderRequest::Input { thread, text: text.to_owned() })?;
+        self.pump();
+        Ok(())
+    }
+
+    /// Feed a message into the running turn.
+    pub fn steer(&mut self, text: &str) -> Result<(), PluginError> {
+        let events = self.engine.steer_input(text.to_owned(), 0);
+        self.events.extend(events);
+        let thread = self.thread_id.clone();
+        self.call(ProviderRequest::Steer { thread, text: text.to_owned() })?;
         self.pump();
         Ok(())
     }

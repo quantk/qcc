@@ -45,7 +45,17 @@ impl Provider for ClaudeCode {
         ProviderInfo {
             id: "claude-code".into(),
             name: "Claude Code".into(),
-            capabilities: ProviderCapabilities { resume: true, fork: false, steer: false },
+            capabilities: ProviderCapabilities {
+                resume: true,
+                fork: false,
+                steer: true,
+                permission_modes: vec![
+                    PermissionMode::Ask,
+                    PermissionMode::AcceptEdits,
+                    PermissionMode::Auto,
+                    PermissionMode::Full,
+                ],
+            },
         }
     }
 
@@ -69,6 +79,16 @@ impl Provider for ClaudeCode {
         .into();
         if let Some(model) = &start.model {
             args.extend(["--model".to_owned(), model.clone()]);
+        }
+        if let Some(mode) = start.permission_mode {
+            // Without the flag the user's own Claude Code settings decide.
+            let mode = match mode {
+                PermissionMode::Ask => "manual",
+                PermissionMode::AcceptEdits => "acceptEdits",
+                PermissionMode::Auto => "auto",
+                PermissionMode::Full => "bypassPermissions",
+            };
+            args.extend(["--permission-mode".to_owned(), mode.to_owned()]);
         }
         if let Some(session) = &start.resume {
             args.extend(["--resume".to_owned(), session.clone()]);
@@ -100,6 +120,12 @@ impl Provider for ClaudeCode {
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
         let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
         let output = session.bridge.prompt(&input.text);
+        session.apply(&input.thread, output)
+    }
+
+    fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
+        let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
+        let output = session.bridge.steer(&input.text);
         session.apply(&input.thread, output)
     }
 

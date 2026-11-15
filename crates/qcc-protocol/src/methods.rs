@@ -1,8 +1,8 @@
 //! Methods and notifications of the daemon API.
 
 use qcc_domain::{
-    EnvironmentInfo, InteractionId, InteractionResolution, ProviderId, ProviderInfo, Thread,
-    ThreadEvent, ThreadId,
+    EnvironmentInfo, InteractionId, InteractionResolution, PermissionMode, ProviderId,
+    ProviderInfo, Thread, ThreadEvent, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +61,10 @@ pub struct ThreadSpawnParams {
     /// The thread that spawned this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
+    /// How much the agent may do unasked. Absent: the agent's own configuration
+    /// decides. Must be a mode the provider lists in its capabilities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,14 +73,64 @@ pub struct ThreadResult {
 }
 
 method!(
-    /// Send a user message. Starts or resumes the provider session if none is attached.
-    ThreadSend, "thread.send", ThreadSendParams => Empty
+    /// Send a user message. With no turn running it starts one, starting or resuming
+    /// the provider session if none is attached. While a turn runs it is steered into
+    /// that turn or queued behind it, as `delivery` asks.
+    ThreadSend, "thread.send", ThreadSendParams => ThreadSendResult
 );
+
+/// What to do with a message that arrives while a turn is running.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SendMode {
+    /// Deliver it as its own turn once the running one ends.
+    #[default]
+    Queue,
+    /// Feed it into the running turn. Falls back to queueing when the provider
+    /// cannot steer.
+    Steer,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadSendParams {
     pub thread_id: ThreadId,
     pub text: String,
+    #[serde(default)]
+    pub delivery: SendMode,
+}
+
+/// What became of a sent message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Delivery {
+    /// It started a turn.
+    Started,
+    /// It went into the running turn.
+    Steered,
+    /// It waits for the running turn to end.
+    Queued,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSendResult {
+    pub delivery: Delivery,
+    /// Set when queued: the `queue_id` its `input/submitted` event will carry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<String>,
+}
+
+method!(
+    /// Change a thread's permission mode. Refused while a turn runs. An attached
+    /// provider session is released; the next message resumes it in the new mode.
+    ThreadSetMode, "thread.set_mode", ThreadSetModeParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadSetModeParams {
+    pub thread_id: ThreadId,
+    /// Absent: back to the agent's own configuration.
+    #[serde(default)]
+    pub permission_mode: Option<PermissionMode>,
 }
 
 method!(

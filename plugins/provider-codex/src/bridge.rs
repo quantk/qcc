@@ -36,6 +36,7 @@ enum Call {
     /// `thread/start` or `thread/resume`.
     Thread,
     TurnStart,
+    Steer,
     Interrupt,
 }
 
@@ -48,6 +49,7 @@ pub struct Bridge {
     peer: Peer<Call>,
     cwd: String,
     model: Option<String>,
+    mode: Option<PermissionMode>,
     /// The thread being resumed, until the agent accepted or refused it.
     resume: Option<String>,
     thread: Option<String>,
@@ -61,6 +63,8 @@ pub struct Bridge {
     turn_id: Option<String>,
     /// An interrupt was asked for before the turn had an id to interrupt.
     interrupt_pending: bool,
+    /// Messages for the running turn, held until it has an id to steer.
+    steers_pending: Vec<String>,
     /// Turns settled by an interrupt: what the agent still says about them is ignored.
     interrupted: HashSet<String>,
     approvals: HashMap<String, Approval>,
@@ -138,11 +142,17 @@ fn text_item(item: &Value) -> Option<(TextChannel, String)> {
 
 impl Bridge {
     /// A bridge for a new agent process, and the handshake to send it.
-    pub fn new(cwd: String, model: Option<String>, resume: Option<String>) -> (Self, Output) {
+    pub fn new(
+        cwd: String,
+        model: Option<String>,
+        resume: Option<String>,
+        mode: Option<PermissionMode>,
+    ) -> (Self, Output) {
         let mut bridge = Self {
             peer: Peer::default(),
             cwd,
             model,
+            mode,
             resume,
             thread: None,
             ready: false,
@@ -151,6 +161,7 @@ impl Bridge {
             turn_open: false,
             turn_id: None,
             interrupt_pending: false,
+            steers_pending: Vec::new(),
             interrupted: HashSet::new(),
             approvals: HashMap::new(),
         };
@@ -188,6 +199,37 @@ impl Bridge {
         self.in_flight = true;
         self.turn_open = true;
         output.deltas.push(Delta::TurnOpen);
+    }
+
+    /// The user sent a message for the running turn.
+    pub fn steer(&mut self, text: &str) -> Output {
+        if !self.turn_open {
+            // The turn ended while the message was on its way: it starts the next one.
+            return self.prompt(text);
+        }
+        let mut output = Output::default();
+        self.steers_pending.push(text.to_owned());
+        self.send_steers(&mut output);
+        output
+    }
+
+    /// `turn/steer` names the turn it expects to be running, so it can only be sent
+    /// once the agent has told us the turn's id.
+    fn send_steers(&mut self, output: &mut Output) {
+        let (Some(turn), Some(thread)) = (&self.turn_id, &self.thread) else {
+            return;
+        };
+        for text in std::mem::take(&mut self.steers_pending) {
+            output.writes.push(self.peer.request(
+                "turn/steer",
+                json!({
+                    "threadId": thread,
+                    "expectedTurnId": turn,
+                    "input": [{"type": "text", "text": text, "text_elements": []}],
+                }),
+                Call::Steer,
+            ));
+        }
     }
 
     /// Interrupt the running turn. The turn is settled right here; what the agent
@@ -330,7 +372,17 @@ impl Bridge {
                     self.send_interrupt(turn, output);
                 } else if self.turn_open {
                     self.turn_id = Some(turn);
+                    self.send_steers(output);
                 }
+            }
+            (Call::Steer, Ok(_)) => {}
+            (Call::Steer, Err(error)) => {
+                // Most likely the turn ended first. The user has to know the message
+                // did not reach the agent.
+                output.deltas.push(Delta::ProviderError(format!(
+                    "the message could not be added to the running turn: {}",
+                    error.message
+                )));
             }
             (Call::TurnStart, Err(error)) => {
                 // The agent never took the prompt: no turn exists on its side.
@@ -345,11 +397,31 @@ impl Bridge {
     }
 
     fn thread_request(&mut self) -> String {
-        // Sandbox, approval policy and who reviews approvals are deliberately left
-        // out: they come from the user's own Codex configuration, as they would in
-        // the Codex CLI. qcc does not make an agent stricter or looser than its
-        // owner set it up to be.
         let mut params = json!({"cwd": self.cwd});
+        // Without a mode nothing is sent and the user's own Codex configuration
+        // decides, as it would in the Codex CLI. A mode sets all three knobs: the
+        // sandbox, when to ask, and who is asked.
+        let policy = match self.mode {
+            None => None,
+            // Ask about everything that is not known to be harmless.
+            Some(PermissionMode::Ask) => Some(("untrusted", "workspace-write", Some("user"))),
+            // Work freely inside the working directory; ask the user to leave it.
+            Some(PermissionMode::AcceptEdits) => {
+                Some(("on-request", "workspace-write", Some("user")))
+            }
+            // The same sandbox, but Codex's automatic reviewer answers.
+            Some(PermissionMode::Auto) => {
+                Some(("on-request", "workspace-write", Some("auto_review")))
+            }
+            Some(PermissionMode::Full) => Some(("never", "danger-full-access", None)),
+        };
+        if let Some((approval, sandbox, reviewer)) = policy {
+            params["approvalPolicy"] = json!(approval);
+            params["sandbox"] = json!(sandbox);
+            if let Some(reviewer) = reviewer {
+                params["approvalsReviewer"] = json!(reviewer);
+            }
+        }
         if let Some(model) = &self.model {
             params["model"] = json!(model);
         }
@@ -364,6 +436,7 @@ impl Bridge {
 
     fn settle(&mut self, status: TurnStatus, error: Option<String>, deltas: &mut Vec<Delta>) {
         self.approvals.clear();
+        self.steers_pending.clear();
         self.turn_id = None;
         if std::mem::take(&mut self.turn_open) {
             deltas.push(boundary(status, error));
@@ -388,7 +461,10 @@ impl Bridge {
         }
         let deltas = &mut output.deltas;
         match method {
-            "turn/started" => self.turn_id = Some(turn.to_owned()),
+            "turn/started" => {
+                self.turn_id = Some(turn.to_owned());
+                self.send_steers(output);
+            }
             "item/started" => {
                 let item = &params["item"];
                 if let Some(shape) = tool_shape(item) {
@@ -536,7 +612,7 @@ mod tests {
 
     /// A bridge with thread `th` ready and a turn started (`turn/start` is request 3).
     fn started() -> Bridge {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None);
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
@@ -545,16 +621,13 @@ mod tests {
 
     #[test]
     fn handshake_then_prompt() {
-        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("gpt-x".into()), None);
+        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("gpt-x".into()), None, None);
         assert_eq!(methods(&handshake), ["initialize"]);
         assert_eq!(bridge.prompt("hello"), Output::default(), "held until the thread exists");
 
         let initialized = bridge.on_line(r#"{"id":1,"result":{"userAgent":"x"}}"#);
         assert_eq!(methods(&initialized), ["initialized", "thread/start"]);
         assert!(initialized.writes[1].contains("\"model\":\"gpt-x\""));
-        // The user's Codex configuration decides sandboxing and approvals.
-        assert!(!initialized.writes[1].contains("sandbox"));
-        assert!(!initialized.writes[1].contains("approvalPolicy"));
 
         let ready = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(methods(&ready), ["turn/start"]);
@@ -564,7 +637,7 @@ mod tests {
 
     #[test]
     fn resume_falls_back_to_a_new_thread() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()));
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
         let resume = bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert_eq!(methods(&resume), ["initialized", "thread/resume"]);
         assert!(resume.writes[1].contains("\"threadId\":\"old\""));
@@ -579,7 +652,7 @@ mod tests {
         assert_eq!(fresh.deltas, [Delta::SessionIdentity("new".into())]);
 
         // A thread that resumes under its own id announces nothing.
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()));
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert!(bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"old"}}}"#).deltas.is_empty());
     }
@@ -604,6 +677,54 @@ mod tests {
         assert_eq!(bridge.on_line(&stale), Output::default());
         let done = notify("turn/completed", json!({"turn": {"id": "t1", "status": "interrupted"}}));
         let next = bridge.on_line(&done);
+        assert_eq!(methods(&next), ["turn/start"]);
+        assert_eq!(next.deltas, [Delta::TurnOpen]);
+    }
+
+    #[test]
+    fn the_permission_mode_sets_sandbox_policy_and_reviewer() {
+        let thread_start = |mode| {
+            let (mut bridge, _) = Bridge::new("/work".into(), None, None, mode);
+            let output = bridge.on_line(r#"{"id":1,"result":{}}"#);
+            let request: Value = serde_json::from_str(&output.writes[1]).unwrap();
+            request["params"].clone()
+        };
+        let knobs = |mode| {
+            let params = thread_start(Some(mode));
+            let text = |name: &str| params[name].as_str().unwrap_or("-").to_owned();
+            [text("approvalPolicy"), text("sandbox"), text("approvalsReviewer")].join(" ")
+        };
+        assert_eq!(knobs(PermissionMode::Ask), "untrusted workspace-write user");
+        assert_eq!(knobs(PermissionMode::AcceptEdits), "on-request workspace-write user");
+        // `auto` is the provider's own reviewer, not ours.
+        assert_eq!(knobs(PermissionMode::Auto), "on-request workspace-write auto_review");
+        assert_eq!(knobs(PermissionMode::Full), "never danger-full-access -");
+        // No mode: the user's Codex configuration is left alone.
+        assert_eq!(thread_start(None), json!({"cwd": "/work"}));
+    }
+
+    #[test]
+    fn steering_waits_for_the_turn_id_and_names_it() {
+        let mut bridge = started();
+        assert_eq!(bridge.steer("also this"), Output::default(), "the turn has no id yet");
+        let known = bridge.on_line(r#"{"id":3,"result":{"turn":{"id":"t1"}}}"#);
+        assert_eq!(methods(&known), ["turn/steer"]);
+        assert!(known.writes[0].contains("\"expectedTurnId\":\"t1\""));
+        assert!(known.writes[0].contains("also this"));
+        assert!(known.deltas.is_empty(), "a steer opens no turn");
+
+        assert_eq!(methods(&bridge.steer("and that")), ["turn/steer"]);
+        // The turn was already over on the agent's side.
+        let refused =
+            bridge.on_line(r#"{"id":5,"error":{"code":-32600,"message":"no active turn"}}"#);
+        assert!(
+            matches!(&refused.deltas[..], [Delta::ProviderError(e)] if e.contains("no active turn"))
+        );
+
+        // With no turn running, a steer is simply the next prompt.
+        let done = notify("turn/completed", json!({"turn": {"id": "t1", "status": "completed"}}));
+        bridge.on_line(&done);
+        let next = bridge.steer("late");
         assert_eq!(methods(&next), ["turn/start"]);
         assert_eq!(next.deltas, [Delta::TurnOpen]);
     }

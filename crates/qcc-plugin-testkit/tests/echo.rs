@@ -5,7 +5,8 @@
 use std::path::PathBuf;
 
 use qcc_domain::{
-    EventPayload, InteractionResolution, ItemStatus, ProviderCapabilities, TurnStatus,
+    EventPayload, InteractionResolution, ItemStatus, PermissionMode, ProviderCapabilities,
+    TurnStatus,
 };
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{Contribution, Grant, Outcome, Permissions, PluginError, ProviderRequest};
@@ -26,7 +27,15 @@ fn declares_its_provider() {
         panic!("expected one provider, got {:?}", harness.handle().contributions());
     };
     assert_eq!(info.id.as_str(), "echo");
-    assert_eq!(info.capabilities, ProviderCapabilities { resume: true, fork: false, steer: false });
+    assert_eq!(
+        info.capabilities,
+        ProviderCapabilities {
+            resume: true,
+            fork: false,
+            steer: true,
+            permission_modes: PermissionMode::ALL.to_vec(),
+        }
+    );
     assert_eq!(harness.handle().id(), "provider-echo");
 }
 
@@ -263,4 +272,38 @@ fn lists_models() {
         panic!("expected models");
     };
     assert_eq!(models[0].id, "echo-1");
+}
+
+#[test]
+fn steering_adds_to_the_running_turn() {
+    let mut harness = echo();
+    harness.start(Some("/slow one two three")).unwrap();
+    harness.steer("four five").unwrap();
+    harness.wait_turns(1);
+    harness.assert_conformant();
+    assert_eq!(harness.agent_messages(), ["one two three four five "]);
+    // One turn took both messages.
+    assert_eq!(harness.count(|p| matches!(p, EventPayload::TurnStarted { .. })), 1);
+    assert_eq!(harness.steer("too late"), Err(PluginError::Rejected("no turn is running".into())));
+}
+
+#[test]
+fn the_permission_mode_decides_whether_the_user_is_asked() {
+    let run = |mode| {
+        let mut harness = echo();
+        harness.set_permission_mode(mode);
+        harness.start(Some("/approve make deploy")).unwrap();
+        harness.pump();
+        harness
+    };
+    for mode in [None, Some(PermissionMode::Ask), Some(PermissionMode::AcceptEdits)] {
+        assert!(run(mode).pending_interaction().is_some(), "{mode:?} asks");
+    }
+    for mode in [PermissionMode::Auto, PermissionMode::Full] {
+        let mut harness = run(Some(mode));
+        harness.wait_turns(1);
+        harness.assert_conformant();
+        assert_eq!(harness.count(|p| matches!(p, EventPayload::InteractionRequested { .. })), 0);
+        assert_eq!(harness.completed_items()[0].status, ItemStatus::Completed);
+    }
 }

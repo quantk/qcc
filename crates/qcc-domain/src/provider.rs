@@ -4,14 +4,55 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::ProviderId;
 
+/// How much an agent may do without asking the user. A thread without a mode runs
+/// with the agent's own configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PermissionMode {
+    /// Everything the agent wants approved is asked of the user.
+    Ask,
+    /// File edits inside the working directory go through; the rest is asked.
+    AcceptEdits,
+    /// The provider's own automatic reviewer decides; the user is not asked.
+    Auto,
+    /// Nothing is asked and nothing is sandboxed.
+    Full,
+}
+
+impl PermissionMode {
+    pub const ALL: [Self; 4] = [Self::Ask, Self::AcceptEdits, Self::Auto, Self::Full];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::AcceptEdits => "accept-edits",
+            Self::Auto => "auto",
+            Self::Full => "full",
+        }
+    }
+}
+
+impl std::str::FromStr for PermissionMode {
+    type Err = String;
+
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        Self::ALL.into_iter().find(|mode| mode.as_str() == text).ok_or_else(|| {
+            format!("unknown permission mode {text:?}; use ask, accept-edits, auto or full")
+        })
+    }
+}
+
 /// Session-behaviour facts reported by the provider's own code.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCapabilities {
     /// A session can be resumed from its provider session handle.
     pub resume: bool,
     pub fork: bool,
-    /// Input sent while a turn is running is fed into that turn.
+    /// Input sent while a turn is running can be fed into that turn.
     pub steer: bool,
+    /// The permission modes the provider can enforce.
+    #[serde(default)]
+    pub permission_modes: Vec<PermissionMode>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

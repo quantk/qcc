@@ -219,6 +219,7 @@ mod tests {
             cwd: "/work".into(),
             model: None,
             parent: None,
+            permission_mode: None,
         }
     }
 

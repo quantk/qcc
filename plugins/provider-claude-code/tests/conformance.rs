@@ -5,7 +5,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use qcc_domain::{EventPayload, InteractionResolution, ItemShape, ItemStatus, TurnStatus};
+use qcc_domain::{
+    EventPayload, InteractionResolution, ItemShape, ItemStatus, PermissionMode, TurnStatus,
+};
 use qcc_plugin_testkit::{Harness, ScriptedProcesses};
 use serde_json::Value;
 
@@ -206,4 +208,67 @@ fn a_missing_executable_fails_the_start() {
     let mut harness = Harness::bundled("provider-claude-code").processes(processes).build();
     assert!(harness.start(Some("hello")).is_err());
     harness.assert_conformant();
+}
+
+#[test]
+fn a_message_sent_mid_turn_is_steered_into_it() {
+    let (mut harness, processes) = replay(&["steer"]);
+    harness.start(Some("First run `cat note.txt`, then run `cat other.txt`, then count")).unwrap();
+    harness.steer("Also end your answer with the word BANANA.").unwrap();
+    harness.wait_turns(1);
+    golden(&harness, "steer");
+
+    // Two user messages went to the agent; it answered them in one turn.
+    let sent = processes.stdin_messages();
+    assert_eq!(sent.iter().filter(|message| message["type"] == "user").count(), 2);
+    assert_eq!(harness.count(|p| matches!(p, EventPayload::TurnStarted { .. })), 1);
+    assert!(harness.agent_messages().last().unwrap().ends_with("BANANA"));
+    let steered =
+        harness.count(|p| matches!(p, EventPayload::InputSubmitted { steered: true, .. }));
+    assert_eq!(steered, 1);
+}
+
+#[test]
+fn accept_edits_mode_applies_an_edit_without_asking_and_reports_the_patch() {
+    let (mut harness, processes) = replay(&["edit"]);
+    harness.set_permission_mode(Some(PermissionMode::AcceptEdits));
+    harness.start(Some("In list.txt replace the line beta")).unwrap();
+    harness.wait_turns(1);
+    golden(&harness, "edit");
+
+    let args = &processes.spawns()[0].args;
+    let flag = args.iter().position(|arg| arg == "--permission-mode").expect("--permission-mode");
+    assert_eq!(args[flag + 1], "acceptEdits");
+    assert_eq!(harness.count(|p| matches!(p, EventPayload::InteractionRequested { .. })), 0);
+
+    let (path, diff) = harness
+        .completed_items()
+        .into_iter()
+        .find_map(|item| match item.shape {
+            ItemShape::FileChange { path, diff } => Some((path, diff)),
+            _ => None,
+        })
+        .expect("a file change");
+    assert_eq!(path, "/work/list.txt");
+    // The patch the agent applied, with line numbers and context.
+    assert_eq!(diff.as_deref(), Some("@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA\n+delta\n gamma"));
+}
+
+#[test]
+fn each_permission_mode_maps_to_a_claude_flag() {
+    let flag_for = |mode| {
+        let processes = ScriptedProcesses::new([vec![]]);
+        let mut harness =
+            Harness::bundled("provider-claude-code").processes(processes.clone()).build();
+        harness.set_permission_mode(mode);
+        harness.start(None).unwrap();
+        let args = processes.spawns()[0].args.clone();
+        args.iter().position(|arg| arg == "--permission-mode").map(|at| args[at + 1].clone())
+    };
+    assert_eq!(flag_for(Some(PermissionMode::Ask)).as_deref(), Some("manual"));
+    assert_eq!(flag_for(Some(PermissionMode::AcceptEdits)).as_deref(), Some("acceptEdits"));
+    assert_eq!(flag_for(Some(PermissionMode::Auto)).as_deref(), Some("auto"));
+    assert_eq!(flag_for(Some(PermissionMode::Full)).as_deref(), Some("bypassPermissions"));
+    // No mode: the user's own Claude Code settings decide.
+    assert_eq!(flag_for(None), None);
 }

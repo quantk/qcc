@@ -85,6 +85,11 @@ impl DeltaAssembler {
         }
     }
 
+    /// An id for a queued input, from the same source as every other timeline id.
+    pub fn mint_queue_id(&mut self) -> String {
+        self.mint.queued()
+    }
+
     /// Violations collected since the last call.
     pub fn take_violations(&mut self) -> Vec<GrammarViolation> {
         std::mem::take(&mut self.violations)

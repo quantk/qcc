@@ -1,6 +1,6 @@
 use qcc_domain::{
-    Delta, EventPayload, InteractionId, InteractionResolution, Thread, ThreadEvent, ThreadStatus,
-    TurnStatus,
+    Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, Thread, ThreadEvent,
+    ThreadStatus, TurnStatus,
 };
 
 use crate::assembler::{DeltaAssembler, GrammarViolation};
@@ -23,6 +23,8 @@ pub struct ThreadEngine {
     timeline: Timeline,
     session_live: bool,
     failed: bool,
+    /// Input was handed to the provider and its turn has not opened yet.
+    awaiting_turn: bool,
 }
 
 impl ThreadEngine {
@@ -39,6 +41,7 @@ impl ThreadEngine {
             timeline: Timeline::default(),
             session_live: false,
             failed: false,
+            awaiting_turn: false,
         };
         let events = engine.emit(vec![created], now);
         (engine, events)
@@ -67,6 +70,7 @@ impl ThreadEngine {
             timeline,
             session_live: false,
             failed,
+            awaiting_turn: false,
         };
         let settlement = engine.timeline.settlement(TurnStatus::Interrupted, None);
         let events = engine.emit(settlement, now);
@@ -87,9 +91,83 @@ impl ThreadEngine {
         self.assembler.take_violations()
     }
 
+    /// Whether a turn is running or about to: input was handed to the provider and
+    /// its turn has not opened yet. New input has to be steered or queued.
+    pub fn busy(&self) -> bool {
+        self.turn_open() || self.awaiting_turn
+    }
+
+    pub fn turn_open(&self) -> bool {
+        self.timeline.open_turn().is_some()
+    }
+
+    pub fn has_queued_input(&self) -> bool {
+        !self.timeline.queued_inputs().is_empty()
+    }
+
+    /// A user message that starts a turn. The caller delivers it to the provider.
     pub fn submit_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
         self.assembler.note_input();
-        self.emit(vec![EventPayload::InputSubmitted { text }], now)
+        self.awaiting_turn = !self.turn_open();
+        let submitted = EventPayload::InputSubmitted { text, steered: false, queue_id: None };
+        self.emit(vec![submitted], now)
+    }
+
+    /// A user message fed into the running turn.
+    pub fn steer_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
+        let submitted = EventPayload::InputSubmitted { text, steered: true, queue_id: None };
+        self.emit(vec![submitted], now)
+    }
+
+    /// A user message that waits for the running turn to end.
+    pub fn queue_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
+        let queue_id = self.assembler.mint_queue_id();
+        self.emit(vec![EventPayload::InputQueued { queue_id, text }], now)
+    }
+
+    /// Take the oldest queued message off the queue if the thread can start a turn.
+    /// Returns its text for the caller to deliver. One message per turn: the next one
+    /// waits until this one's turn has come and gone.
+    pub fn deliver_queued(&mut self, now: u64) -> Option<(String, Vec<ThreadEvent>)> {
+        if self.busy() {
+            return None;
+        }
+        let (queue_id, text) = self.timeline.queued_inputs().first().cloned()?;
+        self.assembler.note_input();
+        self.awaiting_turn = true;
+        let submitted = EventPayload::InputSubmitted {
+            text: text.clone(),
+            steered: false,
+            queue_id: Some(queue_id),
+        };
+        Some((text, self.emit(vec![submitted], now)))
+    }
+
+    /// Discard everything queued: the user stopped the thread.
+    pub fn drop_queued(&mut self, now: u64) -> Vec<ThreadEvent> {
+        let dropped = self
+            .timeline
+            .queued_inputs()
+            .iter()
+            .map(|(queue_id, _)| EventPayload::InputDropped { queue_id: queue_id.clone() })
+            .collect();
+        self.emit(dropped, now)
+    }
+
+    /// The provider refused the submitted input: no turn will open for it.
+    pub fn input_rejected(&mut self) {
+        self.awaiting_turn = false;
+    }
+
+    pub fn set_permission_mode(
+        &mut self,
+        permission_mode: Option<PermissionMode>,
+        now: u64,
+    ) -> Vec<ThreadEvent> {
+        if self.thread.permission_mode == permission_mode {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::PermissionModeChanged { permission_mode }], now)
     }
 
     pub fn session_started(
@@ -108,6 +186,7 @@ impl ThreadEngine {
     pub fn session_failed(&mut self, message: String, now: u64) -> Vec<ThreadEvent> {
         self.session_live = false;
         self.failed = true;
+        self.awaiting_turn = false;
         let mut payloads = vec![EventPayload::ProviderError { message: message.clone() }];
         self.assembler.settle(TurnStatus::Failed, Some(message), &mut payloads);
         self.emit(payloads, now)
@@ -124,6 +203,7 @@ impl ThreadEngine {
         }
         if payloads.iter().any(|p| matches!(p, EventPayload::SessionEnded { .. })) {
             self.session_live = false;
+            self.awaiting_turn = false;
         }
         self.emit(payloads, now)
     }
@@ -166,6 +246,9 @@ impl ThreadEngine {
         for payload in payloads {
             let applied = self.timeline.apply(&payload);
             debug_assert!(applied.is_ok(), "assembler broke the timeline grammar: {applied:?}");
+            if matches!(payload, EventPayload::TurnStarted { .. }) {
+                self.awaiting_turn = false;
+            }
             self.push(payload, now, &mut events);
         }
         let status = if self.timeline.open_turn().is_some() {

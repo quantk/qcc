@@ -2,7 +2,8 @@
 //! crate.
 
 use qcc_domain::{
-    EnvironmentInfo, InteractionResolution, ModelInfo, ProviderId, ProviderInfo, ThreadId,
+    EnvironmentInfo, InteractionResolution, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
+    ThreadId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -19,6 +20,8 @@ pub struct SessionStart {
     /// Provider session handle from an earlier start of this thread.
     pub resume: Option<String>,
     pub prompt: Option<String>,
+    /// Absent: the agent's own configuration decides.
+    pub permission_mode: Option<PermissionMode>,
     /// Variables the agent process must see.
     pub env: Vec<(String, String)>,
 }
@@ -26,10 +29,26 @@ pub struct SessionStart {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderRequest {
     Start(SessionStart),
-    Input { thread: ThreadId, text: String },
-    Interrupt { thread: ThreadId },
-    Stop { thread: ThreadId },
-    ResolveInteraction { thread: ThreadId, request_id: String, resolution: InteractionResolution },
+    Input {
+        thread: ThreadId,
+        text: String,
+    },
+    /// Input for the running turn; only for providers that declared `steer`.
+    Steer {
+        thread: ThreadId,
+        text: String,
+    },
+    Interrupt {
+        thread: ThreadId,
+    },
+    Stop {
+        thread: ThreadId,
+    },
+    ResolveInteraction {
+        thread: ThreadId,
+        request_id: String,
+        resolution: InteractionResolution,
+    },
     ListModels,
 }
 

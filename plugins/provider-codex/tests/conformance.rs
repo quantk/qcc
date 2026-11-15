@@ -191,3 +191,23 @@ fn a_dying_agent_fails_the_turn_with_its_last_words() {
     assert_eq!(harness.turn_statuses(), [(TurnStatus::Failed, Some(reason.into()))]);
     assert!(harness.input("anyone?").is_err());
 }
+
+#[test]
+fn a_message_sent_mid_turn_is_steered_into_it() {
+    let (mut harness, processes) = replay(&["steer"]);
+    harness.start(Some("First run `cat note.txt`, then run `cat other.txt`, then count")).unwrap();
+    harness.wait_until("the turn to start", |h| {
+        h.count(|payload| matches!(payload, EventPayload::TurnStarted { .. })) > 0
+    });
+    harness.steer("Also end your answer with the word BANANA.").unwrap();
+    harness.wait_turns(1);
+    golden(&harness, "steer");
+
+    assert_eq!(harness.count(|p| matches!(p, EventPayload::TurnStarted { .. })), 1);
+    assert!(harness.agent_messages().last().unwrap().ends_with("BANANA"));
+    let sent = processes.stdin_messages();
+    let steer = sent.iter().find(|m| m["method"] == "turn/steer").expect("turn/steer");
+    // Codex only accepts a steer that names the turn it is meant for.
+    assert_eq!(steer["params"]["expectedTurnId"], "01a1de9e-fd6e-7770-a949-51ee730040f4");
+    assert_eq!(sent.iter().filter(|m| m["method"] == "turn/start").count(), 1);
+}

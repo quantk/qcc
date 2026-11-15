@@ -4,10 +4,10 @@
 {"type":"turn/started","turn_id":"turn_1"}
 {"type":"thread/status","status":"active"}
 {"type":"session/identified","provider_session":"b2d79fc3-af16-4aa5-9a79-3a4f4887d6c1"}
-{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"fileChange","path":"/work/made.txt"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"fileChange","path":"/work/made.txt","diff":"+ok"}}
 {"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_1","request":{"type":"approval","title":"Allow Write?","detail":"/work/made.txt","options":[{"id":"allow","label":"Allow","kind":"allow"},{"id":"deny","label":"Deny","kind":"deny"}]}}
 {"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"deny"}}
-{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"declined","type":"fileChange","path":"/work/made.txt"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"declined","type":"fileChange","path":"/work/made.txt","diff":"+ok"}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_2","text":"I did"}
 {"type":"item/text/delta","item_id":"item_2","text":"n't create `"}

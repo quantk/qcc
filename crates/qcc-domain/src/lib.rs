@@ -23,6 +23,8 @@ pub use event::{EventPayload, ThreadEvent};
 pub use ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
-pub use provider::{EnvironmentInfo, ModelInfo, ProviderCapabilities, ProviderInfo};
+pub use provider::{
+    EnvironmentInfo, ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo,
+};
 pub use thread::{Thread, ThreadStatus, TurnStatus};
 pub use usage::{TokenUsage, UsageSnapshot};

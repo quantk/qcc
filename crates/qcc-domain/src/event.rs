@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::ids::{InteractionId, ItemId, ThreadId, TurnId};
 use crate::interaction::{InteractionRequest, InteractionResolution};
 use crate::item::Item;
+use crate::provider::PermissionMode;
 use crate::thread::{Thread, ThreadStatus, TurnStatus};
 use crate::usage::UsageSnapshot;
 
@@ -47,8 +48,31 @@ pub enum EventPayload {
         reason: Option<String>,
     },
 
+    #[serde(rename = "thread/permission-mode")]
+    PermissionModeChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        permission_mode: Option<PermissionMode>,
+    },
+
+    /// A user message was handed to the provider.
     #[serde(rename = "input/submitted")]
-    InputSubmitted { text: String },
+    InputSubmitted {
+        text: String,
+        /// Fed into the running turn instead of starting one.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        steered: bool,
+        /// The queued input this delivery takes off the queue.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        queue_id: Option<String>,
+    },
+
+    /// A user message arrived while a turn was running and waits for it to end.
+    #[serde(rename = "input/queued")]
+    InputQueued { queue_id: String, text: String },
+
+    /// A queued message was discarded before delivery (the thread was stopped).
+    #[serde(rename = "input/dropped")]
+    InputDropped { queue_id: String },
 
     #[serde(rename = "turn/started")]
     TurnStarted { turn_id: TurnId },

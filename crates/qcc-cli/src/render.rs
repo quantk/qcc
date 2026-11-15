@@ -32,6 +32,9 @@ pub fn thread_details(thread: &Thread) -> String {
         format!("provider  {}", thread.provider),
         format!("cwd       {}", thread.cwd),
     ];
+    if let Some(mode) = thread.permission_mode {
+        lines.push(format!("mode      {}", mode.as_str()));
+    }
     if let Some(parent) = &thread.parent {
         lines.push(format!("parent    {parent}"));
     }
@@ -48,6 +51,20 @@ pub fn plugin(plugin: &PluginInfo) -> String {
     )];
     for provider in &plugin.providers {
         lines.push(format!("  provider     {}  {}", provider.id, provider.name));
+        let capabilities = &provider.capabilities;
+        let modes: Vec<&str> = capabilities.permission_modes.iter().map(|m| m.as_str()).collect();
+        if !modes.is_empty() {
+            lines.push(format!("    modes      {}", modes.join(", ")));
+        }
+        let mut can = Vec::new();
+        for (name, on) in [("resume", capabilities.resume), ("steer", capabilities.steer)] {
+            if on {
+                can.push(name);
+            }
+        }
+        if !can.is_empty() {
+            lines.push(format!("    can        {}", can.join(", ")));
+        }
     }
     for environment in &plugin.environments {
         lines.push(format!("  environment  {}  {}", environment.id, environment.name));
@@ -111,7 +128,15 @@ fn item(item: &Item) -> Option<String> {
 /// One event as text; `None` for events that only matter to programs.
 pub fn event(event: &ThreadEvent) -> Option<String> {
     Some(match &event.payload {
-        EventPayload::InputSubmitted { text } => format!("> {text}"),
+        EventPayload::InputSubmitted { text, steered: true, .. } => {
+            format!("> {text}  (into the running turn)")
+        }
+        EventPayload::InputSubmitted { text, .. } => format!("> {text}"),
+        EventPayload::InputQueued { text, .. } => format!("(queued) {text}"),
+        EventPayload::InputDropped { .. } => "(a queued message was dropped)".to_owned(),
+        EventPayload::PermissionModeChanged { permission_mode } => {
+            format!("permission mode: {}", permission_mode.map_or("default", |mode| mode.as_str()))
+        }
         EventPayload::ItemCompleted { item: completed, .. } => item(completed)?,
         EventPayload::TurnCompleted { status, error, .. } => match (status, error) {
             (TurnStatus::Completed, _) => return None,

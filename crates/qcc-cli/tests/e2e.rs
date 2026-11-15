@@ -407,3 +407,148 @@ fn plugins_and_daemon_are_listed() {
     let second = runtime.block_on(qcc_daemon::serve(config, || {}, std::future::pending()));
     assert!(second.unwrap_err().to_string().contains("already listening"));
 }
+
+fn words(count: usize) -> String {
+    (0..count).map(|n| n.to_string()).collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn a_message_sent_during_a_turn_is_queued_and_runs_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn(&format!("/slow {}", words(60)));
+    daemon.wait_for(&id, "item/text/delta");
+
+    // `--follow` on a queued message waits for the turn that takes it, not for the
+    // one that is running.
+    let output = daemon.qcc(&["thread", "send", &id, "second message", "--json", "--follow"]);
+    assert!(output.ok, "{}", output.stderr);
+    let followed = output.json_lines();
+    let kinds = types(&followed);
+    assert_eq!(kinds[0], "input/queued");
+    assert_eq!(kinds.iter().filter(|kind| **kind == "turn/completed").count(), 2);
+    let delivered = followed.iter().position(|e| e["type"] == "input/submitted").unwrap();
+    let first_done = followed.iter().position(|e| e["type"] == "turn/completed").unwrap();
+    assert!(first_done < delivered, "delivered only after the running turn settled");
+    assert_eq!(followed[delivered]["queue_id"], followed[0]["queue_id"]);
+    assert_eq!(*messages(&followed).last().unwrap(), "second message");
+
+    let sent = daemon.qcc(&["thread", "send", &id, "third", "--json"]).json();
+    assert_eq!(sent["delivery"], "started", "an idle thread takes the message at once");
+}
+
+#[test]
+fn a_message_can_be_steered_into_the_running_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn(&format!("/slow {}", words(40)));
+    daemon.wait_for(&id, "item/text/delta");
+
+    let sent = daemon.qcc(&["thread", "send", &id, "LAST WORDS", "--steer", "--json"]).json();
+    assert_eq!(sent["delivery"], "steered");
+    daemon.wait_for(&id, "turn/completed");
+    let events = daemon.events(&id);
+    assert_eq!(types(&events).iter().filter(|kind| **kind == "turn/started").count(), 1);
+    assert!(messages(&events)[0].ends_with("LAST WORDS "), "{:?}", messages(&events));
+    let steered = events.iter().find(|e| e["type"] == "input/submitted" && e["steered"] == true);
+    assert_eq!(steered.unwrap()["text"], "LAST WORDS");
+}
+
+#[test]
+fn stop_drops_the_queue_and_a_restart_keeps_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let stopped = daemon.spawn(&format!("/slow {}", words(3000)));
+    let kept = daemon.spawn(&format!("/slow {}", words(3000)));
+    for id in [&stopped, &kept] {
+        daemon.wait_for(id, "item/text/delta");
+        let sent = daemon.qcc(&["thread", "send", id, "run me later", "--json"]).json();
+        assert_eq!(sent["delivery"], "queued");
+    }
+    assert_eq!(daemon.thread(&kept)["queued_inputs"], 1);
+
+    // Stopping a thread means its queued messages are not run behind the user's back.
+    assert!(daemon.qcc(&["thread", "stop", &stopped]).ok);
+    let events = daemon.events(&stopped);
+    assert!(types(&events).contains(&"input/dropped"));
+    assert_eq!(types(&events).iter().filter(|kind| **kind == "turn/started").count(), 1);
+
+    // A daemon restart interrupts the turn but still owes the queued message.
+    daemon.stop();
+    let daemon = Daemon::start(dir.path());
+    daemon.wait_for(&kept, "session/started");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while messages(&daemon.events(&kept)).last() != Some(&"run me later") {
+        assert!(Instant::now() < deadline, "{:#?}", types(&daemon.events(&kept)));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(daemon.thread(&kept).get("queued_inputs").is_none());
+    assert_eq!(types(&daemon.events(&stopped)).iter().filter(|k| **k == "turn/started").count(), 1);
+}
+
+#[test]
+fn permission_mode_is_set_at_spawn_and_can_be_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+
+    // In `auto` the provider approves by itself: nothing is asked.
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--permission-mode",
+        "auto",
+        "--prompt",
+        "/approve make deploy",
+        "--json",
+        "--follow",
+    ]);
+    assert!(output.ok, "{}", output.stderr);
+    let events = output.json_lines();
+    assert!(!types(&events).contains(&"interaction/requested"));
+    let id = events[0]["thread_id"].as_str().unwrap().to_owned();
+    assert_eq!(daemon.thread(&id)["permission_mode"], "auto");
+
+    // Switching to `ask` releases the session; the next message resumes it and asks.
+    assert!(daemon.qcc(&["thread", "mode", &id, "ask"]).ok);
+    assert_eq!(daemon.thread(&id)["permission_mode"], "ask");
+    assert!(daemon.qcc(&["thread", "send", &id, "/approve make deploy"]).ok);
+    daemon.wait_for(&id, "interaction/requested");
+    let kinds = daemon.events(&id);
+    let kinds = types(&kinds);
+    let changed = kinds.iter().position(|kind| *kind == "thread/permission-mode").unwrap();
+    assert!(kinds[changed..].contains(&"session/ended"));
+    assert!(kinds[changed..].contains(&"session/started"));
+
+    // Not while a turn is running.
+    let busy = daemon.qcc(&["thread", "mode", &id, "full"]);
+    assert!(!busy.ok);
+    assert!(busy.stderr.contains("stop it before changing the permission mode"), "{}", busy.stderr);
+    assert!(daemon.qcc(&["thread", "stop", &id]).ok);
+    assert!(daemon.qcc(&["thread", "mode", &id, "default"]).ok);
+    assert!(daemon.thread(&id).get("permission_mode").is_none());
+
+    // A provider is never started in a mode it cannot enforce.
+    let unsupported =
+        daemon.qcc(&["thread", "spawn", "--provider", "opencode", "--permission-mode", "auto"]);
+    assert!(!unsupported.ok);
+    assert!(
+        unsupported.stderr.contains(
+            "cannot enforce permission mode \"auto\"; it supports: ask, accept-edits, full"
+        ),
+        "{}",
+        unsupported.stderr
+    );
+    let nonsense = daemon.qcc(&["thread", "mode", &id, "yolo"]);
+    assert!(!nonsense.ok);
+    assert!(nonsense.stderr.contains("unknown permission mode"), "{}", nonsense.stderr);
+
+    let plugins = daemon.qcc(&["plugin", "list", "--json"]).json();
+    let codex = &plugins["plugins"][2]["providers"][0]["capabilities"];
+    assert_eq!(codex["steer"], true);
+    assert_eq!(
+        codex["permission_modes"],
+        serde_json::json!(["ask", "accept-edits", "auto", "full"])
+    );
+}

@@ -82,6 +82,8 @@ pub mod codes {
     pub const INTERACTION_NOT_PENDING: i32 = -32003;
     /// The provider plugin refused or failed the request.
     pub const PROVIDER_ERROR: i32 = -32004;
+    /// The thread is in the middle of a turn or of starting its session.
+    pub const THREAD_BUSY: i32 = -32005;
 }
 
 /// Either kind of message a peer can receive.

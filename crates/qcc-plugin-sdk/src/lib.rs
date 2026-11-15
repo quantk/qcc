@@ -14,7 +14,12 @@
 //!         ProviderInfo {
 //!             id: "hello".into(),
 //!             name: "Hello".into(),
-//!             capabilities: ProviderCapabilities { resume: false, fork: false, steer: false },
+//!             capabilities: ProviderCapabilities {
+//!                 resume: false,
+//!                 fork: false,
+//!                 steer: false,
+//!                 permission_modes: vec![],
+//!             },
 //!         }
 //!     }
 //!
@@ -109,6 +114,13 @@ pub trait Provider {
 
     /// Deliver a user message to a started session.
     fn input(&mut self, input: ThreadInput) -> Result<(), String>;
+
+    /// Feed a user message into the running turn. Called only if the provider declared
+    /// the `steer` capability.
+    fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
+        let _ = input;
+        Err("this provider cannot steer a running turn".into())
+    }
 
     /// Interrupt the running turn. Emit the settling deltas before returning.
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
@@ -253,6 +265,7 @@ pub mod __private {
                         provider.start(start).map(Outcome::SessionStarted)
                     }
                     ProviderRequest::Input(input) => provider.input(input).map(done),
+                    ProviderRequest::Steer(input) => provider.steer(input).map(done),
                     ProviderRequest::Interrupt(thread) => provider.interrupt(thread).map(done),
                     ProviderRequest::Stop(thread) => provider.stop(thread).map(done),
                     ProviderRequest::ResolveInteraction(answer) => {

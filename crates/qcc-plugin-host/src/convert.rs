@@ -2,8 +2,8 @@
 
 use qcc_domain::{
     Delta, EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
-    ItemShape, ItemStatus, ModelInfo, OptionKind, ProviderCapabilities, ProviderInfo, TextChannel,
-    TokenUsage, TurnStatus, UsageSnapshot,
+    ItemShape, ItemStatus, ModelInfo, OptionKind, PermissionMode, ProviderCapabilities,
+    ProviderInfo, TextChannel, TokenUsage, TurnStatus, UsageSnapshot,
 };
 
 use crate::api::{
@@ -163,6 +163,17 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 resume: p.capabilities.resume,
                 fork: p.capabilities.fork,
                 steer: p.capabilities.steer,
+                permission_modes: p
+                    .capabilities
+                    .permission_modes
+                    .into_iter()
+                    .map(|mode| match mode {
+                        wit::PermissionMode::Ask => PermissionMode::Ask,
+                        wit::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
+                        wit::PermissionMode::Auto => PermissionMode::Auto,
+                        wit::PermissionMode::Full => PermissionMode::Full,
+                    })
+                    .collect(),
             },
         }),
         wit::Contribution::Environment(e) => {
@@ -191,6 +202,12 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
         model: start.model,
         resume: start.resume,
         prompt: start.prompt,
+        permission_mode: start.permission_mode.map(|mode| match mode {
+            PermissionMode::Ask => wit::PermissionMode::Ask,
+            PermissionMode::AcceptEdits => wit::PermissionMode::AcceptEdits,
+            PermissionMode::Auto => wit::PermissionMode::Auto,
+            PermissionMode::Full => wit::PermissionMode::Full,
+        }),
         env: start.env,
     }
 }
@@ -213,6 +230,9 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 ProviderRequest::Start(start) => wit::ProviderRequest::Start(session_start(start)),
                 ProviderRequest::Input { thread, text } => {
                     wit::ProviderRequest::Input(wit::ThreadInput { thread: thread.0, text })
+                }
+                ProviderRequest::Steer { thread, text } => {
+                    wit::ProviderRequest::Steer(wit::ThreadInput { thread: thread.0, text })
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),

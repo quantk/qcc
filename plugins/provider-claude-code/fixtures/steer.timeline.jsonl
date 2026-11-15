@@ -1,0 +1,32 @@
+{"type":"thread/created","thread":{"id":"thread-1","provider":"claude-code","cwd":"/work","status":"idle","created_at":0,"updated_at":0,"last_seq":0}}
+{"type":"input/submitted","text":"First run `cat note.txt`, then run `cat other.txt`, then count"}
+{"type":"session/started","resumed":false}
+{"type":"turn/started","turn_id":"turn_1"}
+{"type":"thread/status","status":"active"}
+{"type":"input/submitted","text":"Also end your answer with the word BANANA.","steered":true}
+{"type":"session/identified","provider_session":"13d7dba5-0056-4363-a181-4a993e164a6f"}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"command","command":"cat note.txt"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"command","command":"cat other.txt"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"command","command":"cat other.txt","output":"second file"}}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"command","command":"cat note.txt","output":"hello fixture"}}
+{"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
+{"type":"item/text/delta","item_id":"item_3","text":"Cont"}
+{"type":"item/text/delta","item_id":"item_3","text":"ents of `note.txt`"}
+{"type":"item/text/delta","item_id":"item_3","text":": `hello fixture`"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n\nContents of `other."}
+{"type":"item/text/delta","item_id":"item_3","text":"txt`: `second file`"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n\nNumbers 1 "}
+{"type":"item/text/delta","item_id":"item_3","text":"to 30, one per line:"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n\n```\n1\n2\n3"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n4\n5\n6\n7"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n8\n9\n10\n11"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n12\n13\n14\n15"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n16\n17\n18\n19"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n20\n21\n22\n23"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n24\n25\n26\n27"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n28\n29\n30\n```"}
+{"type":"item/text/delta","item_id":"item_3","text":"\n\nBANANA"}
+{"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"Contents of `note.txt`: `hello fixture`\n\nContents of `other.txt`: `second file`\n\nNumbers 1 to 30, one per line:\n\n```\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n```\n\nBANANA"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":706,"cached_input_tokens":51002},"last":{"input_tokens":4,"output_tokens":706,"cached_input_tokens":51002},"model_context_window":1000000}}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"thread/status","status":"idle"}

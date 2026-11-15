@@ -115,27 +115,33 @@ describe("statuses", () => {
 describe("a thread's servers", () => {
   it("list what the session reports, then what it keeps off, and what waits for the next session", () => {
     const settings: Settings = { mcp_servers: { docs: { transport: { type: "stdio", command: "npx" } } } };
+    const settings2: Settings = {
+      mcp_servers: {
+        docs: { transport: { type: "stdio", command: "npx" } },
+        web: { transport: { type: "http", url: "https://x" } },
+        notes: { transport: { type: "stdio", command: "uvx" } },
+      },
+    };
     const rows = threadMcpRows(
       {
-        ...thread("a", "codex", [
+        ...thread("a", "claude-code", [
+          { name: "web", state: "ready" },
+          { name: "notes", state: "disabled" },
           { name: "playwright", state: "ready" },
           { name: "blender", state: "disabled" },
         ]),
-        mcp_disabled: ["docs", "playwright"],
+        mcp_disabled: ["docs", "playwright", "web"],
       },
-      settings,
+      settings2,
     );
     expect(rows.map(({ name, off, ours, pending, pendingOn }) => ({ name, off, ours, pending, pendingOn }))).toEqual([
-      { name: "playwright", off: true, ours: false, pending: true, pendingOn: false },
-      { name: "blender", off: false, ours: false, pending: false, pendingOn: true },
+      { name: "web", off: true, ours: true, pending: true, pendingOn: false },
+      { name: "notes", off: false, ours: true, pending: false, pendingOn: true },
+      // The agent's own: shown as reported, never waiting on the thread.
+      { name: "playwright", off: true, ours: false, pending: false, pendingOn: false },
+      { name: "blender", off: false, ours: false, pending: false, pendingOn: false },
       { name: "docs", off: true, ours: true, pending: false, pendingOn: false },
     ]);
-    // One the agent cannot turn off does not wait for anything.
-    const fixed = threadMcpRows(
-      { ...thread("c", "codex", [{ name: "computer-use", state: "ready", fixed: true }]), mcp_disabled: ["computer-use"] },
-      {},
-    );
-    expect(fixed.map((row) => [row.off, row.pending])).toEqual([[true, false]]);
     // Turned back on before a session took it: still listed, as qcc's.
     const again = threadMcpRows({ ...thread("b", "codex", []), mcp_disabled: [] }, settings);
     expect(again.map((row) => [row.name, row.off, row.status])).toEqual([["docs", false, undefined]]);

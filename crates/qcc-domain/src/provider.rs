@@ -251,10 +251,6 @@ pub struct McpServerStatus {
     /// Why it failed, in the agent's words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    /// The thread keeps it off, but the agent cannot turn this one off (a server a
-    /// Codex plugin brings rather than its configuration).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub fixed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

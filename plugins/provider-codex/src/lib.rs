@@ -35,7 +35,8 @@ impl Provider for Codex {
                     PermissionMode::Auto,
                     PermissionMode::Full,
                 ],
-                // Codex reads its MCP servers when a thread starts.
+                // Codex reads its MCP servers when a thread starts: qcc's servers a
+                // thread keeps off are left out of the new session.
                 mcp_toggle: false,
             },
         }
@@ -54,7 +55,6 @@ impl Provider for Codex {
         bridge.set_instructions(context);
         bridge.set_writable_roots(start.extra_dirs);
         bridge.set_mcp_servers(start.mcp_servers);
-        bridge.set_mcp_disabled(start.mcp_disabled);
         self.sessions.insert(&start.thread, process, bridge);
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;

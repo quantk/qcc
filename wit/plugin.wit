@@ -173,9 +173,6 @@ interface types {
     state: mcp-state,
     /// Why it failed, in the agent's words.
     error: option<string>,
-    /// The thread keeps it off, but the agent cannot turn this one off (a server
-    /// a Codex plugin brings rather than its configuration).
-    fixed: bool,
   }
 
   variant delta {
@@ -411,10 +408,9 @@ interface types {
     /// MCP servers the user set up in qcc. The bridge adds them to those the
     /// agent's own configuration names, the way its agent takes them.
     mcp-servers: list<mcp-server>,
-    /// MCP servers the thread keeps off, by name: servers of the agent's own
-    /// configuration, and for a provider that declared `mcp-toggle` also some of
-    /// `mcp-servers`, which it must start off. A name the agent does not know is
-    /// skipped.
+    /// Which of `mcp-servers` the thread keeps off, by name. Given only to a
+    /// provider that declared `mcp-toggle`, which starts them off and can switch
+    /// them on later; another provider is not given those servers at all.
     mcp-disabled: list<string>,
   }
 

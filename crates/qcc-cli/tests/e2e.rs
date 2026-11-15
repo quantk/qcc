@@ -423,6 +423,11 @@ fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
         }
     };
 
+    // Only qcc's servers are switched; the agent's own are its configuration's.
+    let theirs = daemon.qcc(&["thread", "mcp", &probe, "--off", "playwright"]);
+    assert!(!theirs.ok);
+    assert!(theirs.stderr.contains("not an MCP server set up in qcc"), "{}", theirs.stderr);
+
     // One thread turns a server off for itself, in its running session.
     let off = daemon.qcc(&["thread", "mcp", &probe, "--off", "docs", "--json"]);
     assert!(off.ok, "{}", off.stderr);

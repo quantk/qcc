@@ -527,6 +527,18 @@ impl Core {
         if server.trim().is_empty() {
             return Err(RpcError::new(codes::INVALID_PARAMS, "name the MCP server"));
         }
+        // The agent's own servers are its configuration's business: qcc shows them and
+        // switches only its own. Turning a name on is let through, so that one kept
+        // off before can be cleared.
+        if !enabled && !self.settings.mcp_servers.contains_key(&server) {
+            return Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                format!(
+                    "{server} is not an MCP server set up in qcc; servers of the agent's own \
+                     configuration are switched in the agent"
+                ),
+            ));
+        }
         let thread =
             self.supervisor.thread(&thread_id).ok_or_else(|| thread_not_found(&thread_id))?;
         let mut disabled = thread.mcp_disabled.clone();

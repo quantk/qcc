@@ -216,11 +216,6 @@ export type McpServerStatus = {
 	state: McpState,
 	/**  Why it failed, in the agent's words. */
 	error?: string | null,
-	/**
-	 *  The thread keeps it off, but the agent cannot turn this one off (a server a
-	 *  Codex plugin brings rather than its configuration).
-	 */
-	fixed?: boolean,
 };
 
 export type McpState = 
@@ -513,8 +508,8 @@ export type Thread = {
 	 */
 	mcp_servers?: McpServerStatus[],
 	/**
-	 *  MCP servers this thread keeps off, by name, sorted: its sessions start without
-	 *  them. Not passed on to the threads it starts.
+	 *  MCP servers set up in qcc that this thread keeps off, by name, sorted: its
+	 *  sessions start without them. Not passed on to the threads it starts.
 	 */
 	mcp_disabled?: string[],
 	/**  Put away: it takes no more input and is left out of listings. */

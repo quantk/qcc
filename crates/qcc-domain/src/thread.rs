@@ -209,8 +209,8 @@ pub struct Thread {
     /// order they were first reported. Empty until it says and for agents that do not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<McpServerStatus>,
-    /// MCP servers this thread keeps off, by name, sorted: its sessions start without
-    /// them. Not passed on to the threads it starts.
+    /// MCP servers set up in qcc that this thread keeps off, by name, sorted: its
+    /// sessions start without them. Not passed on to the threads it starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_disabled: Vec<String>,
     /// Put away: it takes no more input and is left out of listings.

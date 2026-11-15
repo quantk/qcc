@@ -508,7 +508,6 @@ impl Bridge {
                 name: str_field(server, "name").to_owned(),
                 state,
                 error,
-                fixed: false,
             }));
         }
         // Servers connect in the background and nothing says when they are done.
@@ -907,19 +906,16 @@ mod tests {
                     name: "docs".into(),
                     state: McpState::Starting,
                     error: None,
-                    fixed: false,
                 }),
                 Delta::McpStatus(McpStatus {
                     name: "off".into(),
                     state: McpState::Disabled,
                     error: None,
-                    fixed: false,
                 }),
                 Delta::McpStatus(McpStatus {
                     name: "web".into(),
                     state: McpState::Failed,
                     error: Some("ENOENT".into()),
-                    fixed: false,
                 }),
             ]
         );

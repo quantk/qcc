@@ -208,15 +208,15 @@ export function threadMcpRows(thread: Thread, settings: Settings | undefined): T
   const ours = settings?.mcp_servers ?? {};
   const off = new Set(thread.mcp_disabled ?? []);
   const reported = thread.mcp_servers ?? [];
+  // Only qcc's servers are the thread's to switch, so only theirs can wait for a
+  // session to take a change; an agent's own may be off in its own settings.
   const rows: ThreadMcpRow[] = reported.map((status) => ({
     name: status.name,
     status,
     off: off.has(status.name),
     ours: status.name in ours,
-    // Only turning off can wait: a server off in the agent's own settings is reported
-    // off too, and that is not the thread's doing.
-    pending: off.has(status.name) && status.state !== "disabled" && !status.fixed,
-    pendingOn: !off.has(status.name) && status.state === "disabled",
+    pending: status.name in ours && off.has(status.name) && status.state !== "disabled",
+    pendingOn: status.name in ours && !off.has(status.name) && status.state === "disabled",
   }));
   const listed = (name: string) => rows.some((row) => row.name === name);
   for (const name of [...off].sort()) {

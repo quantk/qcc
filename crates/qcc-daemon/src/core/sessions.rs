@@ -84,8 +84,7 @@ impl Core {
         });
     }
 
-    /// The MCP servers a session gets, and those of them or of the agent's own
-    /// configuration it keeps off.
+    /// The MCP servers a session gets, and those of them it starts off.
     ///
     /// A provider that switches servers of a running session gets every server the
     /// user did not turn off, the thread's choice among them included, so that one
@@ -102,13 +101,11 @@ impl Core {
                 transport: server.transport.clone(),
             })
             .collect();
-        // A qcc server the session does not get is not the agent's to turn off.
+        // Only qcc's servers are the thread's to switch, and only those the session
+        // gets: the agent's own stay as its configuration says.
         let disabled = disabled
             .iter()
-            .filter(|name| {
-                !self.settings.mcp_servers.contains_key(*name)
-                    || servers.iter().any(|server| &&server.name == name)
-            })
+            .filter(|name| servers.iter().any(|server| &&server.name == name))
             .cloned()
             .collect();
         (servers, disabled)

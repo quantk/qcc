@@ -82,8 +82,9 @@ pub(crate) enum ThreadCommand {
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
     /// The MCP servers of a thread's session and the ones it keeps off; with --off
-    /// and --on, turn servers off or on for this thread alone (not the threads it
-    /// starts). Names are those `qcc thread show` lists or `qcc mcp list` sets up.
+    /// and --on, turn servers set up in qcc (`qcc mcp list`) off or on for this
+    /// thread alone, not the threads it starts. The agent's own servers are shown,
+    /// not switched.
     Mcp {
         thread: String,
         /// Keep this server off in the thread. Repeatable.

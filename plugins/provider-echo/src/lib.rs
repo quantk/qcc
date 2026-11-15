@@ -57,7 +57,6 @@ fn mcp_on_status(server: &McpServer) -> McpStatus {
         name: server.name.clone(),
         state: if failed { McpState::Failed } else { McpState::Ready },
         error: failed.then(|| format!("echo was told to fail {target}")),
-        fixed: false,
     }
 }
 
@@ -430,12 +429,7 @@ impl Provider for Echo {
         let status = if switch.enabled {
             on.clone()
         } else {
-            McpStatus {
-                name: on.name.clone(),
-                state: McpState::Disabled,
-                error: None,
-                fixed: false,
-            }
+            McpStatus { name: on.name.clone(), state: McpState::Disabled, error: None }
         };
         deltas::emit(&switch.thread, &[Delta::McpStatus(status)])
     }

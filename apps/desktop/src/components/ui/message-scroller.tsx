@@ -72,10 +72,10 @@ function MessageScrollerItem({
     <MessageScrollerPrimitive.Item
       data-slot="message-scroller-item"
       scrollAnchor={scrollAnchor}
-      className={cn(
-        "min-w-0 shrink-0 [contain-intrinsic-size:auto_10rem] [content-visibility:auto]",
-        className
-      )}
+      // No `content-visibility: auto`: an item it skipped takes a guessed height
+      // until it is drawn, and WebKit has no scroll anchoring to make up for the
+      // difference, so scrolling up past one made the timeline jump.
+      className={cn("min-w-0 shrink-0", className)}
       {...props}
     />
   )

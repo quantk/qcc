@@ -64,7 +64,10 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
  */
 export function TimelineView({ thread, timeline }: { thread: Thread; timeline: Timeline }) {
   return (
-    <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+    // The scroller goes back to following the end whenever the view is within the
+    // threshold of it. A touchpad scrolls a few pixels at a time, so with the
+    // default 8 px its first steps up were taken back by the next streamed text.
+    <MessageScrollerProvider autoScroll defaultScrollPosition="end" scrollEdgeThreshold={1}>
       <MessageScroller className="h-auto flex-1">
         <MessageScrollerViewport aria-label="Timeline">
           <MessageScrollerContent className="mx-auto w-full max-w-[860px] gap-2.5 px-6 pt-5 pb-7">

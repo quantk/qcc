@@ -138,3 +138,43 @@ pub struct EnvironmentChanges {
     pub base: Option<String>,
     pub files: Vec<ChangedFile>,
 }
+
+/// A named value a plugin command takes. Every value is text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandParam {
+    pub name: String,
+    pub label: String,
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder: Option<String>,
+}
+
+/// A command a plugin contributes to the CLI and the app's command palette.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandInfo {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    /// The command acts on a thread, which the caller names.
+    pub thread: bool,
+    pub params: Vec<CommandParam>,
+}
+
+/// Instructions for agents that a plugin offers to every agent session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SkillInfo {
+    pub name: String,
+    /// When the agent should read it.
+    pub description: String,
+    /// Markdown.
+    pub body: String,
+}
+
+/// A skill as an agent session gets it: a file it can read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SkillRef {
+    pub name: String,
+    pub description: String,
+    /// Absolute path of the skill's `SKILL.md`.
+    pub path: String,
+}

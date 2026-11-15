@@ -245,6 +245,37 @@ interface types {
     web: option<string>,
   }
 
+  /// A named value a command takes. Every value is text.
+  record command-param {
+    name: string,
+    label: string,
+    required: bool,
+    /// A hint shown in an empty field.
+    placeholder: option<string>,
+  }
+
+  /// A command people run from the CLI (`qcc <plugin-id> <id>`) and the app's
+  /// command palette.
+  record command-info {
+    id: string,
+    title: string,
+    description: string,
+    /// The command acts on a thread, which the caller names.
+    thread: bool,
+    params: list<command-param>,
+  }
+
+  /// Instructions for agents, offered to every agent session. Requires the
+  /// `skills` permission: what it says reaches every agent.
+  record skill-info {
+    /// Lowercase letters, digits and dashes.
+    name: string,
+    /// When the agent should read it, in a sentence or two.
+    description: string,
+    /// Markdown.
+    body: string,
+  }
+
   variant contribution {
     provider(provider-info),
     environment(environment-info),
@@ -253,9 +284,55 @@ interface types {
     /// The plugin draws timeline items of this extension kind. The kind must be
     /// the plugin's own: `<plugin-id>/<name>`.
     ui-item(string),
+    command(command-info),
+    skill(skill-info),
+  }
+
+  // ----- threads ----------------------------------------------------------------
+
+  /// Where a thread is, as far as someone waiting on it cares.
+  enum thread-state {
+    /// A turn runs, a message waits for one, or the session is starting.
+    working,
+    /// The agent waits for the user to answer an approval or a question.
+    waiting,
+    /// Nothing runs; the thread takes input.
+    idle,
+    /// The provider session could not start or died.
+    failed,
+    archived,
+  }
+
+  record thread-info {
+    id: thread-id,
+    provider: string,
+    cwd: string,
+    parent: option<thread-id>,
+    title: option<string>,
+    model: option<string>,
+    /// The contributed environment the thread works in, if any.
+    environment: option<string>,
+    state: thread-state,
+    /// How the latest turn ended.
+    last-turn: option<turn-status>,
+  }
+
+  /// A watched thread stopped working: it is idle, failed or archived.
+  record settled-thread {
+    thread: thread-info,
+    /// The text of the agent's latest message.
+    last-message: option<string>,
   }
 
   // ----- events -----------------------------------------------------------------
+
+  /// A skill as an agent session gets it: a file it can read.
+  record skill-ref {
+    name: string,
+    description: string,
+    /// Absolute path of the skill's `SKILL.md`.
+    path: string,
+  }
 
   record session-start {
     thread: thread-id,
@@ -270,6 +347,9 @@ interface types {
     permission-mode: option<permission-mode>,
     /// Variables the agent process must see (`QCC_THREAD_ID`, `QCC_SOCKET`).
     env: list<tuple<string, string>>,
+    /// Skills plugins offer. The bridge tells the agent about them the way its
+    /// agent takes extra instructions; `qcc_plugin_sdk::skills_prompt` words it.
+    skills: list<skill-ref>,
   }
 
   record session-started {
@@ -404,6 +484,21 @@ interface types {
     render-item(ui-item),
   }
 
+  record command-call {
+    command: string,
+    /// Set for a command that acts on a thread.
+    thread: option<thread-id>,
+    /// Parameter values by name. Required ones are always present.
+    args: list<tuple<string, string>>,
+  }
+
+  record command-result {
+    /// What happened, in a sentence, for the person who ran the command.
+    message: string,
+    /// A thread the command made, which the app opens.
+    thread: option<thread-id>,
+  }
+
   record process-output {
     process: u64,
     data: list<u8>,
@@ -419,6 +514,10 @@ interface types {
     provider(provider-call),
     environment(environment-call),
     ui(ui-request),
+    /// Answered with `command-result`.
+    command(command-call),
+    /// A thread passed to `threads.watch` settled.
+    thread-settled(settled-thread),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -445,6 +544,7 @@ interface types {
     /// `keyValues`, `table`, `button`, `input`, `divider`); the app draws what it
     /// knows and skips the rest, so a plugin cannot put anything else on screen.
     ui-tree(string),
+    command-result(command-result),
     /// The answer is not known yet: it will be given through `completions.complete`
     /// with this token, which the plugin picks. For work that waits on a process.
     deferred(u64),
@@ -502,6 +602,42 @@ interface process {
   kill: func(process: u64) -> result<_, string>;
 }
 
+/// Permission `threads`. Create and drive threads like a client of the daemon:
+/// the base of orchestration. Not available during `init`.
+interface threads {
+  use types.{thread-id, thread-info, permission-mode};
+
+  record spawn-options {
+    /// A provider id, as `qcc plugin list` shows it.
+    provider: string,
+    /// An absolute directory; what the environment is made from, if one is named.
+    cwd: string,
+    prompt: option<string>,
+    model: option<string>,
+    parent: option<thread-id>,
+    environment: option<string>,
+    base: option<string>,
+    permission-mode: option<permission-mode>,
+  }
+
+  enum role { user, agent }
+
+  record message {
+    role: role,
+    text: string,
+  }
+
+  spawn: func(options: spawn-options) -> result<thread-info, string>;
+  /// Send a message; queued behind a running turn.
+  send: func(thread: thread-id, text: string) -> result<_, string>;
+  get: func(thread: thread-id) -> result<thread-info, string>;
+  /// The user's messages and the agent's replies, oldest first.
+  transcript: func(thread: thread-id) -> result<list<message>, string>;
+  /// Deliver one `thread-settled` event when the thread is next idle, failed or
+  /// archived; right away if it is already. Watches do not outlive the daemon.
+  watch: func(thread: thread-id) -> result<_, string>;
+}
+
 world plugin {
   import log;
   import completions;
@@ -509,6 +645,7 @@ world plugin {
   import kv;
   import timers;
   import process;
+  import threads;
 
   use types.{contribution, event, outcome};
 

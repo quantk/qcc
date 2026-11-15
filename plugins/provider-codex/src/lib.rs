@@ -100,8 +100,9 @@ impl Provider for Codex {
             env: start.env,
             cwd: Some(start.cwd.clone()),
         })?;
-        let (bridge, handshake) =
+        let (mut bridge, handshake) =
             Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
+        bridge.set_instructions(skills_prompt(&start.skills));
         let session =
             Session { process, stdout: LineBuffer::default(), stderr: Tail::new(4096), bridge };
         self.sessions.insert(start.thread.clone(), session);

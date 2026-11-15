@@ -2,26 +2,28 @@
 //!
 //! It is the same interface for people and for agents: every command takes `--json`,
 //! and a `qcc thread spawn` run from inside an agent session records that session's
-//! thread as the parent.
+//! thread as the parent. Plugin commands run as `qcc <plugin> <command>`.
 
 mod render;
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use qcc_client::protocol::methods::{
-    DaemonStatus, Delivery, Empty, InteractionResolve, InteractionResolveParams, PluginList,
-    SendMode, StopMode, ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet,
-    ThreadGetParams, ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetMode,
-    ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
+    CommandList, CommandRun, CommandRunParams, DaemonStatus, Delivery, Empty, InteractionResolve,
+    InteractionResolveParams, PluginList, SendMode, StopMode, ThreadArchive, ThreadArchiveParams,
+    ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams,
+    ThreadSend, ThreadSendParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn,
+    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
     EventPayload, InteractionId, InteractionResolution, PermissionMode, ProviderId, ThreadEvent,
-    ThreadId, ThreadStatus, TurnStatus,
+    ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
@@ -55,6 +57,19 @@ enum Command {
     /// Inspect plugins.
     #[command(subcommand)]
     Plugin(PluginCommand),
+    /// List the commands plugins contribute.
+    #[command(subcommand, name = "command")]
+    PluginCommands(CommandCommand),
+    /// Run a plugin's command: `qcc <plugin> <command> [--thread <id>] [--<param> <value>]…`.
+    /// The thread defaults to $QCC_THREAD_ID; `qcc command list` shows what there is.
+    #[command(external_subcommand)]
+    External(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum CommandCommand {
+    /// List every plugin command and how to run it.
+    List,
 }
 
 #[derive(Subcommand)]
@@ -67,9 +82,9 @@ enum DaemonCommand {
 enum ThreadCommand {
     /// Start a new thread with a provider.
     Spawn {
-        /// Provider id, as listed by `qcc plugin list`.
+        /// Provider id, as listed by `qcc plugin list` [default: the parent's].
         #[arg(long)]
-        provider: String,
+        provider: Option<String>,
         /// The first message to the agent.
         #[arg(long)]
         prompt: Option<String>,
@@ -120,11 +135,27 @@ enum ThreadCommand {
         #[arg(long)]
         release: bool,
     },
-    /// List threads, oldest first.
+    /// Wait until threads settle (idle, failed or archived) and print each one's
+    /// state and last message. Exit code 0: every last turn completed; 1: one failed
+    /// or was interrupted; 124: the timeout ran out first.
+    Wait {
+        #[arg(required = true)]
+        threads: Vec<String>,
+        /// Return when any of them settles.
+        #[arg(long)]
+        any: bool,
+        /// Give up after this many seconds.
+        #[arg(long, value_name = "SECONDS")]
+        timeout: Option<u64>,
+    },
+    /// List threads, oldest first, children under their parents.
     List {
         /// Include archived threads.
         #[arg(long)]
         archived: bool,
+        /// Only the children of this thread.
+        #[arg(long, value_name = "THREAD")]
+        parent: Option<String>,
     },
     /// List the files a thread changed in its environment.
     Changes { thread: String },
@@ -216,6 +247,9 @@ fn print_json(value: &impl Serialize) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Exit code of a wait that ran out of time, as `timeout(1)` has it.
+const TIMED_OUT: u8 = 124;
+
 async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
     let socket = cli.socket.unwrap_or_else(paths::default_socket);
     let client = Client::connect(&socket).await.context("is qccd running?")?;
@@ -250,15 +284,28 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             };
             // Without a prompt no turn starts, so there is nothing to follow.
             let follow = follow && prompt.is_some();
+            let parent = parent.filter(|parent| !parent.is_empty()).map(ThreadId::new);
+            let provider = match (provider, &parent) {
+                (Some(provider), _) => ProviderId::new(provider),
+                // A child takes after its parent.
+                (None, Some(parent)) => {
+                    client
+                        .call::<ThreadGet>(ThreadGetParams { thread_id: parent.clone() })
+                        .await?
+                        .thread
+                        .provider
+                }
+                (None, None) => bail!("name a provider with --provider (see `qcc plugin list`)"),
+            };
             let result = client
                 .call::<ThreadSpawn>(ThreadSpawnParams {
-                    provider: ProviderId::new(provider),
+                    provider,
                     cwd: cwd.display().to_string(),
                     environment: env,
                     base,
                     prompt,
                     model,
-                    parent: parent.map(ThreadId::new),
+                    parent,
                     permission_mode,
                 })
                 .await?;
@@ -377,16 +424,60 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::List { archived }) => {
-            let result =
+        Command::Thread(ThreadCommand::List { archived, parent }) => {
+            let mut result =
                 client.call::<ThreadList>(ThreadListParams { include_archived: archived }).await?;
+            if let Some(parent) = &parent {
+                result
+                    .threads
+                    .retain(|thread| thread.parent.as_ref().map(ThreadId::as_str) == Some(parent));
+            }
             if json {
                 print_json(&result)?;
-            } else {
+            } else if parent.is_some() {
                 for thread in &result.threads {
                     out(render::thread_line(thread));
                 }
+            } else {
+                for line in render::thread_tree(&result.threads) {
+                    out(line);
+                }
             }
+        }
+
+        Command::Thread(ThreadCommand::Wait { threads, any, timeout }) => {
+            let result = client
+                .call::<ThreadWait>(ThreadWaitParams {
+                    thread_ids: threads.into_iter().map(ThreadId::new).collect(),
+                    any,
+                    timeout_ms: timeout.map(|seconds| seconds.saturating_mul(1000)),
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for (index, waited) in result.threads.iter().enumerate() {
+                    if index > 0 {
+                        out("");
+                    }
+                    out(render::waited(waited));
+                }
+            }
+            if result.timed_out {
+                if !json {
+                    eprintln!("qcc: timed out; the threads still working have not settled");
+                }
+                return Ok(ExitCode::from(TIMED_OUT));
+            }
+            let bad = result.threads.iter().any(|waited| {
+                waited.state == ThreadState::Failed
+                    || (waited.state.is_settled()
+                        && matches!(
+                            waited.thread.last_turn_status,
+                            Some(TurnStatus::Failed | TurnStatus::Interrupted)
+                        ))
+            });
+            return Ok(if bad { ExitCode::FAILURE } else { ExitCode::SUCCESS });
         }
 
         Command::Thread(ThreadCommand::Show { thread }) => {
@@ -445,6 +536,33 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
+        Command::PluginCommands(CommandCommand::List) => {
+            let result = client.call::<CommandList>(Empty {}).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for command in &result.commands {
+                    out(render::command(command));
+                }
+            }
+        }
+
+        Command::External(mut args) => {
+            // A global flag after the command name is still the global flag.
+            let json = json || args.iter().any(|arg| arg == "--json");
+            args.retain(|arg| arg != "--json");
+            let params = plugin_command(args)?;
+            let result = client.call::<CommandRun>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(&result.message);
+                if let Some(thread) = &result.thread_id {
+                    out(format!("thread {thread}"));
+                }
+            }
+        }
+
         Command::Plugin(PluginCommand::List) => {
             let result = client.call::<PluginList>(Empty {}).await?;
             if json {
@@ -457,6 +575,34 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `<plugin> <command> [--thread <id>] [--<name> <value> | --<name>=<value>]…`
+fn plugin_command(args: Vec<String>) -> anyhow::Result<CommandRunParams> {
+    let mut args = args.into_iter();
+    let (Some(plugin), Some(command)) = (args.next(), args.next()) else {
+        bail!("run a plugin command as `qcc <plugin> <command>`; `qcc command list` shows them");
+    };
+    let mut thread_id = std::env::var(paths::THREAD_ID_ENV).ok().filter(|id| !id.is_empty());
+    let mut values = BTreeMap::new();
+    while let Some(arg) = args.next() {
+        let Some(name) = arg.strip_prefix("--") else {
+            bail!("unexpected {arg:?}: give values as --<name> <value>");
+        };
+        let (name, value) = match name.split_once('=') {
+            Some((name, value)) => (name.to_owned(), value.to_owned()),
+            None => {
+                let value = args.next().with_context(|| format!("--{name} needs a value"))?;
+                (name.to_owned(), value)
+            }
+        };
+        if name == "thread" {
+            thread_id = Some(value);
+        } else {
+            values.insert(name, value);
+        }
+    }
+    Ok(CommandRunParams { plugin, command, thread_id: thread_id.map(ThreadId::new), args: values })
 }
 
 fn print_event(event: &ThreadEvent, json: bool) -> anyhow::Result<()> {

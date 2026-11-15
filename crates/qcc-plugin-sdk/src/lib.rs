@@ -43,8 +43,9 @@
 //! ```
 //!
 //! The plugin is a single-threaded actor: the host calls it with one event at a time
-//! and no host import blocks on the outside world. Process output and timers come back
-//! through [`Plugin::on_process`] and [`Plugin::on_timer`].
+//! and no host import blocks on the outside world. Process output, timers and watched
+//! threads come back through [`Plugin::on_process`], [`Plugin::on_timer`] and
+//! [`Plugin::on_thread_settled`].
 
 // The generated bindings carry the component's raw ABI glue.
 #[allow(unsafe_code, clippy::all, missing_docs)]
@@ -67,21 +68,22 @@ pub mod ui;
 
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
-pub use bindings::qcc::plugin::{completions, deltas, kv, process, timers};
+pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
 
 use types::{
-    Contribution, EnvironmentChanges, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
-    EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, ModelInfo,
-    Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted, ThreadInput, UiAction,
-    UiItem, UiRender, UiRequest, UiViewInfo,
+    CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDiff,
+    EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove, EnvironmentRequest,
+    Event, InteractionAnswer, ModelInfo, Outcome, ProviderInfo, ProviderRequest, SessionStart,
+    SessionStarted, SettledThread, SkillInfo, SkillRef, ThreadInput, UiAction, UiItem, UiRender,
+    UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas, kv, log,
-        process, timers,
+        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas, kv,
+        log, process, skills_prompt, threads, timers,
     };
 }
 
@@ -234,6 +236,34 @@ pub trait Ui {
     }
 }
 
+/// Commands for the CLI (`qcc <plugin-id> <command>`) and the app's command palette.
+pub trait Commands {
+    fn commands(&self) -> Vec<CommandInfo>;
+
+    /// Run one. The host has checked that the command exists, that a thread is named
+    /// if it needs one and that required parameters are there. Answer a deferred
+    /// call with [`Outcome::CommandResult`].
+    fn run(&mut self, call: CommandCall) -> Result<Reply<CommandResult>, String>;
+}
+
+/// The paragraph a provider bridge hands its agent about the skills of a session,
+/// or `None` if there are none. Every bridge uses it, so agents hear the same thing
+/// whatever runs them.
+pub fn skills_prompt(skills: &[SkillRef]) -> Option<String> {
+    if skills.is_empty() {
+        return None;
+    }
+    let mut text = String::from(
+        "This session runs under qcc, a control center for coding agents. qcc offers \
+         these skills: instructions kept in a file. When a task matches a skill's \
+         description, read the file first and follow it.\n",
+    );
+    for skill in skills {
+        text.push_str(&format!("\n- {}: {} (file: {})", skill.name, skill.description, skill.path));
+    }
+    Some(text)
+}
+
 /// The plugin itself. Every method has a default, so implement only what you contribute.
 pub trait Plugin: Default + 'static {
     fn providers(&mut self) -> Vec<&mut dyn Provider> {
@@ -246,6 +276,21 @@ pub trait Plugin: Default + 'static {
 
     fn ui(&mut self) -> Option<&mut dyn Ui> {
         None
+    }
+
+    fn commands(&mut self) -> Option<&mut dyn Commands> {
+        None
+    }
+
+    /// Instructions for agents. They reach every agent session, so the host takes
+    /// them only from a plugin granted the `skills` permission.
+    fn skills(&self) -> Vec<SkillInfo> {
+        Vec::new()
+    }
+
+    /// A thread passed to [`threads::watch`] settled.
+    fn on_thread_settled(&mut self, settled: SettledThread) {
+        let _ = settled;
     }
 
     fn on_process(&mut self, event: ProcessEvent) {
@@ -315,6 +360,10 @@ pub mod __private {
                 contributions.extend(ui.views().into_iter().map(Contribution::UiView));
                 contributions.extend(ui.item_kinds().into_iter().map(Contribution::UiItem));
             }
+            if let Some(commands) = plugin.commands() {
+                contributions.extend(commands.commands().into_iter().map(Contribution::Command));
+            }
+            contributions.extend(plugin.skills().into_iter().map(Contribution::Skill));
             Ok(contributions)
         })
     }
@@ -370,6 +419,14 @@ pub mod __private {
                     UiRequest::RenderItem(item) => ui.render_item(item),
                 }
                 .map(Outcome::UiTree)
+            }
+            Event::Command(call) => {
+                let commands = plugin.commands().ok_or("this plugin contributes no commands")?;
+                commands.run(call).map(|r| reply(r, Outcome::CommandResult))
+            }
+            Event::ThreadSettled(settled) => {
+                plugin.on_thread_settled(settled);
+                Ok(Outcome::Done)
             }
             Event::ProcessStdout(output) => {
                 plugin.on_process(ProcessEvent::Stdout {

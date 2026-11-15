@@ -24,11 +24,12 @@ pub use ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
 pub use provider::{
-    ChangeKind, ChangedFile, EnvironmentChanges, EnvironmentInfo, ModelInfo, PermissionMode,
-    ProviderCapabilities, ProviderInfo, UiPlacement, UiScope, UiViewInfo,
+    ChangeKind, ChangedFile, CommandInfo, CommandParam, EnvironmentChanges, EnvironmentInfo,
+    ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SkillInfo, SkillRef,
+    UiPlacement, UiScope, UiViewInfo,
 };
 pub use thread::{
-    ActivityKind, EnvironmentState, PendingInteraction, Thread, ThreadActivity, ThreadEnvironment,
-    ThreadStatus, TurnStatus,
+    ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,
+    ThreadEnvironment, ThreadState, ThreadStatus, TranscriptEntry, TurnStatus,
 };
 pub use usage::{TokenUsage, UsageSnapshot};

@@ -10,7 +10,7 @@ use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
-use crate::api::{Contribution, Outcome, PluginRequest};
+use crate::api::{Contribution, Outcome, PluginRequest, ThreadsAnswer, ThreadsCall};
 use crate::bindings::qcc::plugin as imports;
 use crate::bindings::{Plugin, wit};
 use crate::convert;
@@ -91,6 +91,15 @@ impl PluginHandle {
     /// Queue a request and wait for the plugin's answer.
     pub async fn call(&self, request: PluginRequest) -> Result<Outcome, PluginError> {
         self.send(request)?.await.map_err(|_| PluginError::Gone)?.map(convert::outcome)
+    }
+
+    /// Deliver an event nobody waits on, like process output: the plugin's answer is
+    /// only logged.
+    pub fn post(&self, request: PluginRequest) -> Result<(), PluginError> {
+        self.inner
+            .tx
+            .send(Message::Internal(convert::event(request)))
+            .map_err(|_| PluginError::Gone)
     }
 
     /// [`PluginHandle::call`] for callers outside an async runtime.
@@ -484,6 +493,49 @@ impl imports::process::Host for State {
 
     fn kill(&mut self, process: u64) -> Result<(), String> {
         self.process(process)?.kill()
+    }
+}
+
+impl State {
+    fn threads(&self, call: ThreadsCall) -> Result<ThreadsAnswer, String> {
+        if !self.permissions.threads {
+            return Err(self.denied("threads"));
+        }
+        (self.services.threads)(&self.plugin_id, call)
+    }
+}
+
+impl imports::threads::Host for State {
+    fn spawn(
+        &mut self,
+        options: imports::threads::SpawnOptions,
+    ) -> Result<wit::ThreadInfo, String> {
+        match self.threads(ThreadsCall::Spawn(convert::spawn_options(options)))? {
+            ThreadsAnswer::Thread(summary) => Ok(convert::thread_info(*summary)),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+
+    fn send(&mut self, thread: String, text: String) -> Result<(), String> {
+        self.threads(ThreadsCall::Send { thread: ThreadId(thread), text }).map(|_| ())
+    }
+
+    fn get(&mut self, thread: String) -> Result<wit::ThreadInfo, String> {
+        match self.threads(ThreadsCall::Get(ThreadId(thread)))? {
+            ThreadsAnswer::Thread(summary) => Ok(convert::thread_info(*summary)),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+
+    fn transcript(&mut self, thread: String) -> Result<Vec<imports::threads::Message>, String> {
+        match self.threads(ThreadsCall::Transcript(ThreadId(thread)))? {
+            ThreadsAnswer::Transcript(entries) => Ok(convert::transcript(entries)),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+
+    fn watch(&mut self, thread: String) -> Result<(), String> {
+        self.threads(ThreadsCall::Watch(ThreadId(thread))).map(|_| ())
     }
 }
 

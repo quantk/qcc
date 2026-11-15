@@ -8,7 +8,9 @@
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
-use qcc_domain::{EventPayload, Thread, ThreadEvent, ThreadId};
+use qcc_domain::{
+    EventPayload, Item, ItemShape, Role, Thread, ThreadEvent, ThreadId, TranscriptEntry,
+};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
 #[derive(Debug, thiserror::Error)]
@@ -172,6 +174,42 @@ impl Store {
         Ok(events)
     }
 
+    /// The conversation of a thread: messages handed to the agent and the agent's
+    /// settled replies, oldest first. With `last_agent_only`, just the latest reply.
+    pub fn transcript(&self, id: &ThreadId, last_agent_only: bool) -> Result<Vec<TranscriptEntry>> {
+        const REPLY: &str = "json_extract(payload, '$.type') = 'item/completed' \
+                             AND json_extract(payload, '$.item.type') = 'agentMessage'";
+        let sql = if last_agent_only {
+            format!(
+                "SELECT payload FROM events WHERE thread_id = ?1 AND {REPLY} \
+                 ORDER BY seq DESC LIMIT 1"
+            )
+        } else {
+            format!(
+                "SELECT payload FROM events WHERE thread_id = ?1 AND \
+                 (json_extract(payload, '$.type') = 'input/submitted' OR ({REPLY})) ORDER BY seq"
+            )
+        };
+        let conn = self.lock();
+        let mut statement = conn.prepare(&sql)?;
+        let rows = statement.query_map([id.as_str()], |row| row.get::<_, String>(0))?;
+        let mut entries = Vec::new();
+        for row in rows {
+            let entry = match serde_json::from_str(&row?)? {
+                EventPayload::InputSubmitted { text, .. } => {
+                    TranscriptEntry { role: Role::User, text }
+                }
+                EventPayload::ItemCompleted {
+                    item: Item { shape: ItemShape::AgentMessage { text }, .. },
+                    ..
+                } => TranscriptEntry { role: Role::Agent, text },
+                _ => continue,
+            };
+            entries.push(entry);
+        }
+        Ok(entries)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave a transaction half-applied:
         // rusqlite rolls back on drop.
@@ -281,6 +319,17 @@ mod tests {
         assert_eq!(store.events(&"a".into(), 4).unwrap(), a[4..]);
         assert_eq!(store.events(&"a".into(), 999).unwrap(), vec![]);
         assert_eq!(store.thread(&"zzz".into()).unwrap(), None);
+
+        // `a` settled its reply; `b` is still streaming one.
+        let user = |text: &str| TranscriptEntry { role: Role::User, text: text.into() };
+        let agent = |text: &str| TranscriptEntry { role: Role::Agent, text: text.into() };
+        assert_eq!(
+            store.transcript(&"a".into(), false).unwrap(),
+            [user("hello from a"), agent("hi")]
+        );
+        assert_eq!(store.transcript(&"a".into(), true).unwrap(), [agent("hi")]);
+        assert_eq!(store.transcript(&"b".into(), false).unwrap(), [user("hello from b")]);
+        assert_eq!(store.transcript(&"b".into(), true).unwrap(), []);
     }
 
     #[test]

@@ -389,6 +389,7 @@ fn plugins_and_daemon_are_listed() {
         ids,
         [
             "env-git-worktree",
+            "orchestration",
             "provider-acp",
             "provider-claude-code",
             "provider-codex",
@@ -396,7 +397,11 @@ fn plugins_and_daemon_are_listed() {
         ]
     );
     assert_eq!(plugins["plugins"][0]["environments"][0]["id"], "git-worktree");
-    let echo = &plugins["plugins"][4];
+    let orchestration = &plugins["plugins"][1];
+    assert_eq!(orchestration["permissions"]["threads"], true);
+    assert_eq!(orchestration["skills"][0], "qcc-orchestration");
+    assert_eq!(orchestration["commands"][0]["id"], "handoff");
+    let echo = &plugins["plugins"][5];
     assert_eq!(echo["bundled"], true);
     assert_eq!(echo["providers"][0]["id"], "echo");
     assert_eq!(echo["providers"][0]["capabilities"]["resume"], true);
@@ -557,7 +562,13 @@ fn permission_mode_is_set_at_spawn_and_can_be_changed() {
     assert!(nonsense.stderr.contains("unknown permission mode"), "{}", nonsense.stderr);
 
     let plugins = daemon.qcc(&["plugin", "list", "--json"]).json();
-    let codex = &plugins["plugins"][2]["providers"][0]["capabilities"];
+    let codex = plugins["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|plugin| plugin["id"] == "provider-codex")
+        .unwrap();
+    let codex = &codex["providers"][0]["capabilities"];
     assert_eq!(codex["steer"], true);
     assert_eq!(
         codex["permission_modes"],
@@ -1051,4 +1062,197 @@ fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
         }
     });
     daemon.stop();
+}
+
+/// Poll until `check` holds for a thread's events.
+fn eventually(daemon: &Daemon, thread: &str, what: &str, check: impl Fn(&[Value]) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let events = daemon.events(thread);
+        if check(&events) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "never {what}: {events:#?}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn inputs(events: &[Value]) -> Vec<&str> {
+    events
+        .iter()
+        .filter(|e| e["type"] == "input/submitted")
+        .map(|e| e["text"].as_str().unwrap())
+        .collect()
+}
+
+#[test]
+fn a_parent_waits_for_its_children_and_reads_their_answers() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let parent = daemon.spawn("parent");
+    let as_agent = [("QCC_THREAD_ID", parent.as_str())];
+
+    // From inside an agent session a child needs only a prompt: the provider is
+    // the parent's.
+    let child = |prompt: &str| {
+        let output = daemon.qcc_env(&["thread", "spawn", "--prompt", prompt, "--json"], &as_agent);
+        assert!(output.ok, "{}", output.stderr);
+        assert_eq!(output.json()["thread"]["provider"], "echo");
+        output.json()["thread"]["id"].as_str().unwrap().to_owned()
+    };
+    let slow = child("/slow one two three");
+    let quick = child("second child");
+
+    let waited = daemon.qcc(&["thread", "wait", &slow, &quick, "--json"]);
+    assert!(waited.ok, "{}", waited.stderr);
+    let waited = waited.json();
+    assert_eq!(waited["timed_out"], Value::Null);
+    let threads = waited["threads"].as_array().unwrap();
+    assert_eq!(threads[0]["thread"]["id"], slow.as_str());
+    assert_eq!(threads[0]["state"], "idle");
+    assert_eq!(threads[0]["last_message"].as_str().unwrap().trim(), "one two three");
+    assert_eq!(threads[1]["last_message"], "second child");
+
+    // In text, each thread with its answer.
+    let text = daemon.qcc(&["thread", "wait", &quick]);
+    assert!(text.ok);
+    assert!(text.stdout.contains("idle, last turn completed"), "{}", text.stdout);
+    assert!(text.stdout.ends_with("second child\n"), "{}", text.stdout);
+
+    let children = daemon.qcc(&["thread", "list", "--parent", &parent, "--json"]).json();
+    assert_eq!(children["threads"].as_array().unwrap().len(), 2);
+    let tree = daemon.qcc(&["thread", "list"]).stdout;
+    let lines: Vec<&str> = tree.lines().collect();
+    assert_eq!(lines.len(), 3, "{tree}");
+    assert!(lines[0].starts_with(&parent), "{tree}");
+    assert!(lines[1].starts_with(&format!("  {slow}")), "{tree}");
+
+    // A thread waiting for the user has not settled: the wait runs out of time and
+    // says where it stands.
+    let asking = child("/ask which one?");
+    daemon.wait_for(&asking, "interaction/requested");
+    let timed_out = daemon.qcc(&["thread", "wait", &asking, "--timeout", "1", "--json"]);
+    assert!(!timed_out.ok);
+    assert_eq!(timed_out.json()["timed_out"], true);
+    assert_eq!(timed_out.json()["threads"][0]["state"], "waiting");
+    let text = daemon.qcc(&["thread", "wait", &asking, "--timeout", "1"]);
+    assert!(text.stdout.contains("waiting for the user"), "{}", text.stdout);
+
+    // `--any` returns as soon as one is done.
+    let any = daemon.qcc(&["thread", "wait", &asking, &quick, "--any", "--json"]);
+    assert!(any.ok, "{}", any.stderr);
+    assert_eq!(any.json()["threads"][1]["state"], "idle");
+
+    // A failed turn fails the wait.
+    let failing = child("/fail no luck");
+    let failed = daemon.qcc(&["thread", "wait", &failing]);
+    assert!(!failed.ok);
+    assert!(failed.stdout.contains("last turn failed"), "{}", failed.stdout);
+    assert!(!daemon.qcc(&["thread", "wait", "thr_gone"]).ok);
+
+    // Delegation nests only so deep.
+    let mut current = parent.clone();
+    for level in 1..=5 {
+        let output = daemon.qcc(&["thread", "spawn", "--parent", &current, "--json"]);
+        if level <= 4 {
+            assert!(output.ok, "level {level}: {}", output.stderr);
+            current = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+        } else {
+            assert!(!output.ok);
+            assert!(output.stderr.contains("may not delegate any deeper"), "{}", output.stderr);
+        }
+    }
+}
+
+#[test]
+fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+
+    // Every session is told about the skill and where to read it.
+    let probe = daemon.spawn("/skills");
+    let told = daemon.qcc(&["thread", "wait", &probe, "--json"]).json();
+    let told = told["threads"][0]["last_message"].as_str().unwrap().to_owned();
+    assert!(told.contains("qcc-orchestration:"), "{told}");
+    let path = told.split("(file: ").nth(1).unwrap().trim_end_matches(')');
+    assert!(path.starts_with(dir.path().to_str().unwrap()), "{path}");
+    let skill = std::fs::read_to_string(path).unwrap();
+    assert!(skill.starts_with("---\nname: qcc-orchestration\ndescription: \""), "{skill}");
+    assert!(skill.contains("qcc thread wait"), "{skill}");
+
+    let commands = daemon.qcc(&["command", "list", "--json"]).json();
+    let ids: Vec<&str> = commands["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["handoff", "review"]);
+    assert!(
+        daemon.qcc(&["command", "list"]).stdout.contains("qcc orchestration review --thread <id>")
+    );
+
+    let source = daemon.spawn("fix the parser bug");
+    assert!(daemon.qcc(&["thread", "wait", &source]).ok);
+
+    // Handoff: a new thread in the same directory with the conversation so far.
+    let handoff = daemon.qcc(&[
+        "orchestration",
+        "handoff",
+        "--thread",
+        &source,
+        "--note",
+        "add a regression test",
+        "--json",
+    ]);
+    assert!(handoff.ok, "{}", handoff.stderr);
+    let next = handoff.json()["thread_id"].as_str().unwrap().to_owned();
+    let next_thread = daemon.thread(&next);
+    assert_eq!(next_thread["parent"], source.as_str());
+    assert_eq!(next_thread["cwd"], daemon.thread(&source)["cwd"]);
+    let waited = daemon.qcc(&["thread", "wait", &next, "--json"]).json();
+    let echoed = waited["threads"][0]["last_message"].as_str().unwrap();
+    assert!(echoed.contains("taking over a task"), "{echoed}");
+    assert!(echoed.contains("fix the parser bug"), "{echoed}");
+    assert!(echoed.ends_with("What to do now: add a regression test"), "{echoed}");
+
+    // Review: a reviewer child whose findings go back to the reviewed thread.
+    let review = daemon.qcc(&["orchestration", "review", "--thread", &source, "--focus=errors"]);
+    assert!(review.ok, "{}", review.stderr);
+    let reviewer =
+        review.stdout.lines().last().unwrap().strip_prefix("thread ").unwrap().to_owned();
+    assert_eq!(daemon.thread(&reviewer)["parent"], source.as_str());
+    eventually(&daemon, &source, "received the review", |events| {
+        inputs(events)
+            .iter()
+            .any(|text| text.starts_with(&format!("A reviewer (qcc thread {reviewer})")))
+    });
+    let reviewed = daemon.qcc(&["thread", "wait", &source, "--json"]).json();
+    let findings = reviewed["threads"][0]["last_message"].as_str().unwrap();
+    // The echo reviewer's findings are its prompt, echoed.
+    assert!(findings.contains("Pay particular attention to: errors"), "{findings}");
+
+    // A thread that is still working is neither handed off nor reviewed.
+    let busy = daemon.spawn("/ask ready?");
+    daemon.wait_for(&busy, "interaction/requested");
+    let refused = daemon.qcc(&["orchestration", "review", "--thread", &busy]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("still working"), "{}", refused.stderr);
+
+    // The daemon checks commands before the plugin sees them.
+    for (args, message) in [
+        (vec!["orchestration", "review"], "acts on a thread"),
+        (vec!["orchestration", "review", "--thread", &source, "--bogus", "1"], "no parameter"),
+        (vec!["orchestration", "nothing"], "has no command"),
+        (vec!["nosuch", "thing"], "no plugin"),
+        (vec!["orchestration"], "qcc <plugin> <command>"),
+    ] {
+        let output = daemon.qcc(&args);
+        assert!(!output.ok, "{args:?}");
+        assert!(output.stderr.contains(message), "{args:?}: {}", output.stderr);
+    }
+    // Inside an agent session the thread is the agent's own.
+    let own =
+        daemon.qcc_env(&["orchestration", "handoff", "--json"], &[("QCC_THREAD_ID", &source)]);
+    assert!(own.ok, "{}", own.stderr);
 }

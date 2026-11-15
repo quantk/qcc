@@ -1,8 +1,11 @@
 //! Methods and notifications of the daemon API.
 
+use std::collections::BTreeMap;
+
 use qcc_domain::{
-    EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution, PermissionMode,
-    ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId, UiViewInfo,
+    CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution,
+    PermissionMode, ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId, ThreadState,
+    UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -246,6 +249,43 @@ pub struct ThreadDiffResult {
 }
 
 method!(
+    /// Wait until threads settle: nothing runs in them and nothing will until someone
+    /// sends them a message (idle, failed or archived). A thread waiting for the user
+    /// to answer an approval is not settled. Returns at once if the condition already
+    /// holds.
+    ThreadWait, "thread.wait", ThreadWaitParams => ThreadWaitResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadWaitParams {
+    pub thread_ids: Vec<ThreadId>,
+    /// Return when any of them settles instead of all.
+    #[serde(default)]
+    pub any: bool,
+    /// Give up after this long and say so in `timed_out`. Absent: wait as long as
+    /// it takes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadWaitResult {
+    /// In the order asked.
+    pub threads: Vec<WaitedThread>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub timed_out: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct WaitedThread {
+    pub thread: Thread,
+    pub state: ThreadState,
+    /// The text of the agent's latest message: usually the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_message: Option<String>,
+}
+
+method!(
     /// Read a thread's events after a cursor and optionally keep following it.
     ThreadEvents, "thread.events", ThreadEventsParams => ThreadEventsResult
 );
@@ -319,6 +359,9 @@ pub struct PluginInfo {
     pub permissions: PluginPermissions,
     pub providers: Vec<ProviderInfo>,
     pub environments: Vec<EnvironmentInfo>,
+    pub commands: Vec<CommandInfo>,
+    /// Names of the skills it offers to agents.
+    pub skills: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -326,8 +369,54 @@ pub struct PluginPermissions {
     pub deltas: bool,
     pub kv: bool,
     pub timers: bool,
+    pub threads: bool,
+    pub skills: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
+}
+
+// ----- plugin commands --------------------------------------------------------------
+
+method!(
+    /// The commands plugins contribute.
+    CommandList, "command.list", Empty => CommandListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandListResult {
+    pub commands: Vec<CommandContribution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandContribution {
+    pub plugin: String,
+    #[serde(flatten)]
+    pub command: CommandInfo,
+}
+
+method!(
+    /// Run a plugin's command.
+    CommandRun, "command.run", CommandRunParams => CommandRunResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandRunParams {
+    pub plugin: String,
+    pub command: String,
+    /// Required by a command that acts on a thread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+    /// Parameter values by name.
+    #[serde(default)]
+    pub args: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommandRunResult {
+    pub message: String,
+    /// A thread the command made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
 }
 
 // ----- plugin UI --------------------------------------------------------------------

@@ -1,16 +1,18 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
 use qcc_domain::{
-    ChangeKind, ChangedFile, Delta, EnvironmentChanges, EnvironmentInfo, InteractionOption,
-    InteractionRequest, InteractionResolution, ItemKey, ItemShape, ItemStatus, ModelInfo,
-    OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, TextChannel, TokenUsage,
-    TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
+    ChangeKind, ChangedFile, CommandInfo, CommandParam, Delta, EnvironmentChanges, EnvironmentInfo,
+    InteractionOption, InteractionRequest, InteractionResolution, ItemKey, ItemShape, ItemStatus,
+    ModelInfo, OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, Role, SkillInfo,
+    TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement,
+    UiScope, UiViewInfo, UsageSnapshot,
 };
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
-    UiRequest,
+    SettledThread, SpawnThread, ThreadSummary, UiRequest,
 };
+use crate::bindings::qcc::plugin::threads as wit_threads;
 use crate::bindings::wit;
 
 fn json(text: &str) -> Result<serde_json::Value, String> {
@@ -169,12 +171,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                     .capabilities
                     .permission_modes
                     .into_iter()
-                    .map(|mode| match mode {
-                        wit::PermissionMode::Ask => PermissionMode::Ask,
-                        wit::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
-                        wit::PermissionMode::Auto => PermissionMode::Auto,
-                        wit::PermissionMode::Full => PermissionMode::Full,
-                    })
+                    .map(mode_from_wit)
                     .collect(),
             },
         }),
@@ -195,7 +192,97 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             web: view.web,
         }),
         wit::Contribution::UiItem(kind) => Contribution::UiItem(kind),
+        wit::Contribution::Command(c) => Contribution::Command(CommandInfo {
+            id: c.id,
+            title: c.title,
+            description: c.description,
+            thread: c.thread,
+            params: c
+                .params
+                .into_iter()
+                .map(|p| CommandParam {
+                    name: p.name,
+                    label: p.label,
+                    required: p.required,
+                    placeholder: p.placeholder,
+                })
+                .collect(),
+        }),
+        wit::Contribution::Skill(s) => Contribution::Skill(SkillInfo {
+            name: s.name,
+            description: s.description,
+            body: s.body,
+        }),
     }
+}
+
+fn mode_from_wit(mode: wit::PermissionMode) -> PermissionMode {
+    match mode {
+        wit::PermissionMode::Ask => PermissionMode::Ask,
+        wit::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
+        wit::PermissionMode::Auto => PermissionMode::Auto,
+        wit::PermissionMode::Full => PermissionMode::Full,
+    }
+}
+
+fn mode_to_wit(mode: PermissionMode) -> wit::PermissionMode {
+    match mode {
+        PermissionMode::Ask => wit::PermissionMode::Ask,
+        PermissionMode::AcceptEdits => wit::PermissionMode::AcceptEdits,
+        PermissionMode::Auto => wit::PermissionMode::Auto,
+        PermissionMode::Full => wit::PermissionMode::Full,
+    }
+}
+
+pub(crate) fn spawn_options(options: wit_threads::SpawnOptions) -> SpawnThread {
+    SpawnThread {
+        provider: options.provider.into(),
+        cwd: options.cwd,
+        prompt: options.prompt,
+        model: options.model,
+        parent: options.parent.map(ThreadId),
+        environment: options.environment,
+        base: options.base,
+        permission_mode: options.permission_mode.map(mode_from_wit),
+    }
+}
+
+pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
+    let ThreadSummary { thread, state } = summary;
+    wit::ThreadInfo {
+        id: thread.id.0,
+        provider: thread.provider.0,
+        cwd: thread.cwd,
+        parent: thread.parent.map(|parent| parent.0),
+        title: thread.title,
+        model: thread.model,
+        environment: thread.environment.map(|environment| environment.id),
+        state: match state {
+            ThreadState::Working => wit::ThreadState::Working,
+            ThreadState::Waiting => wit::ThreadState::Waiting,
+            ThreadState::Idle => wit::ThreadState::Idle,
+            ThreadState::Failed => wit::ThreadState::Failed,
+            ThreadState::Archived => wit::ThreadState::Archived,
+        },
+        last_turn: thread.last_turn_status.map(|status| match status {
+            TurnStatus::Completed => wit::TurnStatus::Completed,
+            TurnStatus::Failed => wit::TurnStatus::Failed,
+            TurnStatus::Interrupted => wit::TurnStatus::Interrupted,
+        }),
+    }
+}
+
+pub(crate) fn transcript(entries: Vec<TranscriptEntry>) -> Vec<wit_threads::Message> {
+    entries
+        .into_iter()
+        .map(|entry| wit_threads::Message {
+            role: match entry.role {
+                Role::User => wit_threads::Role::User,
+                Role::Agent => wit_threads::Role::Agent,
+            },
+            text: entry.text,
+        })
+        .collect()
 }
 
 pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
@@ -233,6 +320,9 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
         wit::Outcome::EnvironmentDiff(diff) => {
             Outcome::EnvironmentDiff { diff: diff.diff, truncated: diff.truncated }
         }
+        wit::Outcome::CommandResult(result) => {
+            Outcome::CommandResult { message: result.message, thread: result.thread.map(ThreadId) }
+        }
         // The actor resolves deferred answers; one never leaves it.
         wit::Outcome::Deferred(_) => Outcome::Done,
     }
@@ -245,13 +335,17 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
         model: start.model,
         resume: start.resume,
         prompt: start.prompt,
-        permission_mode: start.permission_mode.map(|mode| match mode {
-            PermissionMode::Ask => wit::PermissionMode::Ask,
-            PermissionMode::AcceptEdits => wit::PermissionMode::AcceptEdits,
-            PermissionMode::Auto => wit::PermissionMode::Auto,
-            PermissionMode::Full => wit::PermissionMode::Full,
-        }),
+        permission_mode: start.permission_mode.map(mode_to_wit),
         env: start.env,
+        skills: start
+            .skills
+            .into_iter()
+            .map(|skill| wit::SkillRef {
+                name: skill.name,
+                description: skill.description,
+                path: skill.path,
+            })
+            .collect(),
     }
 }
 
@@ -305,6 +399,15 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 wit::UiRequest::RenderItem(wit::UiItem { kind, payload })
             }
         }),
+        PluginRequest::Command { command, thread, args } => {
+            wit::Event::Command(wit::CommandCall { command, thread: thread.map(|t| t.0), args })
+        }
+        PluginRequest::ThreadSettled(SettledThread { summary, last_message }) => {
+            wit::Event::ThreadSettled(wit::SettledThread {
+                thread: thread_info(summary),
+                last_message,
+            })
+        }
         PluginRequest::Environment { environment, request } => {
             wit::Event::Environment(wit::EnvironmentCall {
                 environment,

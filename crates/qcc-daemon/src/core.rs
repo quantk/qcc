@@ -1,21 +1,24 @@
 //! The core task: the single owner of all daemon state.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use base64::Engine as _;
 use qcc_domain::{
-    Delta, EnvironmentState, EventPayload, PermissionMode, ProviderId, ThreadEnvironment,
-    ThreadEvent, ThreadId, ThreadStatus,
+    Delta, EnvironmentState, EventPayload, PermissionMode, ProviderId, SkillRef, ThreadEnvironment,
+    ThreadEvent, ThreadId, ThreadState, ThreadStatus,
 };
 use qcc_plugin_host::{
     Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
-    PluginRequest, ProviderRequest, SessionStart, UiRequest,
+    PluginRequest, ProviderRequest, SessionStart, SettledThread, ThreadSummary, ThreadsAnswer,
+    ThreadsCall, UiRequest,
 };
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
-    DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
+    CommandContribution, CommandList, CommandListResult, CommandRun, CommandRunParams,
+    CommandRunResult, DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
     SendMode, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
     ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
@@ -23,9 +26,10 @@ use qcc_protocol::methods::{
     ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
     ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
     ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
-    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams, UiAsset,
-    UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult, UiItemContribution,
-    UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
+    ThreadUpdatedNotification, ThreadWait, ThreadWaitParams, ThreadWaitResult, ThreadWatch,
+    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
+    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution, WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -78,6 +82,10 @@ pub(crate) enum Action {
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const REMOVE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How far below a thread the user started agents may spawn agents: a guard
+/// against an orchestrator that keeps delegating.
+pub(crate) const MAX_SPAWN_DEPTH: usize = 4;
 
 /// Ask an environment plugin, and stop waiting if it never answers.
 async fn call_environment(
@@ -149,7 +157,33 @@ pub(crate) enum Command {
         result: Result<Outcome, PluginError>,
         responder: Responder,
     },
+    /// A plugin's `threads` import. Answered on `reply`, which the plugin's thread
+    /// blocks on.
+    Threads {
+        plugin: String,
+        call: ThreadsCall,
+        reply: std::sync::mpsc::Sender<Result<ThreadsAnswer, String>>,
+    },
+    /// A `thread.wait` ran out of time.
+    WaitTimedOut {
+        waiter: u64,
+    },
     Shutdown,
+}
+
+/// A `thread.wait` that has not been answered yet.
+struct Waiter {
+    id: u64,
+    connection: u64,
+    threads: Vec<ThreadId>,
+    any: bool,
+    responder: Responder,
+}
+
+/// A plugin asked to hear when a thread settles.
+struct Watch {
+    plugin: String,
+    thread: ThreadId,
 }
 
 /// Per-thread state that does not outlive the daemon process.
@@ -182,6 +216,13 @@ pub(crate) struct Core {
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
     /// Connections following the list of threads.
     watchers: Vec<Subscriber>,
+    waiters: Vec<Waiter>,
+    next_waiter: u64,
+    watches: Vec<Watch>,
+    /// Skills plugins offer, written out where agents can read them.
+    skills: Vec<SkillRef>,
+    /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
+    cli_dir: Option<PathBuf>,
     /// Set when the journal cannot be written. The daemon stops rather than let
     /// memory and disk disagree.
     fatal: Option<anyhow::Error>,
@@ -211,6 +252,11 @@ impl Core {
         let store = Store::open(config.database())
             .with_context(|| format!("cannot open {}", config.database().display()))?;
         let host = plugins::load_all(config, &commands).context("cannot load plugins")?;
+        let skills = plugins::write_skills(config, &host);
+        let cli_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(PathBuf::from))
+            .filter(|dir| dir.join("qcc").is_file());
 
         let mut supervisor = Supervisor::new(|| Box::new(UuidMint));
         let mut queued = HashSet::new();
@@ -246,6 +292,11 @@ impl Core {
             archiving: HashSet::new(),
             subscribers: HashMap::new(),
             watchers: Vec::new(),
+            waiters: Vec::new(),
+            next_waiter: 0,
+            watches: Vec::new(),
+            skills,
+            cli_dir,
             fatal: None,
         })
     }
@@ -258,6 +309,7 @@ impl Core {
             }
             self.handle(command);
             self.drain_queues();
+            self.settle_waits();
             if let Some(error) = self.fatal.take() {
                 return Err(error);
             }
@@ -291,6 +343,7 @@ impl Core {
                     subscribers.retain(|subscriber| subscriber.connection != connection);
                 }
                 self.watchers.retain(|watcher| watcher.connection != connection);
+                self.waiters.retain(|waiter| waiter.connection != connection);
             }
             Command::Deltas { plugin, thread, deltas } => self.deltas(&plugin, thread, deltas),
             Command::PluginCrashed { plugin, reason } => self.plugin_crashed(&plugin, &reason),
@@ -305,6 +358,15 @@ impl Core {
             }
             Command::EnvironmentRemoved { thread, result, responder } => {
                 self.environment_removed(thread, result, responder);
+            }
+            Command::Threads { plugin, call, reply } => {
+                let _ = reply.send(self.threads_call(&plugin, call));
+            }
+            Command::WaitTimedOut { waiter } => {
+                if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {
+                    let waiter = self.waiters.remove(index);
+                    self.answer_wait(waiter, true);
+                }
             }
             Command::Shutdown => {}
         }
@@ -381,6 +443,10 @@ impl Core {
                 });
                 responder.reply(result);
             }
+            ThreadWait::NAME => match params::<ThreadWait>(raw) {
+                Ok(p) => self.thread_wait(connection, p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             ThreadEvents::NAME => match params::<ThreadEvents>(raw) {
                 Ok(p) => self.thread_events(connection, p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
@@ -407,6 +473,11 @@ impl Core {
                 responder.reply(result);
             }
             PluginList::NAME => responder.reply(Ok(self.plugin_list())),
+            CommandList::NAME => responder.reply(Ok(self.command_list())),
+            CommandRun::NAME => match params::<CommandRun>(raw) {
+                Ok(p) => self.command_run(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             UiContributions::NAME => responder.reply(Ok(self.ui_contributions())),
             UiRender::NAME => match params::<UiRender>(raw) {
                 Ok(UiRenderParams { plugin, view, thread_id }) => {
@@ -457,10 +528,19 @@ impl Core {
 
     fn thread_spawn(&mut self, p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
         self.check_mode(&p.provider, p.permission_mode)?;
-        if let Some(parent) = &p.parent
-            && self.supervisor.thread(parent).is_none()
-        {
-            return Err(thread_not_found(parent));
+        if let Some(parent) = &p.parent {
+            if self.supervisor.thread(parent).is_none() {
+                return Err(thread_not_found(parent));
+            }
+            if self.depth(parent) >= MAX_SPAWN_DEPTH {
+                return Err(RpcError::new(
+                    codes::INVALID_PARAMS,
+                    format!(
+                        "thread {parent} is {MAX_SPAWN_DEPTH} levels below the thread the user \
+                         started; agents may not delegate any deeper"
+                    ),
+                ));
+            }
         }
         let cwd = std::path::Path::new(&p.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
@@ -521,6 +601,21 @@ impl Core {
 
         let thread = self.supervisor.thread(&id).cloned().ok_or_else(|| thread_not_found(&id))?;
         Ok(ThreadResult { thread })
+    }
+
+    /// How many ancestors a thread has.
+    fn depth(&self, id: &ThreadId) -> usize {
+        let mut depth = 0;
+        let mut current = self.supervisor.thread(id).and_then(|thread| thread.parent.clone());
+        while let Some(parent) = current {
+            depth += 1;
+            // A cycle cannot be made through the API; the bound is only a backstop.
+            if depth > MAX_SPAWN_DEPTH * 4 {
+                break;
+            }
+            current = self.supervisor.thread(&parent).and_then(|thread| thread.parent.clone());
+        }
+        depth
     }
 
     /// The provider must exist and must be able to enforce the mode.
@@ -765,10 +860,14 @@ impl Core {
                         deltas: permissions.deltas,
                         kv: permissions.kv,
                         timers: permissions.timers,
+                        threads: permissions.threads,
+                        skills: permissions.skills,
                         process: permissions.process.clone(),
                     },
                     providers: Vec::new(),
                     environments: Vec::new(),
+                    commands: Vec::new(),
+                    skills: Vec::new(),
                 };
                 for contribution in plugin.contributions() {
                     match contribution {
@@ -776,13 +875,285 @@ impl Core {
                         Contribution::Environment(environment) => {
                             info.environments.push(environment.clone());
                         }
-                        Contribution::UiView(_) | Contribution::UiItem(_) => {}
+                        Contribution::Command(command) => info.commands.push(command.clone()),
+                        // Listed only if the plugin may offer it.
+                        Contribution::Skill(skill) if permissions.skills => {
+                            info.skills.push(skill.name.clone());
+                        }
+                        Contribution::Skill(_)
+                        | Contribution::UiView(_)
+                        | Contribution::UiItem(_) => {}
                     }
                 }
                 info
             })
             .collect();
         PluginListResult { plugins }
+    }
+
+    /// What every agent process sees: where it is and how to reach the daemon.
+    fn session_env(&self, id: &ThreadId) -> Vec<(String, String)> {
+        let mut env = vec![
+            (paths::THREAD_ID_ENV.into(), id.to_string()),
+            (paths::SOCKET_ENV.into(), self.config.socket.display().to_string()),
+        ];
+        if let Some(dir) = &self.cli_dir {
+            env.push((paths::CLI_BIN_ENV.into(), dir.join("qcc").display().to_string()));
+            let path = match std::env::var("PATH") {
+                Ok(path) if !path.is_empty() => format!("{}:{path}", dir.display()),
+                _ => dir.display().to_string(),
+            };
+            env.push(("PATH".into(), path));
+        }
+        env
+    }
+
+    // ----- waiting --------------------------------------------------------------------
+
+    /// Where a thread is, for someone waiting on it.
+    fn thread_state(&mut self, id: &ThreadId) -> Option<ThreadState> {
+        let starting = self.sessions.get(id).is_some_and(|session| session.starting);
+        let archiving = self.archiving.contains(id);
+        let engine = self.supervisor.engine(id).ok()?;
+        let thread = engine.thread();
+        Some(if thread.archived {
+            ThreadState::Archived
+        } else if !thread.pending_interactions.is_empty() {
+            ThreadState::Waiting
+        } else if starting || archiving || engine.busy() || engine.has_queued_input() {
+            ThreadState::Working
+        } else if thread.status == ThreadStatus::Failed {
+            ThreadState::Failed
+        } else {
+            ThreadState::Idle
+        })
+    }
+
+    fn summary(&mut self, id: &ThreadId) -> Option<ThreadSummary> {
+        let state = self.thread_state(id)?;
+        let thread = self.supervisor.thread(id)?.clone();
+        Some(ThreadSummary { thread, state })
+    }
+
+    fn last_message(&self, id: &ThreadId) -> Option<String> {
+        match self.store.transcript(id, true) {
+            Ok(mut entries) => entries.pop().map(|entry| entry.text),
+            Err(error) => {
+                tracing::error!(thread = %id, %error, "cannot read the transcript");
+                None
+            }
+        }
+    }
+
+    fn thread_wait(&mut self, connection: u64, p: ThreadWaitParams, responder: Responder) {
+        let ThreadWaitParams { thread_ids, any, timeout_ms } = p;
+        if thread_ids.is_empty() {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                "name a thread to wait on",
+            )));
+        }
+        if let Some(missing) = thread_ids.iter().find(|id| self.supervisor.thread(id).is_none()) {
+            return responder.reply::<Empty>(Err(thread_not_found(missing)));
+        }
+        self.next_waiter += 1;
+        let id = self.next_waiter;
+        self.waiters.push(Waiter { id, connection, threads: thread_ids, any, responder });
+        if let Some(timeout) = timeout_ms {
+            let commands = self.commands.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(timeout)).await;
+                let _ = commands.send(Command::WaitTimedOut { waiter: id });
+            });
+        }
+        // Answered right away, after this command, if nothing needs to happen first.
+    }
+
+    fn answer_wait(&mut self, waiter: Waiter, timed_out: bool) {
+        let mut threads = Vec::new();
+        for id in &waiter.threads {
+            let (Some(state), Some(thread)) =
+                (self.thread_state(id), self.supervisor.thread(id).cloned())
+            else {
+                continue;
+            };
+            let last_message = self.last_message(id);
+            threads.push(WaitedThread { thread, state, last_message });
+        }
+        waiter.responder.reply(Ok(ThreadWaitResult { threads, timed_out }));
+    }
+
+    /// Answer the waits and fire the watches whose threads settled.
+    fn settle_waits(&mut self) {
+        if self.waiters.is_empty() && self.watches.is_empty() {
+            return;
+        }
+        let mut index = 0;
+        while index < self.waiters.len() {
+            let (threads, any) = (self.waiters[index].threads.clone(), self.waiters[index].any);
+            let mut settled =
+                threads.iter().map(|id| self.thread_state(id).is_none_or(ThreadState::is_settled));
+            let done = if any { settled.any(|s| s) } else { settled.all(|s| s) };
+            if done {
+                let waiter = self.waiters.remove(index);
+                self.answer_wait(waiter, false);
+            } else {
+                index += 1;
+            }
+        }
+
+        let mut index = 0;
+        while index < self.watches.len() {
+            let thread = self.watches[index].thread.clone();
+            let Some(summary) = self.summary(&thread) else {
+                self.watches.remove(index);
+                continue;
+            };
+            if !summary.state.is_settled() {
+                index += 1;
+                continue;
+            }
+            let watch = self.watches.remove(index);
+            let last_message = self.last_message(&thread);
+            if let Some(plugin) = self.host.plugin(&watch.plugin) {
+                let settled = SettledThread { summary, last_message };
+                if plugin.post(PluginRequest::ThreadSettled(settled)).is_err() {
+                    tracing::warn!(plugin = watch.plugin, "a watching plugin is gone");
+                }
+            }
+        }
+    }
+
+    // ----- the `threads` import -------------------------------------------------------
+
+    fn threads_call(&mut self, plugin: &str, call: ThreadsCall) -> Result<ThreadsAnswer, String> {
+        let summary = |core: &mut Self, id: &ThreadId| {
+            core.summary(id)
+                .map(|summary| ThreadsAnswer::Thread(Box::new(summary)))
+                .ok_or_else(|| format!("thread {id} does not exist"))
+        };
+        match call {
+            ThreadsCall::Spawn(spawn) => {
+                tracing::info!(plugin, provider = %spawn.provider, "a plugin spawns a thread");
+                let result = self
+                    .thread_spawn(ThreadSpawnParams {
+                        provider: spawn.provider,
+                        cwd: spawn.cwd,
+                        environment: spawn.environment,
+                        base: spawn.base,
+                        prompt: spawn.prompt,
+                        model: spawn.model,
+                        parent: spawn.parent,
+                        permission_mode: spawn.permission_mode,
+                    })
+                    .map_err(|error| error.message)?;
+                summary(self, &result.thread.id)
+            }
+            ThreadsCall::Send { thread, text } => self
+                .thread_send(ThreadSendParams {
+                    thread_id: thread,
+                    text,
+                    delivery: SendMode::Queue,
+                })
+                .map(|_| ThreadsAnswer::Done)
+                .map_err(|error| error.message),
+            ThreadsCall::Get(thread) => summary(self, &thread),
+            ThreadsCall::Transcript(thread) => {
+                if self.supervisor.thread(&thread).is_none() {
+                    return Err(format!("thread {thread} does not exist"));
+                }
+                self.store
+                    .transcript(&thread, false)
+                    .map(ThreadsAnswer::Transcript)
+                    .map_err(|error| error.to_string())
+            }
+            ThreadsCall::Watch(thread) => {
+                if self.supervisor.thread(&thread).is_none() {
+                    return Err(format!("thread {thread} does not exist"));
+                }
+                self.watches.push(Watch { plugin: plugin.to_owned(), thread });
+                Ok(ThreadsAnswer::Done)
+            }
+        }
+    }
+
+    // ----- plugin commands ------------------------------------------------------------
+
+    fn command_list(&self) -> CommandListResult {
+        let mut commands = Vec::new();
+        for plugin in self.host.plugins() {
+            for contribution in plugin.contributions() {
+                if let Contribution::Command(command) = contribution {
+                    commands.push(CommandContribution {
+                        plugin: plugin.id().to_owned(),
+                        command: command.clone(),
+                    });
+                }
+            }
+        }
+        CommandListResult { commands }
+    }
+
+    fn command_run(&mut self, p: CommandRunParams, responder: Responder) {
+        let CommandRunParams { plugin: plugin_id, command, thread_id, args } = p;
+        let invalid = |message: String| RpcError::new(codes::INVALID_PARAMS, message);
+        let Some(plugin) = self.host.plugin(&plugin_id).cloned() else {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::PLUGIN_ERROR,
+                format!("no plugin {plugin_id:?} is loaded"),
+            )));
+        };
+        let info = plugin.contributions().iter().find_map(|contribution| match contribution {
+            Contribution::Command(info) if info.id == command => Some(info.clone()),
+            _ => None,
+        });
+        let Some(info) = info else {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::PLUGIN_ERROR,
+                format!("plugin {plugin_id:?} has no command {command:?}"),
+            )));
+        };
+        let thread = match (info.thread, thread_id) {
+            (true, None) => {
+                return responder
+                    .reply::<Empty>(Err(invalid(format!("{command} acts on a thread; name one"))));
+            }
+            (true, Some(id)) if self.supervisor.thread(&id).is_none() => {
+                return responder.reply::<Empty>(Err(thread_not_found(&id)));
+            }
+            (true, thread) => thread,
+            (false, _) => None,
+        };
+        if let Some(unknown) =
+            args.keys().find(|name| !info.params.iter().any(|p| &p.name == *name))
+        {
+            return responder
+                .reply::<Empty>(Err(invalid(format!("{command} takes no parameter {unknown:?}"))));
+        }
+        if let Some(missing) = info
+            .params
+            .iter()
+            .find(|p| p.required && args.get(&p.name).is_none_or(|value| value.trim().is_empty()))
+        {
+            return responder.reply::<Empty>(Err(invalid(format!(
+                "{command} needs {:?} ({})",
+                missing.name, missing.label
+            ))));
+        }
+        let request = PluginRequest::Command { command, thread, args: args.into_iter().collect() };
+        tokio::spawn(async move {
+            let answer = tokio::time::timeout(QUERY_TIMEOUT, plugin.call(request)).await;
+            let error = |message: String| RpcError::new(codes::PLUGIN_ERROR, message);
+            let result = match answer {
+                Ok(Ok(Outcome::CommandResult { message, thread })) => {
+                    Ok(CommandRunResult { message, thread_id: thread })
+                }
+                Ok(Ok(other)) => Err(error(format!("the plugin answered with {other:?}"))),
+                Ok(Err(failure)) => Err(error(failure.to_string())),
+                Err(_) => Err(error("the plugin did not answer in time".into())),
+            };
+            responder.reply(result);
+        });
     }
 
     // ----- plugin UI ------------------------------------------------------------------
@@ -896,10 +1267,8 @@ impl Core {
                 resume,
                 prompt,
                 permission_mode: thread.permission_mode,
-                env: vec![
-                    (paths::THREAD_ID_ENV.into(), id.to_string()),
-                    (paths::SOCKET_ENV.into(), self.config.socket.display().to_string()),
-                ],
+                env: self.session_env(id),
+                skills: self.skills.clone(),
             }),
         };
         self.sessions.entry(id.clone()).or_default().starting = true;

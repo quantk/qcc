@@ -7,10 +7,13 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
-use qcc_domain::{Delta, ThreadId};
+use qcc_domain::{Delta, SkillRef, ThreadId};
 use qcc_plugin_host::services::DirKv;
-use qcc_plugin_host::{Grant, MANIFEST_FILE, Permissions, PluginHost, Services};
+use qcc_plugin_host::{
+    Contribution, Grant, MANIFEST_FILE, Permissions, PluginHost, Services, ThreadsCall,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::Config;
@@ -64,6 +67,7 @@ pub(crate) fn load_all(
         let loaded = host.load_dir(&dir, &grant, |manifest| {
             let deltas = commands.clone();
             let crashes = commands.clone();
+            let threads = commands.clone();
             Services {
                 deltas: Arc::new(move |plugin: &str, thread: ThreadId, deltas_: Vec<Delta>| {
                     let _ = deltas.send(Command::Deltas {
@@ -74,6 +78,18 @@ pub(crate) fn load_all(
                 }),
                 kv: Box::new(DirKv::new(config.plugin_data_dir(&manifest.id).join("kv"))),
                 processes: Arc::new(qcc_plugin_host::services::OsProcesses),
+                threads: Arc::new(move |plugin: &str, call: ThreadsCall| {
+                    let (reply, answer) = std::sync::mpsc::channel();
+                    threads
+                        .send(Command::Threads { plugin: plugin.to_owned(), call, reply })
+                        .map_err(|_| "the daemon is shutting down".to_owned())?;
+                    // The core answers at once; it never waits on a plugin. It is not
+                    // running yet while plugins are being loaded.
+                    answer.recv_timeout(THREADS_TIMEOUT).map_err(|_| {
+                        "the daemon did not answer; threads are not available during init"
+                            .to_owned()
+                    })?
+                }),
                 on_crash: Arc::new(move |plugin: &str, reason: &str| {
                     let _ = crashes.send(Command::PluginCrashed {
                         plugin: plugin.to_owned(),
@@ -93,6 +109,69 @@ pub(crate) fn load_all(
         }
     }
     Ok(host)
+}
+
+/// How long a plugin's `threads` call may wait for the core.
+const THREADS_TIMEOUT: Duration = Duration::from_secs(5);
+
+fn valid_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// Write the skills of plugins allowed to offer them where agents can read them,
+/// replacing what an earlier start wrote.
+pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<SkillRef> {
+    let root = config.skills_dir();
+    if root.exists()
+        && let Err(error) = std::fs::remove_dir_all(&root)
+    {
+        tracing::error!(dir = %root.display(), %error, "cannot clear old skills");
+    }
+    let mut skills = Vec::new();
+    for plugin in host.plugins() {
+        for contribution in plugin.contributions() {
+            let Contribution::Skill(skill) = contribution else { continue };
+            if !plugin.permissions().skills {
+                tracing::warn!(
+                    plugin = plugin.id(),
+                    skill = skill.name,
+                    "skill ignored: the plugin may not offer skills"
+                );
+                continue;
+            }
+            if !valid_skill_name(&skill.name) {
+                tracing::warn!(
+                    plugin = plugin.id(),
+                    skill = skill.name,
+                    "skill ignored: invalid name"
+                );
+                continue;
+            }
+            let dir = root.join(plugin.id()).join(&skill.name);
+            let path = dir.join("SKILL.md");
+            // A JSON string is a valid YAML scalar, whatever the description says.
+            let description = serde_json::to_string(&skill.description).expect("strings serialize");
+            let text = format!(
+                "---\nname: {}\ndescription: {description}\n---\n\n{}\n",
+                skill.name, skill.body
+            );
+            if let Err(error) =
+                std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, text))
+            {
+                tracing::error!(path = %path.display(), %error, "cannot write a skill");
+                continue;
+            }
+            skills.push(SkillRef {
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                path: path.display().to_string(),
+            });
+        }
+    }
+    skills
 }
 
 fn plugin_id(dir: &Path) -> Option<String> {

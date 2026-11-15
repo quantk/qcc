@@ -10,6 +10,10 @@ pub struct Permissions {
     /// A private key-value store.
     pub kv: bool,
     pub timers: bool,
+    /// Create, drive and read threads: orchestration.
+    pub threads: bool,
+    /// Offer skills (instructions) to every agent session.
+    pub skills: bool,
     /// Executables the plugin may run, matched exactly against `spawn`'s `program`.
     pub process: Vec<String>,
 }
@@ -20,6 +24,8 @@ impl Permissions {
             deltas: self.deltas && other.deltas,
             kv: self.kv && other.kv,
             timers: self.timers && other.timers,
+            threads: self.threads && other.threads,
+            skills: self.skills && other.skills,
             process: self.process.iter().filter(|p| other.process.contains(p)).cloned().collect(),
         }
     }

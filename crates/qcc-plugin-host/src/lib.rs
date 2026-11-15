@@ -20,7 +20,7 @@ pub mod services;
 pub use actor::{PluginError, PluginHandle};
 pub use api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
-    UiRequest,
+    SettledThread, SpawnThread, ThreadSummary, ThreadsAnswer, ThreadsCall, UiRequest,
 };
 pub use host::{LoadError, PluginHost};
 pub use manifest::{API_VERSION, MANIFEST_FILE, Manifest, ManifestError};

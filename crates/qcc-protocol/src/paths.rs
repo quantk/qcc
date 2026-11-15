@@ -9,6 +9,9 @@ pub const SOCKET_ENV: &str = "QCC_SOCKET";
 pub const DATA_DIR_ENV: &str = "QCC_DATA_DIR";
 /// Set by the daemon for every agent session: the thread the agent runs in.
 pub const THREAD_ID_ENV: &str = "QCC_THREAD_ID";
+/// Set by the daemon for every agent session: the absolute path of the `qcc` CLI,
+/// for agents whose shells rebuild `PATH`.
+pub const CLI_BIN_ENV: &str = "QCC_BIN";
 
 fn home() -> PathBuf {
     env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))

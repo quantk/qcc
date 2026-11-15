@@ -2,8 +2,9 @@
 //! crate.
 
 use qcc_domain::{
-    EnvironmentChanges, EnvironmentInfo, InteractionResolution, ModelInfo, PermissionMode,
-    ProviderId, ProviderInfo, ThreadId, UiViewInfo,
+    CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionResolution, ModelInfo,
+    PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread, ThreadId, ThreadState,
+    TranscriptEntry, UiViewInfo,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +14,8 @@ pub enum Contribution {
     UiView(UiViewInfo),
     /// The plugin draws timeline items of this extension kind.
     UiItem(String),
+    Command(CommandInfo),
+    Skill(SkillInfo),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +30,7 @@ pub struct SessionStart {
     pub permission_mode: Option<PermissionMode>,
     /// Variables the agent process must see.
     pub env: Vec<(String, String)>,
+    pub skills: Vec<SkillRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,9 +105,66 @@ pub enum UiRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginRequest {
-    Provider { provider: ProviderId, request: ProviderRequest },
-    Environment { environment: String, request: EnvironmentRequest },
+    Provider {
+        provider: ProviderId,
+        request: ProviderRequest,
+    },
+    Environment {
+        environment: String,
+        request: EnvironmentRequest,
+    },
     Ui(UiRequest),
+    /// Answered with [`Outcome::CommandResult`].
+    Command {
+        command: String,
+        thread: Option<ThreadId>,
+        args: Vec<(String, String)>,
+    },
+    /// A watched thread settled. Nobody waits for the answer; see
+    /// [`crate::PluginHandle::post`].
+    ThreadSettled(SettledThread),
+}
+
+/// A thread as plugins see it: the projection and where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadSummary {
+    pub thread: Thread,
+    pub state: ThreadState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettledThread {
+    pub summary: ThreadSummary,
+    pub last_message: Option<String>,
+}
+
+/// What a plugin may ask of threads through the `threads` import.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThreadsCall {
+    Spawn(SpawnThread),
+    Send { thread: ThreadId, text: String },
+    Get(ThreadId),
+    Transcript(ThreadId),
+    Watch(ThreadId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpawnThread {
+    pub provider: ProviderId,
+    pub cwd: String,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    pub parent: Option<ThreadId>,
+    pub environment: Option<String>,
+    pub base: Option<String>,
+    pub permission_mode: Option<PermissionMode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ThreadsAnswer {
+    Done,
+    Thread(Box<ThreadSummary>),
+    Transcript(Vec<TranscriptEntry>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,4 +184,8 @@ pub enum Outcome {
     },
     /// A tree of UI nodes, as the JSON the plugin wrote.
     UiTree(String),
+    CommandResult {
+        message: String,
+        thread: Option<ThreadId>,
+    },
 }

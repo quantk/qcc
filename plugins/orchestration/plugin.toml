@@ -1,0 +1,13 @@
+id = "orchestration"
+name = "Orchestration"
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+# Reviews in flight survive a plugin restart.
+kv = true
+# Spawn, drive and read threads.
+threads = true
+# Tell every agent how to delegate through the qcc CLI.
+skills = true

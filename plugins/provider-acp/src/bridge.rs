@@ -108,6 +108,10 @@ pub struct Bridge {
     refused: HashSet<String>,
     total: TokenUsage,
     context_window: Option<u64>,
+    /// What the session must know before its first prompt (the skills qcc offers).
+    /// ACP has no system prompt, so it goes in front of the first prompt of a fresh
+    /// session; a continued session has it in its history already.
+    context: Option<String>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -228,6 +232,7 @@ impl Bridge {
             refused: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             context_window: None,
+            context: None,
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -245,6 +250,11 @@ impl Bridge {
         (bridge, Output { writes: vec![initialize], ..Output::default() })
     }
 
+    /// Text the agent gets ahead of the first prompt of a fresh session.
+    pub fn set_context(&mut self, context: Option<String>) {
+        self.context = context;
+    }
+
     /// The user sent a message. It goes out as soon as the agent can take it.
     pub fn prompt(&mut self, text: &str) -> Output {
         self.waiting.push_back(text.to_owned());
@@ -260,9 +270,14 @@ impl Bridge {
         let (Some(text), Some(session)) = (self.waiting.pop_front(), &self.session) else {
             return;
         };
+        let mut prompt = Vec::new();
+        if let Some(context) = self.context.take() {
+            prompt.push(json!({"type": "text", "text": context}));
+        }
+        prompt.push(json!({"type": "text", "text": text}));
         output.writes.push(self.peer.request(
             "session/prompt",
-            json!({"sessionId": session, "prompt": [{"type": "text", "text": text}]}),
+            json!({"sessionId": session, "prompt": prompt}),
             Call::Prompt,
         ));
         self.in_flight = true;
@@ -400,6 +415,7 @@ impl Bridge {
             }
             (Call::Continue, Ok(_)) => {
                 self.replaying = false;
+                self.context = None;
                 let session = self.resume.take().unwrap_or_default();
                 self.session_ready(session, output);
             }

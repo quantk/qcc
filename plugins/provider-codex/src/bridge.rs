@@ -68,6 +68,7 @@ pub struct Bridge {
     /// Turns settled by an interrupt: what the agent still says about them is ignored.
     interrupted: HashSet<String>,
     approvals: HashMap<String, Approval>,
+    instructions: Option<String>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -164,6 +165,7 @@ impl Bridge {
             steers_pending: Vec::new(),
             interrupted: HashSet::new(),
             approvals: HashMap::new(),
+            instructions: None,
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -171,6 +173,12 @@ impl Bridge {
             Call::Initialize,
         );
         (bridge, Output { writes: vec![initialize], ..Output::default() })
+    }
+
+    /// Developer instructions for the thread (the skills qcc offers), sent with
+    /// `thread/start` and `thread/resume`.
+    pub fn set_instructions(&mut self, instructions: Option<String>) {
+        self.instructions = instructions;
     }
 
     /// The user sent a message. It goes out as soon as the agent can take it.
@@ -398,6 +406,9 @@ impl Bridge {
 
     fn thread_request(&mut self) -> String {
         let mut params = json!({"cwd": self.cwd});
+        if let Some(instructions) = &self.instructions {
+            params["developerInstructions"] = json!(instructions);
+        }
         // Without a mode nothing is sent and the user's own Codex configuration
         // decides, as it would in the Codex CLI. A mode sets all three knobs: the
         // sandbox, when to ask, and who is asked.

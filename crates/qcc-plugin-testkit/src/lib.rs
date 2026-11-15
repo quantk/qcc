@@ -226,6 +226,7 @@ impl Harness {
             prompt: prompt.map(str::to_owned),
             permission_mode: self.permission_mode,
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
+            skills: Vec::new(),
         }));
         match outcome {
             Ok(Outcome::SessionStarted { provider_session }) => {

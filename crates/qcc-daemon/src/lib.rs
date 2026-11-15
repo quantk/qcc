@@ -44,6 +44,11 @@ impl Config {
         self.data_dir.join("environments").join(environment)
     }
 
+    /// Skills plugins offer to agents, written out as `<plugin>/<name>/SKILL.md`.
+    pub fn skills_dir(&self) -> PathBuf {
+        self.data_dir.join("skills")
+    }
+
     pub fn database(&self) -> PathBuf {
         self.data_dir.join("qcc.db")
     }

@@ -1,0 +1,17 @@
+[package]
+name = "orchestration"
+description = "Agents that delegate to agents: the qcc skill, handoff and review"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qcc-plugin-sdk.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

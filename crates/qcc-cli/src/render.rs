@@ -1,9 +1,9 @@
 //! Plain-text rendering for people. Scripts and agents use `--json`.
 
-use qcc_client::protocol::methods::PluginInfo;
+use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
     ChangeKind, EnvironmentChanges, EnvironmentState, EventPayload, InteractionRequest, Item,
-    ItemShape, ItemStatus, Thread, ThreadEvent, ThreadStatus, TurnStatus,
+    ItemShape, ItemStatus, Thread, ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -22,6 +22,75 @@ pub fn thread_line(thread: &Thread) -> String {
         thread.provider,
         thread.title.as_deref().unwrap_or("(untitled)")
     )
+}
+
+/// Threads as a tree: children under their parents, oldest first at each level.
+/// A thread whose parent is not in the list stands at the top.
+pub fn thread_tree(threads: &[Thread]) -> Vec<String> {
+    fn walk(threads: &[Thread], parent: Option<&ThreadId>, depth: usize, out: &mut Vec<String>) {
+        for thread in threads.iter().filter(|thread| {
+            match (&thread.parent, parent) {
+                (Some(own), Some(parent)) => own == parent,
+                // A root, or an orphan whose parent was left out.
+                (own, None) => own.as_ref().is_none_or(|own| !threads.iter().any(|t| &t.id == own)),
+                (None, Some(_)) => false,
+            }
+        }) {
+            out.push(format!("{}{}", "  ".repeat(depth), thread_line(thread)));
+            // Ids are unique, so no thread is its own ancestor in a listing.
+            if depth < 32 {
+                walk(threads, Some(&thread.id), depth + 1, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(threads, None, 0, &mut out);
+    out
+}
+
+pub fn state(state: ThreadState) -> &'static str {
+    match state {
+        ThreadState::Working => "working",
+        ThreadState::Waiting => "waiting for the user",
+        ThreadState::Idle => "idle",
+        ThreadState::Failed => "failed",
+        ThreadState::Archived => "archived",
+    }
+}
+
+pub fn waited(waited: &WaitedThread) -> String {
+    let thread = &waited.thread;
+    let turn = match (waited.state, thread.last_turn_status) {
+        (ThreadState::Idle | ThreadState::Archived, Some(TurnStatus::Completed)) => {
+            ", last turn completed"
+        }
+        (ThreadState::Idle | ThreadState::Archived, Some(TurnStatus::Failed)) => {
+            ", last turn failed"
+        }
+        (ThreadState::Idle | ThreadState::Archived, Some(TurnStatus::Interrupted)) => {
+            ", last turn interrupted"
+        }
+        _ => "",
+    };
+    let mut text =
+        format!("== {}  {}{turn}  ({})", thread.id, state(waited.state), thread.provider);
+    if let Some(message) = &waited.last_message {
+        text.push_str(&format!("\n{}", message.trim_end()));
+    }
+    text
+}
+
+pub fn command(command: &CommandContribution) -> String {
+    let info = &command.command;
+    let mut usage = format!("qcc {} {}", command.plugin, info.id);
+    if info.thread {
+        usage.push_str(" --thread <id>");
+    }
+    for param in &info.params {
+        let flag = format!("--{} <{}>", param.name, param.label.to_lowercase());
+        usage.push_str(&if param.required { format!(" {flag}") } else { format!(" [{flag}]") });
+    }
+    format!("{usage}\n  {}", info.description)
 }
 
 pub fn thread_details(thread: &Thread) -> String {
@@ -111,11 +180,21 @@ pub fn plugin(plugin: &PluginInfo) -> String {
     for environment in &plugin.environments {
         lines.push(format!("  environment  {}  {}", environment.id, environment.name));
     }
+    for command in &plugin.commands {
+        lines.push(format!("  command      {} {}  {}", plugin.id, command.id, command.title));
+    }
+    for skill in &plugin.skills {
+        lines.push(format!("  skill        {skill}"));
+    }
     let permissions = &plugin.permissions;
     let mut granted = Vec::new();
-    for (name, on) in
-        [("deltas", permissions.deltas), ("kv", permissions.kv), ("timers", permissions.timers)]
-    {
+    for (name, on) in [
+        ("deltas", permissions.deltas),
+        ("kv", permissions.kv),
+        ("timers", permissions.timers),
+        ("threads", permissions.threads),
+        ("skills", permissions.skills),
+    ] {
         if on {
             granted.push(name.to_owned());
         }

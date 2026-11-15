@@ -17,6 +17,47 @@ export type ChangedFile = {
 	deletions?: number | null,
 };
 
+export type CommandContribution = {
+	plugin: string,
+} & CommandInfo;
+
+/**  A command a plugin contributes to the CLI and the app's command palette. */
+export type CommandInfo = {
+	id: string,
+	title: string,
+	description: string,
+	/**  The command acts on a thread, which the caller names. */
+	thread: boolean,
+	params: CommandParam[],
+};
+
+export type CommandListResult = {
+	commands: CommandContribution[],
+};
+
+/**  A named value a plugin command takes. Every value is text. */
+export type CommandParam = {
+	name: string,
+	label: string,
+	required: boolean,
+	placeholder?: string | null,
+};
+
+export type CommandRunParams = {
+	plugin: string,
+	command: string,
+	/**  Required by a command that acts on a thread. */
+	thread_id?: ThreadId | null,
+	/**  Parameter values by name. */
+	args?: { [key in string]: string },
+};
+
+export type CommandRunResult = {
+	message: string,
+	/**  A thread the command made. */
+	thread_id?: ThreadId | null,
+};
+
 export type DaemonStatusResult = {
 	version: string,
 	protocol: number,
@@ -160,6 +201,9 @@ export type PluginInfo = {
 	permissions: PluginPermissions,
 	providers: ProviderInfo[],
 	environments: EnvironmentInfo[],
+	commands: CommandInfo[],
+	/**  Names of the skills it offers to agents. */
+	skills: string[],
 };
 
 export type PluginListResult = {
@@ -170,6 +214,8 @@ export type PluginPermissions = {
 	deltas: boolean,
 	kv: boolean,
 	timers: boolean,
+	threads: boolean,
+	skills: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
 };
@@ -391,6 +437,20 @@ export type ThreadSpawnParams = {
 	permission_mode?: PermissionMode | null,
 };
 
+/**
+ *  Where a thread is, as far as someone waiting on it cares. Derived by the core
+ *  from the projection and what is in flight; never journaled.
+ */
+export type ThreadState = 
+/**  A turn runs, a message waits for one, or the session is starting. */
+"working" | 
+/**  The agent waits for the user to answer an approval or a question. */
+"waiting" | 
+/**  Nothing runs; the thread takes input. */
+"idle" | 
+/**  The provider session could not start or died. */
+"failed" | "archived";
+
 export type ThreadStatus = 
 /**  No turn is running; the thread accepts input. */
 "idle" | 
@@ -411,6 +471,23 @@ export type ThreadUnsubscribeParams = {
 export type ThreadUpdatedNotification = {
 	subscription: number,
 	thread: Thread,
+};
+
+export type ThreadWaitParams = {
+	thread_ids: ThreadId[],
+	/**  Return when any of them settles instead of all. */
+	any?: boolean,
+	/**
+	 *  Give up after this long and say so in `timed_out`. Absent: wait as long as
+	 *  it takes.
+	 */
+	timeout_ms?: number | null,
+};
+
+export type ThreadWaitResult = {
+	/**  In the order asked. */
+	threads: WaitedThread[],
+	timed_out?: boolean,
 };
 
 export type ThreadWatchParams = {
@@ -520,6 +597,13 @@ export type UsageSnapshot = {
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
 
+export type WaitedThread = {
+	thread: Thread,
+	state: ThreadState,
+	/**  The text of the agent's latest message: usually the answer. */
+	last_message?: string | null,
+};
+
 /** Every request method: its parameters and its result. */
 export type Methods = {
 	"daemon.status": { params: Empty; result: DaemonStatusResult },
@@ -533,10 +617,13 @@ export type Methods = {
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadResult },
 	"thread.changes": { params: ThreadGetParams; result: ThreadChangesResult },
 	"thread.diff": { params: ThreadGetParams; result: ThreadDiffResult },
+	"thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult },
 	"thread.events": { params: ThreadEventsParams; result: ThreadEventsResult },
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
+	"command.list": { params: Empty; result: CommandListResult },
+	"command.run": { params: CommandRunParams; result: CommandRunResult },
 	"ui.contributions": { params: Empty; result: UiContributionsResult },
 	"ui.render": { params: UiRenderParams; result: UiTreeResult },
 	"ui.action": { params: UiActionParams; result: UiTreeResult },

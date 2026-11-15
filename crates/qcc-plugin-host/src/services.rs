@@ -10,17 +10,25 @@ use std::time::Duration;
 
 use qcc_domain::{Delta, ThreadId};
 
+use crate::api::{ThreadsAnswer, ThreadsCall};
+
 /// Receives the deltas a plugin emits: `(plugin id, thread, deltas)`.
 pub type DeltaSink = Arc<dyn Fn(&str, ThreadId, Vec<Delta>) + Send + Sync>;
 
 /// Told when a plugin traps: `(plugin id, message)`. The plugin handles nothing after.
 pub type CrashSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 
+/// Carries out what a plugin asks of threads: `(plugin id, call)`. Called on the
+/// plugin's own thread, which waits for the answer.
+pub type ThreadsBackend =
+    Arc<dyn Fn(&str, ThreadsCall) -> Result<ThreadsAnswer, String> + Send + Sync>;
+
 /// What one plugin instance is wired to.
 pub struct Services {
     pub deltas: DeltaSink,
     pub kv: Box<dyn KvStore>,
     pub processes: Arc<dyn ProcessBackend>,
+    pub threads: ThreadsBackend,
     pub on_crash: CrashSink,
 }
 
@@ -31,6 +39,7 @@ impl Services {
             deltas,
             kv: Box::new(MemoryKv::default()),
             processes: Arc::new(OsProcesses),
+            threads: Arc::new(|_, _| Err("no daemon is attached to answer for threads".into())),
             on_crash: Arc::new(|_, _| {}),
         }
     }

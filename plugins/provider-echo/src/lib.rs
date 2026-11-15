@@ -14,6 +14,7 @@
 //! | `/kv`                | counts invocations in the plugin's key-value store           |
 //! | `/card <text>`       | an item of the plugin's own kind, drawn by the plugin        |
 //! | `/fail <message>`    | the turn fails                                               |
+//! | `/skills`            | says what the session was told about skills, word for word   |
 //! | `/crash`             | the plugin traps                                             |
 //!
 //! A message steered into a running `/slow` turn is appended to what it streams.
@@ -46,6 +47,8 @@ struct Session {
     turn: Option<Turn>,
     next_request: u64,
     mode: Option<PermissionMode>,
+    /// What a real bridge would hand its agent about the session's skills.
+    skills: Option<String>,
 }
 
 /// What the running turn is waiting for.
@@ -254,6 +257,13 @@ impl Echo {
             }
             "/fail" => out.push(boundary(TurnStatus::Failed, Some(rest.to_owned()))),
             "/crash" => panic!("echo provider was asked to crash"),
+            "/skills" => {
+                let reply = session.skills.clone().unwrap_or_else(|| "no skills".into());
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             _ => {
                 for (index, word) in prompt.split_whitespace().enumerate() {
                     out.push(text(if index == 0 { word.to_owned() } else { format!(" {word}") }));
@@ -312,7 +322,11 @@ impl Provider for Echo {
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
-        let session = Session { mode: start.permission_mode, ..Session::default() };
+        let session = Session {
+            mode: start.permission_mode,
+            skills: skills_prompt(&start.skills),
+            ..Session::default()
+        };
         self.sessions.insert(start.thread.clone(), session);
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {

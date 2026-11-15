@@ -93,6 +93,9 @@ impl Provider for ClaudeCode {
         if let Some(session) = &start.resume {
             args.extend(["--resume".to_owned(), session.clone()]);
         }
+        if let Some(skills) = skills_prompt(&start.skills) {
+            args.extend(["--append-system-prompt".to_owned(), skills]);
+        }
         let process = process::spawn(&process::SpawnOptions {
             program: PROGRAM.into(),
             args,

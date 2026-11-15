@@ -53,6 +53,43 @@ pub struct ThreadEnvironment {
     pub state: EnvironmentState,
 }
 
+/// Where a thread is, as far as someone waiting on it cares. Derived by the core
+/// from the projection and what is in flight; never journaled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadState {
+    /// A turn runs, a message waits for one, or the session is starting.
+    Working,
+    /// The agent waits for the user to answer an approval or a question.
+    Waiting,
+    /// Nothing runs; the thread takes input.
+    Idle,
+    /// The provider session could not start or died.
+    Failed,
+    Archived,
+}
+
+impl ThreadState {
+    /// Nothing will happen in the thread until someone sends it something.
+    pub fn is_settled(self) -> bool {
+        matches!(self, Self::Idle | Self::Failed | Self::Archived)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum Role {
+    User,
+    Agent,
+}
+
+/// One message of a conversation: what the user sent or what the agent replied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TranscriptEntry {
+    pub role: Role,
+    pub text: String,
+}
+
 /// An approval or a question the agent is waiting on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct PendingInteraction {

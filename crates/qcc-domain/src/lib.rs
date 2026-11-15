@@ -14,15 +14,17 @@ pub mod event;
 pub mod ids;
 pub mod interaction;
 pub mod item;
+pub mod project;
 pub mod provider;
 pub mod thread;
 pub mod usage;
 
 pub use delta::{Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent};
-pub use ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
+pub use ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
+pub use project::{Project, project_of};
 pub use provider::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, EnvironmentChanges, EnvironmentInfo,
     ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SkillInfo, SkillRef,

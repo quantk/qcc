@@ -8,6 +8,7 @@
 mod core;
 mod handover;
 mod plugins;
+mod projects;
 mod server;
 
 use std::future::Future;

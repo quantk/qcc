@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { PluginInfo, Thread } from "../api/protocol.gen";
-import { childrenOf, rootOf, threadTree, visiblePlugins } from "./selectors";
+import type { PluginInfo, Project, Thread } from "../api/protocol.gen";
+import { childrenOf, rootOf, threadGroups, threadTree, visiblePlugins } from "./selectors";
 
 function thread(id: string, created_at: number, parent?: string): Thread {
   return {
@@ -48,5 +48,27 @@ describe("example plugins", () => {
     const plugins = [plugin("real", false), plugin("echo", true)];
     expect(visiblePlugins(plugins, false).map((p) => p.id)).toEqual(["real"]);
     expect(visiblePlugins(plugins, true).map((p) => p.id)).toEqual(["real", "echo"]);
+  });
+});
+
+describe("sidebar groups", () => {
+  const project = (id: string, created_at: number): Project => ({ id, name: id, folders: [], created_at });
+  const at = (id: string, updated_at: number, extra: Partial<Thread>) => ({ ...thread(id, 1), updated_at, ...extra }) as Thread;
+
+  it("puts projects first, empty ones too, and the rest by folder", () => {
+    const threads = [
+      at("p1", 10, { project: "shop" }),
+      at("child", 50, { parent: "p1", cwd: "/elsewhere" }),
+      at("loose", 30, { cwd: "/tmp/repo" }),
+      at("lost", 40, { project: "deleted", cwd: "/old" }),
+    ];
+    const all = Object.fromEntries(threads.map((t) => [t.id, t]));
+    const groups = threadGroups(threads, all, [project("shop", 1), project("empty", 20)]);
+    expect(groups.map((g) => [g.key, g.threads.map((t) => t.id)])).toEqual([
+      ["project:shop", ["p1", "child"]],
+      ["project:empty", []],
+      ["folder:/old", ["lost"]],
+      ["folder:/tmp/repo", ["loose"]],
+    ]);
   });
 });

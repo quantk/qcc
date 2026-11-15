@@ -95,6 +95,7 @@ impl HarnessBuilder {
             cwd: "/work".into(),
             model: None,
             parent: None,
+            project: None,
             permission_mode: None,
             title: None,
             status: ThreadStatus::Idle,

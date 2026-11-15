@@ -14,17 +14,19 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Delivery, Empty, InteractionResolve,
-    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, SendMode, StopMode,
-    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams,
-    ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
-    ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
+    InteractionResolveParams, PluginList, ProjectCreate, ProjectCreateParams, ProjectDelete,
+    ProjectDeleteParams, ProjectList, ProjectListResult, ProjectUpdate, ProjectUpdateParams,
+    ProviderModels, ProviderModelsParams, SendMode, StopMode, ThreadArchive, ThreadArchiveParams,
+    ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams,
+    ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams,
     ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
-    EventPayload, InteractionId, InteractionResolution, PermissionMode, ProviderId, ThreadEvent,
-    ThreadId, ThreadState, ThreadStatus, TurnStatus,
+    EventPayload, InteractionId, InteractionResolution, PermissionMode, Project, ProviderId,
+    ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
@@ -58,6 +60,9 @@ enum Command {
     /// Inspect plugins.
     #[command(subcommand)]
     Plugin(PluginCommand),
+    /// Group threads by project: named sets of repositories and folders.
+    #[command(subcommand)]
+    Project(ProjectCommand),
     /// Inspect agent providers.
     #[command(subcommand)]
     Provider(ProviderCommand),
@@ -108,6 +113,10 @@ enum ThreadCommand {
         /// Parent thread [default: $QCC_THREAD_ID, set inside agent sessions].
         #[arg(long, env = paths::THREAD_ID_ENV)]
         parent: Option<String>,
+        /// Project id or name [default: the parent's, or the project whose folder
+        /// holds --cwd].
+        #[arg(long)]
+        project: Option<String>,
         /// How much the agent may do unasked: ask, accept-edits, auto or full
         /// [default: the agent's own configuration].
         #[arg(long, value_name = "MODE")]
@@ -132,6 +141,8 @@ enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// Put a thread into a project (id or name), or take it out with `none`.
+    Project { thread: String, project: String },
     /// Take a queued message back before it is delivered and print it. The id is the
     /// `queue_id` that `thread send --json` printed.
     Unqueue { thread: String, queue_id: String },
@@ -231,6 +242,37 @@ enum PluginCommand {
 }
 
 #[derive(Subcommand)]
+enum ProjectCommand {
+    /// List projects and their folders.
+    List,
+    /// Make a project. Threads outside any project that work in its folders join it.
+    Create {
+        name: String,
+        /// A repository or folder of the project; repeat for several.
+        #[arg(long = "folder", required = true)]
+        folders: Vec<PathBuf>,
+    },
+    /// Add a folder to a project.
+    AddFolder {
+        project: String,
+        folder: PathBuf,
+    },
+    /// Take a folder out of a project.
+    RemoveFolder {
+        project: String,
+        folder: PathBuf,
+    },
+    Rename {
+        project: String,
+        name: String,
+    },
+    /// Delete a project. Its threads stay, outside any project.
+    Delete {
+        project: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum ProviderCommand {
     /// The models a provider's agent offers, for `thread spawn --model`.
     Models {
@@ -302,9 +344,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             base,
             model,
             parent,
+            project,
             permission_mode,
             follow,
         }) => {
+            let project = match project {
+                Some(project) => Some(find_project(&client, &project).await?.id),
+                None => None,
+            };
             let cwd = match cwd {
                 Some(cwd) => std::path::absolute(cwd)?,
                 None => std::env::current_dir()?,
@@ -333,6 +380,7 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     prompt,
                     model,
                     parent,
+                    project,
                     permission_mode,
                 })
                 .await?;
@@ -398,6 +446,24 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 print_json(&result)?;
             }
         }
+
+        Command::Thread(ThreadCommand::Project { thread, project }) => {
+            let project = match project.as_str() {
+                "none" => None,
+                project => Some(find_project(&client, project).await?.id),
+            };
+            let result = client
+                .call::<ThreadSetProject>(ThreadSetProjectParams {
+                    thread_id: ThreadId::new(thread),
+                    project,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        Command::Project(command) => return project_command(&client, command, json).await,
 
         Command::Thread(ThreadCommand::Unqueue { thread, queue_id }) => {
             let result = client
@@ -641,6 +707,88 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 }
             }
         }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A project by id or by exact name.
+async fn find_project(client: &Client, wanted: &str) -> anyhow::Result<Project> {
+    let ProjectListResult { projects } = client.call::<ProjectList>(Empty {}).await?;
+    let mut matches = projects.into_iter().filter(|p| p.id.as_str() == wanted || p.name == wanted);
+    let found =
+        matches.next().with_context(|| format!("no project {wanted:?}; see `qcc project list`"))?;
+    if matches.next().is_some() {
+        bail!("several projects are named {wanted:?}; use the id");
+    }
+    Ok(found)
+}
+
+fn absolute(folder: PathBuf) -> anyhow::Result<String> {
+    Ok(std::path::absolute(folder)?.display().to_string())
+}
+
+async fn project_command(
+    client: &Client,
+    command: ProjectCommand,
+    json: bool,
+) -> anyhow::Result<ExitCode> {
+    let update = |project: &Project| ProjectUpdateParams {
+        id: project.id.clone(),
+        name: None,
+        folders: None,
+    };
+    let changed = match command {
+        ProjectCommand::List => {
+            let result = client.call::<ProjectList>(Empty {}).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for project in &result.projects {
+                    out(format!("{}  {}", project.id, project.name));
+                    for folder in &project.folders {
+                        out(format!("  {folder}"));
+                    }
+                }
+            }
+            return Ok(ExitCode::SUCCESS);
+        }
+        ProjectCommand::Create { name, folders } => {
+            let folders = folders.into_iter().map(absolute).collect::<anyhow::Result<_>>()?;
+            client.call::<ProjectCreate>(ProjectCreateParams { name, folders }).await?
+        }
+        ProjectCommand::AddFolder { project, folder } => {
+            let project = find_project(client, &project).await?;
+            let mut folders = project.folders.clone();
+            folders.push(absolute(folder)?);
+            let params = ProjectUpdateParams { folders: Some(folders), ..update(&project) };
+            client.call::<ProjectUpdate>(params).await?
+        }
+        ProjectCommand::RemoveFolder { project, folder } => {
+            let project = find_project(client, &project).await?;
+            let folder = absolute(folder)?;
+            let folders: Vec<String> =
+                project.folders.iter().filter(|known| **known != folder).cloned().collect();
+            if folders.len() == project.folders.len() {
+                bail!("{folder} is not a folder of {}", project.name);
+            }
+            let params = ProjectUpdateParams { folders: Some(folders), ..update(&project) };
+            client.call::<ProjectUpdate>(params).await?
+        }
+        ProjectCommand::Rename { project, name } => {
+            let project = find_project(client, &project).await?;
+            let params = ProjectUpdateParams { name: Some(name), ..update(&project) };
+            client.call::<ProjectUpdate>(params).await?
+        }
+        ProjectCommand::Delete { project } => {
+            let project = find_project(client, &project).await?;
+            client.call::<ProjectDelete>(ProjectDeleteParams { id: project.id }).await?;
+            return Ok(ExitCode::SUCCESS);
+        }
+    };
+    if json {
+        print_json(&changed)?;
+    } else {
+        out(format!("{}  {}", changed.project.id, changed.project.name));
     }
     Ok(ExitCode::SUCCESS)
 }

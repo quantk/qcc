@@ -7,7 +7,7 @@ import {
   attentionLabel,
   attentionOf,
   findProvider,
-  projectOf,
+  folderOf,
 } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt } from "../../ui/kit";
@@ -28,6 +28,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const attention = attentionOf(thread);
   const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
   const parent = useApp((state) => (thread.parent ? state.threads[thread.parent] : undefined));
+  const project = useApp((state) => state.projects.find((candidate) => candidate.id === thread.project));
   const activity = activityText(thread);
   const technical = thread.activity && !["agentMessage", "reasoning", "plan"].includes(thread.activity.kind);
   const open = () => store().select(thread.id);
@@ -52,7 +53,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
         </span>
       </header>
       <div className="agent-facts">
-        <span title={projectOf(thread)}>{baseName(projectOf(thread))}</span>
+        <span title={folderOf(thread)}>{project ? project.name : baseName(folderOf(thread))}</span>
         <span>{provider}</span>
         {thread.model && <span>{thread.model}</span>}
         {thread.environment && <span>worktree</span>}

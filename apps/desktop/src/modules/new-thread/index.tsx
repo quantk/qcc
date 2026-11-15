@@ -1,6 +1,12 @@
+import type { ProjectId } from "../../api/protocol.gen";
 import { store } from "../../state/store";
-import type { UiModule } from "../../ui/registry";
+import { type UiModule, ui } from "../../ui/registry";
 import { NewThreadDialog } from "./NewThreadDialog";
+
+/** Open the dialog, starting in a project. */
+export function openNewThread(preset: { project?: ProjectId } = {}) {
+  ui.showDialog(({ close }) => <NewThreadDialog close={close} project={preset.project} />);
+}
 
 export const NEW_THREAD = "thread.new";
 

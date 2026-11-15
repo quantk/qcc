@@ -1,6 +1,6 @@
 use qcc_domain::{
-    Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, ProviderId, Thread,
-    ThreadEvent, ThreadStatus, TurnStatus,
+    Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, ProjectId,
+    ProviderId, Thread, ThreadEvent, ThreadStatus, TurnStatus,
 };
 
 use crate::assembler::{DeltaAssembler, GrammarViolation};
@@ -191,6 +191,13 @@ impl ThreadEngine {
             return Vec::new();
         }
         self.emit(vec![EventPayload::AgentChanged { provider, model }], now)
+    }
+
+    pub fn set_project(&mut self, project: Option<ProjectId>, now: u64) -> Vec<ThreadEvent> {
+        if self.thread.project == project {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::ProjectChanged { project }], now)
     }
 
     /// Record a step in the life of the thread's environment or of the thread

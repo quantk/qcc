@@ -1,5 +1,5 @@
 import { relativePath, tailPath } from "../util/format";
-import type { PermissionMode, PluginInfo, ProviderInfo, Thread } from "../api/protocol.gen";
+import type { PermissionMode, PluginInfo, Project, ProviderInfo, Thread } from "../api/protocol.gen";
 
 /** Example plugins are left out unless asked for. */
 export function visiblePlugins(plugins: readonly PluginInfo[], showExamples: boolean): readonly PluginInfo[] {
@@ -19,8 +19,45 @@ export function findProvider(plugins: readonly PluginInfo[], id: string): Provid
 }
 
 /** The directory a thread is about: where it was asked to work. */
-export function projectOf(thread: Thread): string {
+export function folderOf(thread: Thread): string {
   return thread.environment?.source_dir ?? thread.cwd;
+}
+
+/** A group of the sidebar: a project, or a folder of threads in no project. */
+export type ThreadGroup =
+  | { kind: "project"; key: string; project: Project; threads: Thread[]; latest: number }
+  | { kind: "folder"; key: string; folder: string; threads: Thread[]; latest: number };
+
+/**
+ * Threads by project, and the rest by folder. A family stays together under the
+ * group of the thread the user began, wherever its members work. Projects come
+ * first, every one of them even without threads, most recently active first;
+ * folders follow the same way.
+ */
+export function threadGroups(
+  threads: readonly Thread[],
+  all: Readonly<Record<string, Thread>>,
+  projects: readonly Project[],
+): ThreadGroup[] {
+  const known = new Map(projects.map((project) => [project.id, project]));
+  const groups = new Map<string, ThreadGroup>();
+  for (const project of projects) {
+    groups.set(`project:${project.id}`, { kind: "project", key: `project:${project.id}`, project, threads: [], latest: project.created_at });
+  }
+  for (const thread of threads) {
+    const root = rootOf(thread, all);
+    const project = root.project ? known.get(root.project) : undefined;
+    const key = project ? `project:${project.id}` : `folder:${folderOf(root)}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { kind: "folder", key, folder: folderOf(root), threads: [], latest: 0 };
+      groups.set(key, group);
+    }
+    group.threads.push(thread);
+    group.latest = Math.max(group.latest, thread.updated_at);
+  }
+  const ordered = [...groups.values()].sort((a, b) => b.latest - a.latest);
+  return [...ordered.filter((group) => group.kind === "project"), ...ordered.filter((group) => group.kind === "folder")];
 }
 
 export type Attention = "archived" | "failed" | "waiting" | "active" | "idle";

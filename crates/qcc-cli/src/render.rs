@@ -300,6 +300,10 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::EnvironmentReady { cwd } => format!("working directory: {cwd}"),
         EventPayload::EnvironmentRemoved => "(the working directory was removed)".to_owned(),
         EventPayload::ThreadArchived => "(archived)".to_owned(),
+        EventPayload::ProjectChanged { project } => match project {
+            Some(project) => format!("(project {project})"),
+            None => "(no project)".to_owned(),
+        },
         // The failure follows as a provider error, in full.
         EventPayload::EnvironmentFailed { .. }
         | EventPayload::EnvironmentPreparing

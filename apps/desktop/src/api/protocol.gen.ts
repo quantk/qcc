@@ -112,6 +112,8 @@ export type EventPayload =
  *  resume the previous one's session: the next session starts afresh.
  */
 { type: "thread/agent"; provider: ProviderId; model?: string | null } | 
+/**  The thread was put into a project, moved to another or taken out of one. */
+{ type: "thread/project"; project?: ProjectId | null } | 
 /**  The thread was put away. Always its last state change. */
 { type: "thread/archived" } | 
 /**  The environment plugin was asked (again) to make the working directory. */
@@ -242,6 +244,53 @@ export type PluginPermissions = {
 	process: string[],
 };
 
+/**
+ *  What the user works on: one or several repositories or folders under a name.
+ *  A thread belongs to at most one project and works in one of its folders.
+ */
+export type Project = {
+	id: ProjectId,
+	name: string,
+	/**  Absolute paths, in the order the user gave them. */
+	folders: string[],
+	/**  Milliseconds since the Unix epoch. */
+	created_at: number,
+};
+
+export type ProjectCreateParams = {
+	name: string,
+	/**  Absolute paths of existing directories: repositories or plain folders. */
+	folders: string[],
+};
+
+export type ProjectDeleteParams = {
+	id: ProjectId,
+};
+
+/**  Minted by the daemon when the user creates a project. */
+export type ProjectId = string;
+
+export type ProjectListResult = {
+	projects: Project[],
+};
+
+export type ProjectResult = {
+	project: Project,
+};
+
+export type ProjectUpdateParams = {
+	id: ProjectId,
+	name?: string | null,
+	/**  The whole new list. Absent: unchanged. */
+	folders?: string[] | null,
+};
+
+export type ProjectsUpdatedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	projects: Project[],
+};
+
 /**  Session-behaviour facts reported by the provider's own code. */
 export type ProviderCapabilities = {
 	/**  A session can be resumed from its provider session handle. */
@@ -312,6 +361,8 @@ export type Thread = {
 	environment?: ThreadEnvironment | null,
 	model?: string | null,
 	parent?: ThreadId | null,
+	/**  The project the thread is grouped under. */
+	project?: ProjectId | null,
 	/**  Absent: the agent's own configuration decides what it may do unasked. */
 	permission_mode?: PermissionMode | null,
 	title?: string | null,
@@ -459,6 +510,11 @@ export type ThreadSetModeParams = {
 	permission_mode?: PermissionMode | null,
 };
 
+export type ThreadSetProjectParams = {
+	thread_id: ThreadId,
+	project?: ProjectId | null,
+};
+
 export type ThreadSpawnParams = {
 	provider: ProviderId,
 	/**  Working directory of the thread, or what its environment is made from. */
@@ -474,6 +530,11 @@ export type ThreadSpawnParams = {
 	model?: string | null,
 	/**  The thread that spawned this one. */
 	parent?: ThreadId | null,
+	/**
+	 *  The project to group it under. Absent: the parent's project, or else the
+	 *  project one of whose folders holds `cwd`.
+	 */
+	project?: ProjectId | null,
 	/**
 	 *  How much the agent may do unasked. Absent: the agent's own configuration
 	 *  decides. Must be a mode the provider lists in its capabilities.
@@ -666,6 +727,11 @@ export type Methods = {
 	"thread.unqueue": { params: ThreadUnqueueParams; result: ThreadUnqueueResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
+	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },
+	"project.list": { params: Empty; result: ProjectListResult },
+	"project.create": { params: ProjectCreateParams; result: ProjectResult },
+	"project.update": { params: ProjectUpdateParams; result: ProjectResult },
+	"project.delete": { params: ProjectDeleteParams; result: Empty },
 	"thread.stop": { params: ThreadStopParams; result: Empty },
 	"thread.list": { params: ThreadListParams; result: ThreadListResult },
 	"thread.watch": { params: ThreadWatchParams; result: ThreadListResult },
@@ -692,4 +758,5 @@ export type Methods = {
 export type Notifications = {
 	"thread.event": ThreadEventNotification,
 	"thread.updated": ThreadUpdatedNotification,
+	"projects.updated": ProjectsUpdatedNotification,
 };

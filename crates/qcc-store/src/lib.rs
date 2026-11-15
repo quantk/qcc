@@ -9,7 +9,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
-    EventPayload, Item, ItemShape, Role, Thread, ThreadEvent, ThreadId, TranscriptEntry,
+    EventPayload, Item, ItemShape, Project, ProjectId, Role, Thread, ThreadEvent, ThreadId,
+    TranscriptEntry,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -32,7 +33,8 @@ pub enum StoreError {
 pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// Ordered schema migrations; `PRAGMA user_version` is the count applied.
-const MIGRATIONS: &[&str] = &["
+const MIGRATIONS: &[&str] = &[
+    "
     CREATE TABLE threads (
         id          TEXT PRIMARY KEY,
         created_at  INTEGER NOT NULL,
@@ -46,7 +48,15 @@ const MIGRATIONS: &[&str] = &["
         payload     TEXT NOT NULL,
         PRIMARY KEY (thread_id, seq)
     ) STRICT, WITHOUT ROWID;
-"];
+",
+    "
+    CREATE TABLE projects (
+        id          TEXT PRIMARY KEY,
+        created_at  INTEGER NOT NULL,
+        data        TEXT NOT NULL
+    ) STRICT;
+",
+];
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -214,6 +224,33 @@ impl Store {
         Ok(entries)
     }
 
+    /// Every project, oldest first. Projects are settings, not history: a row is
+    /// replaced when the project changes.
+    pub fn projects(&self) -> Result<Vec<Project>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare("SELECT data FROM projects ORDER BY created_at, id")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut projects = Vec::new();
+        for data in rows {
+            projects.push(decode(&data?)?);
+        }
+        Ok(projects)
+    }
+
+    pub fn save_project(&self, project: &Project) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO projects (id, created_at, data) VALUES (?1, ?2, ?3) \
+             ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+            params![project.id.as_str(), project.created_at.cast_signed(), encode(project)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_project(&self, id: &ProjectId) -> Result<()> {
+        self.lock().execute("DELETE FROM projects WHERE id = ?1", [id.as_str()])?;
+        Ok(())
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave a transaction half-applied:
         // rusqlite rolls back on drop.
@@ -262,6 +299,23 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn projects_are_saved_replaced_and_deleted() {
+        let store = Store::open_in_memory().unwrap();
+        let mut project = Project {
+            id: ProjectId::new("p"),
+            name: "App".into(),
+            folders: vec!["/src/app".into()],
+            created_at: 5,
+        };
+        store.save_project(&project).unwrap();
+        project.folders.push("/src/api".into());
+        store.save_project(&project).unwrap();
+        assert_eq!(store.projects().unwrap(), [project.clone()]);
+        store.delete_project(&project.id).unwrap();
+        assert!(store.projects().unwrap().is_empty());
+    }
+
     fn new_thread(id: &str) -> NewThread {
         NewThread {
             id: id.into(),
@@ -270,6 +324,7 @@ mod tests {
             environment: None,
             model: None,
             parent: None,
+            project: None,
             permission_mode: None,
         }
     }

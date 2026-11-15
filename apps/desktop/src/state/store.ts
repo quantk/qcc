@@ -12,6 +12,8 @@ import type {
   ModelInfo,
   PermissionMode,
   PluginInfo,
+  Project,
+  ProjectId,
   ProviderId,
   SendMode,
   Thread,
@@ -55,6 +57,8 @@ export type AppState = {
   /** Something the user should hear about that is not a failure. */
   notice: string | null;
   models: Readonly<Record<ProviderId, ModelList>>;
+  /** Oldest first. */
+  projects: readonly Project[];
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -78,6 +82,7 @@ export class AppStore {
     error: null,
     notice: null,
     models: {},
+    projects: [],
   };
   private listeners = new Set<() => void>();
   private notifying = false;
@@ -135,12 +140,14 @@ export class AppStore {
     const watch = this.nextSubscription++;
     this.watch = watch;
     try {
-      const [list, plugins] = await Promise.all([
+      const [list, plugins, projects] = await Promise.all([
         this.api.call("thread.watch", { subscription: watch }),
         this.api.call("plugin.list", {}),
+        this.api.call("project.list", {}),
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
+      this.set({ projects: projects.projects });
       this.set({
         allPlugins: plugins.plugins,
         plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
@@ -154,6 +161,8 @@ export class AppStore {
   private notified(notification: Notification) {
     if (notification.method === "thread.updated") {
       if (notification.params.subscription === this.watch) this.mergeThreads([notification.params.thread]);
+    } else if (notification.method === "projects.updated") {
+      if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
     } else if (notification.method === "thread.event") {
       const live = this.live;
       if (!live || notification.params.subscription !== live.id) return;
@@ -334,6 +343,32 @@ export class AppStore {
     );
     if (result) this.mergeThreads([result.thread]);
     return result !== null;
+  }
+
+  /** Resolves to the project, or null when the daemon refused (the error is shown). */
+  async saveProject(id: ProjectId | null, name: string, folders: string[]): Promise<Project | null> {
+    const result = await this.attempt(() =>
+      id
+        ? this.api.call("project.update", { id, name, folders })
+        : this.api.call("project.create", { name, folders }),
+    );
+    if (!result) return null;
+    const others = this.state.projects.filter((project) => project.id !== result.project.id);
+    const projects = id ? this.state.projects.map((p) => (p.id === id ? result.project : p)) : [...others, result.project];
+    this.set({ projects });
+    return result.project;
+  }
+
+  async deleteProject(id: ProjectId) {
+    const done = await this.attempt(() => this.api.call("project.delete", { id }));
+    if (done) this.set({ projects: this.state.projects.filter((project) => project.id !== id) });
+  }
+
+  async setProject(threadId: ThreadId, project: ProjectId | null) {
+    const result = await this.attempt(() =>
+      this.api.call("thread.set_project", { thread_id: threadId, project }),
+    );
+    if (result) this.mergeThreads([result.thread]);
   }
 
   /**

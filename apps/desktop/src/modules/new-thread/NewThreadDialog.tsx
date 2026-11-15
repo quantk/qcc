@@ -1,10 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useRef, useState } from "react";
 
-import type { PermissionMode } from "../../api/protocol.gen";
+import type { PermissionMode, ProjectId } from "../../api/protocol.gen";
 import { environmentsOf, modeLabel, providersOf } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { Choice, ModelPicker } from "../../ui/kit";
+import { tailPath } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -12,8 +13,16 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 
 const REMEMBERED = "qcc.new-thread";
+const OTHER = "\u0000other";
 
-type Remembered = { provider?: string; cwd?: string; environment?: string; mode?: string; model?: string };
+type Remembered = {
+  provider?: string;
+  cwd?: string;
+  environment?: string;
+  mode?: string;
+  model?: string;
+  project?: string;
+};
 
 function remembered(): Remembered {
   try {
@@ -23,14 +32,23 @@ function remembered(): Remembered {
   }
 }
 
-export function NewThreadDialog({ close: onClose }: { close: () => void }) {
+export function NewThreadDialog({ close: onClose, project: preset }: { close: () => void; project?: ProjectId }) {
   const plugins = useApp((state) => state.plugins);
+  const projects = useApp((state) => state.projects);
   const providers = useMemo(() => providersOf(plugins), [plugins]);
   const environments = useMemo(() => environmentsOf(plugins), [plugins]);
   const last = useMemo(remembered, []);
 
   const [providerId, setProviderId] = useState(last.provider ?? "");
-  const [cwd, setCwd] = useState(last.cwd ?? "");
+  const [projectId, setProjectId] = useState<string | null>(preset ?? last.project ?? null);
+  const project = projects.find((candidate) => candidate.id === projectId);
+  // In a project, the directory is one of its folders unless asked otherwise.
+  const [otherDir, setOtherDir] = useState(false);
+  const [cwd, setCwd] = useState(() => {
+    const first = projects.find((candidate) => candidate.id === (preset ?? last.project));
+    if (first && !first.folders.includes(last.cwd ?? "")) return first.folders[0] ?? "";
+    return last.cwd ?? "";
+  });
   const [environment, setEnvironment] = useState(last.environment ?? "");
   const [base, setBase] = useState("");
   // A model means something only to the agent it was chosen for.
@@ -59,6 +77,7 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
     const thread = await store().spawn({
       provider: provider.id,
       cwd: cwd.trim(),
+      project: project?.id ?? null,
       environment: chosenEnvironment || null,
       base: chosenEnvironment && base.trim() ? base.trim() : null,
       model,
@@ -73,6 +92,7 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
       environment: chosenEnvironment,
       mode,
       model: model ?? undefined,
+      project: project?.id,
     };
     localStorage.setItem(REMEMBERED, JSON.stringify(next));
     onClose();
@@ -112,6 +132,46 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
                 }}
               />
             </Field>
+            {projects.length > 0 && (
+              <Field>
+                <FieldLabel>Project</FieldLabel>
+                <Choice
+                  aria-label="Project"
+                  className="w-full"
+                  value={project?.id ?? null}
+                  options={[
+                    { value: null, label: "No project" },
+                    ...projects.map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                  ]}
+                  onChange={(value) => {
+                    setProjectId(value);
+                    setOtherDir(false);
+                    const next = projects.find((candidate) => candidate.id === value);
+                    if (next && !next.folders.includes(cwd.trim())) setCwd(next.folders[0] ?? "");
+                  }}
+                />
+              </Field>
+            )}
+            {project && (
+              <Field>
+                <FieldLabel>Folder</FieldLabel>
+                <Choice
+                  aria-label="Folder"
+                  className="w-full"
+                  value={otherDir ? OTHER : cwd.trim()}
+                  options={[
+                    ...project.folders.map((folder) => ({ value: folder, label: tailPath(folder, 56) })),
+                    { value: OTHER, label: "Another directory…" },
+                  ]}
+                  onChange={(value) => {
+                    if (value === OTHER) return setOtherDir(true);
+                    setOtherDir(false);
+                    if (value) setCwd(value);
+                  }}
+                />
+              </Field>
+            )}
+            {(!project || otherDir) && (
             <Field>
               <FieldLabel htmlFor="new-thread-cwd">Directory</FieldLabel>
               <div className="flex gap-2">
@@ -128,6 +188,7 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
                 </Button>
               </div>
             </Field>
+            )}
             <Field>
               <FieldLabel>Workspace</FieldLabel>
               <Choice

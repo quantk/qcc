@@ -16,6 +16,7 @@ fn new_thread(id: &str) -> NewThread {
         environment: None,
         model: None,
         parent: None,
+        project: None,
         permission_mode: None,
     }
 }

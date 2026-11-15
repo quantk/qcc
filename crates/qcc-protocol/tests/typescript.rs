@@ -42,6 +42,11 @@ fn generate() -> String {
         .method::<ThreadUnqueue>()
         .method::<ThreadSetMode>()
         .method::<ThreadSetAgent>()
+        .method::<ThreadSetProject>()
+        .method::<ProjectList>()
+        .method::<ProjectCreate>()
+        .method::<ProjectUpdate>()
+        .method::<ProjectDelete>()
         .method::<ThreadStop>()
         .method::<ThreadList>()
         .method::<ThreadWatch>()
@@ -66,6 +71,7 @@ fn generate() -> String {
         .types
         .register::<ThreadEventNotification>()
         .register::<ThreadUpdatedNotification>()
+        .register::<ProjectsUpdatedNotification>()
         .register::<RpcError>();
     // Sequence numbers, timestamps and token counts stay far below 2^53.
     let types = Remapper::new().dangerous_bigints_as_number().remap_types(types);
@@ -83,6 +89,7 @@ fn generate() -> String {
     out.push_str("export type Notifications = {\n");
     out.push_str(&format!("\t\"{THREAD_EVENT}\": ThreadEventNotification,\n"));
     out.push_str(&format!("\t\"{THREAD_UPDATED}\": ThreadUpdatedNotification,\n"));
+    out.push_str(&format!("\t\"{PROJECTS_UPDATED}\": ProjectsUpdatedNotification,\n"));
     out.push_str("};\n");
     out
 }

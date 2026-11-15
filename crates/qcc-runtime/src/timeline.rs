@@ -190,6 +190,7 @@ impl Timeline {
             | EventPayload::EnvironmentRemoved
             | EventPayload::PermissionModeChanged { .. }
             | EventPayload::AgentChanged { .. }
+            | EventPayload::ProjectChanged { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }
             | EventPayload::SessionIdentified { .. }

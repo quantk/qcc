@@ -61,3 +61,7 @@ id!(
     /// Declared by the plugin that contributes the provider.
     ProviderId
 );
+id!(
+    /// Minted by the daemon when the user creates a project.
+    ProjectId
+);

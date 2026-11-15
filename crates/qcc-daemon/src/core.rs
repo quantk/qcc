@@ -7,8 +7,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use base64::Engine as _;
 use qcc_domain::{
-    Delta, EnvironmentState, EventPayload, ModelInfo, PermissionMode, ProviderId, Role, SkillRef,
-    ThreadEnvironment, ThreadEvent, ThreadId, ThreadState, ThreadStatus,
+    Delta, EnvironmentState, EventPayload, ModelInfo, PermissionMode, Project, ProjectId,
+    ProviderId, Role, SkillRef, ThreadEnvironment, ThreadEvent, ThreadId, ThreadState,
+    ThreadStatus,
 };
 use qcc_plugin_host::{
     Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
@@ -19,19 +20,22 @@ use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandList, CommandListResult, CommandRun, CommandRunParams,
     CommandRunResult, DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
-    InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
-    ProviderModels, ProviderModelsParams, ProviderModelsResult, SendMode, StopMode, THREAD_EVENT,
-    THREAD_UPDATED, ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesResult,
-    ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
-    ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadListResult,
-    ThreadResult, ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetAgent,
-    ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadUnqueueResult,
-    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait,
-    ThreadWaitParams, ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult,
-    UiItemContribution, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult,
-    UiViewContribution, WaitedThread,
+    InteractionResolveParams, PROJECTS_UPDATED, PluginInfo, PluginList, PluginListResult,
+    PluginPermissions, ProjectCreate, ProjectCreateParams, ProjectDelete, ProjectDeleteParams,
+    ProjectList, ProjectListResult, ProjectResult, ProjectUpdate, ProjectUpdateParams,
+    ProjectsUpdatedNotification, ProviderModels, ProviderModelsParams, ProviderModelsResult,
+    SendMode, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
+    ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
+    ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
+    ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
+    ThreadSendResult, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams,
+    ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
+    ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadUnqueueResult, ThreadUnsubscribe,
+    ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait, ThreadWaitParams,
+    ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams, UiAsset,
+    UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult, UiItemContribution,
+    UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
+    WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -40,7 +44,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::{Config, handover, plugins};
+use crate::{Config, handover, plugins, projects};
 
 /// Answers one request on the connection it came from.
 pub(crate) struct Responder {
@@ -237,6 +241,8 @@ pub(crate) struct Core {
     watches: Vec<Watch>,
     /// Skills plugins offer, written out where agents can read them.
     skills: Vec<SkillRef>,
+    /// Oldest first.
+    projects: Vec<Project>,
     /// What each provider said it offers, until asked to look again.
     models: HashMap<ProviderId, Vec<ModelInfo>>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
@@ -276,6 +282,7 @@ impl Core {
             .and_then(|exe| exe.parent().map(PathBuf::from))
             .filter(|dir| dir.join("qcc").is_file());
 
+        let projects = store.projects()?;
         let mut supervisor = Supervisor::new(|| Box::new(UuidMint));
         let mut queued = HashSet::new();
         let now = now_ms();
@@ -315,6 +322,7 @@ impl Core {
             watches: Vec::new(),
             skills,
             models: HashMap::new(),
+            projects,
             cli_dir,
             fatal: None,
         })
@@ -420,6 +428,26 @@ impl Core {
             }
             ThreadSetMode::NAME => {
                 let result = params::<ThreadSetMode>(raw).and_then(|p| self.thread_set_mode(p));
+                responder.reply(result);
+            }
+            ThreadSetProject::NAME => {
+                let result =
+                    params::<ThreadSetProject>(raw).and_then(|p| self.thread_set_project(p));
+                responder.reply(result);
+            }
+            ProjectList::NAME => {
+                responder.reply(Ok(ProjectListResult { projects: self.projects.clone() }));
+            }
+            ProjectCreate::NAME => {
+                let result = params::<ProjectCreate>(raw).and_then(|p| self.project_create(p));
+                responder.reply(result);
+            }
+            ProjectUpdate::NAME => {
+                let result = params::<ProjectUpdate>(raw).and_then(|p| self.project_update(p));
+                responder.reply(result);
+            }
+            ProjectDelete::NAME => {
+                let result = params::<ProjectDelete>(raw).and_then(|p| self.project_delete(p));
                 responder.reply(result);
             }
             ThreadUnqueue::NAME => {
@@ -613,6 +641,22 @@ impl Core {
             None => None,
         };
 
+        let project = match p.project {
+            Some(project) => {
+                self.project(&project)?;
+                Some(project)
+            }
+            None => {
+                let inherited = p
+                    .parent
+                    .as_ref()
+                    .and_then(|parent| self.supervisor.thread(parent)?.project.clone());
+                inherited.or_else(|| {
+                    qcc_domain::project_of(&self.projects, &p.cwd).map(|project| project.id.clone())
+                })
+            }
+        };
+
         let id = ThreadId(format!("thr_{}", uuid::Uuid::now_v7().simple()));
         let now = now_ms();
         let mut events = self
@@ -625,6 +669,7 @@ impl Core {
                     environment,
                     model: p.model,
                     parent: p.parent,
+                    project,
                     permission_mode: p.permission_mode,
                 },
                 now,
@@ -730,6 +775,123 @@ impl Core {
         self.commit(events);
         self.queued.insert(thread_id);
         Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    fn project(&self, id: &ProjectId) -> Result<&Project, RpcError> {
+        self.projects.iter().find(|project| &project.id == id).ok_or_else(|| {
+            RpcError::new(codes::INVALID_PARAMS, format!("project {id} does not exist"))
+        })
+    }
+
+    fn thread_set_project(&mut self, p: ThreadSetProjectParams) -> Result<ThreadResult, RpcError> {
+        let ThreadSetProjectParams { thread_id, project } = p;
+        if let Some(project) = &project {
+            self.project(project)?;
+        }
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        let events = engine.set_project(project, now_ms());
+        self.commit(events);
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+    }
+
+    fn project_create(&mut self, p: ProjectCreateParams) -> Result<ProjectResult, RpcError> {
+        let (name, folders) = projects::check(&p.name, &p.folders)
+            .map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
+        let project = Project {
+            id: ProjectId(format!("prj_{}", uuid::Uuid::now_v7().simple())),
+            name,
+            folders,
+            created_at: now_ms(),
+        };
+        self.save_project(project.clone())?;
+        Ok(ProjectResult { project })
+    }
+
+    fn project_update(&mut self, p: ProjectUpdateParams) -> Result<ProjectResult, RpcError> {
+        let current = self.project(&p.id)?.clone();
+        let (name, folders) = projects::check(
+            p.name.as_deref().unwrap_or(&current.name),
+            p.folders.as_deref().unwrap_or(&current.folders),
+        )
+        .map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
+        let project = Project { name, folders, ..current };
+        self.save_project(project.clone())?;
+        Ok(ProjectResult { project })
+    }
+
+    fn project_delete(&mut self, p: ProjectDeleteParams) -> Result<Empty, RpcError> {
+        self.project(&p.id)?;
+        self.store
+            .delete_project(&p.id)
+            .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
+        self.projects.retain(|project| project.id != p.id);
+        // Its threads stay, outside any project.
+        let members: Vec<ThreadId> = self
+            .supervisor
+            .threads()
+            .filter(|thread| thread.project.as_ref() == Some(&p.id))
+            .map(|thread| thread.id.clone())
+            .collect();
+        let now = now_ms();
+        for id in members {
+            if let Ok(engine) = self.supervisor.engine(&id) {
+                let events = engine.set_project(None, now);
+                self.commit(events);
+            }
+        }
+        self.projects_changed();
+        Ok(Empty {})
+    }
+
+    /// Store a new or changed project, then let threads outside any project that
+    /// work in one of its folders join it.
+    fn save_project(&mut self, project: Project) -> Result<(), RpcError> {
+        self.store
+            .save_project(&project)
+            .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
+        match self.projects.iter_mut().find(|known| known.id == project.id) {
+            Some(known) => *known = project.clone(),
+            None => self.projects.push(project.clone()),
+        }
+        let joining: Vec<ThreadId> = self
+            .supervisor
+            .threads()
+            .filter(|thread| thread.project.is_none() && !thread.archived)
+            .filter(|thread| {
+                let dir = thread.environment.as_ref().map_or(&thread.cwd, |env| &env.source_dir);
+                qcc_domain::project_of(&self.projects, dir).map(|found| &found.id)
+                    == Some(&project.id)
+            })
+            .map(|thread| thread.id.clone())
+            .collect();
+        let now = now_ms();
+        for id in joining {
+            if let Ok(engine) = self.supervisor.engine(&id) {
+                let events = engine.set_project(Some(project.id.clone()), now);
+                self.commit(events);
+            }
+        }
+        self.projects_changed();
+        Ok(())
+    }
+
+    /// Tell every connection that watches threads what the projects are now.
+    fn projects_changed(&mut self) {
+        let projects = self.projects.clone();
+        self.watchers.retain(|watcher| {
+            let notification = Request::notification(
+                PROJECTS_UPDATED,
+                serde_json::to_value(ProjectsUpdatedNotification {
+                    subscription: watcher.subscription,
+                    projects: projects.clone(),
+                })
+                .expect("projects serialize"),
+            );
+            let line = serde_json::to_string(&notification).expect("notifications serialize");
+            watcher.out.send(line).is_ok()
+        });
     }
 
     fn thread_unqueue(&mut self, p: ThreadUnqueueParams) -> Result<ThreadUnqueueResult, RpcError> {
@@ -1169,7 +1331,7 @@ impl Core {
             let last_message = self.last_message(&thread);
             if let Some(plugin) = self.host.plugin(&watch.plugin) {
                 let settled = SettledThread { summary, last_message };
-                if plugin.post(PluginRequest::ThreadSettled(settled)).is_err() {
+                if plugin.post(PluginRequest::ThreadSettled(Box::new(settled))).is_err() {
                     tracing::warn!(plugin = watch.plugin, "a watching plugin is gone");
                 }
             }
@@ -1196,6 +1358,7 @@ impl Core {
                         prompt: spawn.prompt,
                         model: spawn.model,
                         parent: spawn.parent,
+                        project: None,
                         permission_mode: spawn.permission_mode,
                     })
                     .map_err(|error| error.message)?;

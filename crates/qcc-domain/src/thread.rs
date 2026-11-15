@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::event::{EventPayload, ThreadEvent};
-use crate::ids::{InteractionId, ProviderId, ThreadId};
+use crate::ids::{InteractionId, ProjectId, ProviderId, ThreadId};
 use crate::interaction::InteractionRequest;
 use crate::item::{Item, ItemShape, ItemStatus};
 use crate::provider::PermissionMode;
@@ -165,6 +165,9 @@ pub struct Thread {
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
+    /// The project the thread is grouped under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectId>,
     /// Absent: the agent's own configuration decides what it may do unasked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,
@@ -212,7 +215,10 @@ const TITLE_MAX_CHARS: usize = 80;
 impl Thread {
     /// Fold one event into the projection.
     pub fn apply(&mut self, event: &ThreadEvent) {
-        self.updated_at = event.ts;
+        // Filing a thread under a project is not something it did.
+        if !matches!(event.payload, EventPayload::ProjectChanged { .. }) {
+            self.updated_at = event.ts;
+        }
         self.last_seq = event.seq;
         // The first message names the thread, whether it was sent or queued.
         if self.title.is_none()
@@ -232,6 +238,7 @@ impl Thread {
                 }
                 self.handover = false;
             }
+            EventPayload::ProjectChanged { project } => self.project.clone_from(project),
             EventPayload::AgentChanged { provider, model } => {
                 if *provider != self.provider {
                     self.provider = provider.clone();
@@ -306,6 +313,7 @@ mod tests {
             environment: None,
             model: None,
             parent: None,
+            project: None,
             permission_mode: None,
             title: None,
             status: ThreadStatus::Idle,

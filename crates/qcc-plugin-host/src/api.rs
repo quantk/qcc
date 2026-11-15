@@ -122,7 +122,7 @@ pub enum PluginRequest {
     },
     /// A watched thread settled. Nobody waits for the answer; see
     /// [`crate::PluginHandle::post`].
-    ThreadSettled(SettledThread),
+    ThreadSettled(Box<SettledThread>),
 }
 
 /// A thread as plugins see it: the projection and where it is.

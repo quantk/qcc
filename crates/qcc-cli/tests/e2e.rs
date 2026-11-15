@@ -243,6 +243,67 @@ fn question_is_answered_from_the_cli() {
 }
 
 #[test]
+fn projects_group_threads_by_their_folders() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let app = dir.path().join("app");
+    let api = dir.path().join("api");
+    std::fs::create_dir_all(api.join("src")).unwrap();
+    std::fs::create_dir_all(&app).unwrap();
+    let (app, api) = (app.to_str().unwrap(), api.to_str().unwrap());
+    let spawn_in = |cwd: &str, extra: &[&str]| {
+        let mut args = vec!["thread", "spawn", "--provider", "echo", "--cwd", cwd, "--json"];
+        args.extend(extra);
+        let output = daemon.qcc(&args);
+        assert!(output.ok, "{}", output.stderr);
+        output.json()["thread"]["id"].as_str().unwrap().to_owned()
+    };
+
+    // A thread from before the project joins it when the project is made.
+    let early = spawn_in(app, &[]);
+    assert!(daemon.thread(&early).get("project").is_none());
+    let made =
+        daemon.qcc(&["project", "create", "Shop", "--folder", app, "--folder", api, "--json"]);
+    assert!(made.ok, "{}", made.stderr);
+    let project = made.json()["project"]["id"].as_str().unwrap().to_owned();
+    assert_eq!(daemon.thread(&early)["project"], project.as_str());
+
+    // New threads in any of its folders belong to it, children follow their parent.
+    let nested = spawn_in(&format!("{api}/src"), &[]);
+    assert_eq!(daemon.thread(&nested)["project"], project.as_str());
+    let elsewhere = dir.path().to_str().unwrap();
+    let child = spawn_in(elsewhere, &["--parent", &nested]);
+    assert_eq!(daemon.thread(&child)["project"], project.as_str());
+    let outside = spawn_in(elsewhere, &[]);
+    assert!(daemon.thread(&outside).get("project").is_none());
+
+    // By name as well as by id; and out again.
+    assert!(daemon.qcc(&["thread", "project", &outside, "Shop"]).ok);
+    assert_eq!(daemon.thread(&outside)["project"], project.as_str());
+    assert!(daemon.qcc(&["thread", "project", &outside, "none"]).ok);
+    assert!(daemon.thread(&outside).get("project").is_none());
+
+    assert!(daemon.qcc(&["project", "rename", "Shop", "Store"]).ok);
+    assert!(daemon.qcc(&["project", "remove-folder", "Store", api]).ok);
+    let listed = daemon.qcc(&["project", "list", "--json"]).json();
+    assert_eq!(listed["projects"][0]["name"], "Store");
+    assert_eq!(listed["projects"][0]["folders"], serde_json::json!([app]));
+    let missing = daemon.qcc(&["project", "add-folder", "Store", "/no/such/dir"]);
+    assert!(!missing.ok);
+    assert!(missing.stderr.contains("not an absolute path to a directory"), "{}", missing.stderr);
+
+    // Deleting a project leaves its threads, outside any project.
+    assert!(daemon.qcc(&["project", "delete", "Store"]).ok);
+    assert!(daemon.thread(&early).get("project").is_none());
+    assert!(
+        daemon.qcc(&["project", "list", "--json"]).json()["projects"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn a_queued_message_can_be_taken_back() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

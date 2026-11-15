@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use qcc_domain::{
     CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution,
-    ModelInfo, PermissionMode, ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId,
-    ThreadState, UiViewInfo,
+    ModelInfo, PermissionMode, Project, ProjectId, ProviderId, ProviderInfo, Thread, ThreadEvent,
+    ThreadId, ThreadState, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -72,6 +72,10 @@ pub struct ThreadSpawnParams {
     /// The thread that spawned this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
+    /// The project to group it under. Absent: the parent's project, or else the
+    /// project one of whose folders holds `cwd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<ProjectId>,
     /// How much the agent may do unasked. Absent: the agent's own configuration
     /// decides. Must be a mode the provider lists in its capabilities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -358,6 +362,86 @@ pub const THREAD_EVENT: &str = "thread.event";
 pub struct ThreadEventNotification {
     pub subscription: u64,
     pub event: ThreadEvent,
+}
+
+method!(
+    /// Put a thread into a project, move it to another or take it out (`None`).
+    ThreadSetProject, "thread.set_project", ThreadSetProjectParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadSetProjectParams {
+    pub thread_id: ThreadId,
+    #[serde(default)]
+    pub project: Option<ProjectId>,
+}
+
+// ----- projects ---------------------------------------------------------------------
+
+method!(
+    /// Every project, oldest first.
+    ProjectList, "project.list", Empty => ProjectListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectListResult {
+    pub projects: Vec<Project>,
+}
+
+/// Notification to connections that watch threads: the projects changed. Carries
+/// all of them.
+pub const PROJECTS_UPDATED: &str = "projects.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectsUpdatedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub projects: Vec<Project>,
+}
+
+method!(
+    /// Make a project. Threads outside any project whose directory is in one of its
+    /// folders join it.
+    ProjectCreate, "project.create", ProjectCreateParams => ProjectResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectCreateParams {
+    pub name: String,
+    /// Absolute paths of existing directories: repositories or plain folders.
+    pub folders: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectResult {
+    pub project: Project,
+}
+
+method!(
+    /// Rename a project or change its folders. Threads outside any project whose
+    /// directory is in a new folder join it; threads already in it stay.
+    ProjectUpdate, "project.update", ProjectUpdateParams => ProjectResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectUpdateParams {
+    pub id: ProjectId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The whole new list. Absent: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folders: Option<Vec<String>>,
+}
+
+method!(
+    /// Delete a project. Its threads stay, outside any project; their files are not
+    /// touched.
+    ProjectDelete, "project.delete", ProjectDeleteParams => Empty
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProjectDeleteParams {
+    pub id: ProjectId,
 }
 
 // ----- interactions -----------------------------------------------------------------

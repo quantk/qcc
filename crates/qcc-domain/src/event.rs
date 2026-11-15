@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
+use crate::ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 use crate::interaction::{InteractionRequest, InteractionResolution};
 use crate::item::Item;
 use crate::provider::PermissionMode;
@@ -61,6 +61,13 @@ pub enum EventPayload {
         provider: ProviderId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+    },
+
+    /// The thread was put into a project, moved to another or taken out of one.
+    #[serde(rename = "thread/project")]
+    ProjectChanged {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        project: Option<ProjectId>,
     },
 
     /// The thread was put away. Always its last state change.

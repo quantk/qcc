@@ -410,7 +410,8 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
         PluginRequest::Command { command, thread, args } => {
             wit::Event::Command(wit::CommandCall { command, thread: thread.map(|t| t.0), args })
         }
-        PluginRequest::ThreadSettled(SettledThread { summary, last_message }) => {
+        PluginRequest::ThreadSettled(settled) => {
+            let SettledThread { summary, last_message } = *settled;
             wit::Event::ThreadSettled(wit::SettledThread {
                 thread: thread_info(summary),
                 last_message,

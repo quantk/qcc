@@ -18,7 +18,7 @@ use qcc_client::protocol::methods::{
     ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams,
     ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
     ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
+    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -132,6 +132,9 @@ enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// Take a queued message back before it is delivered and print it. The id is the
+    /// `queue_id` that `thread send --json` printed.
+    Unqueue { thread: String, queue_id: String },
     /// Go on with another agent or model. Another agent starts a new session and is
     /// told the conversation so far; `qcc provider models` lists the models.
     Agent {
@@ -393,6 +396,20 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .await?;
             if json {
                 print_json(&result)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::Unqueue { thread, queue_id }) => {
+            let result = client
+                .call::<ThreadUnqueue>(ThreadUnqueueParams {
+                    thread_id: ThreadId::new(thread),
+                    queue_id,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(result.text);
             }
         }
 

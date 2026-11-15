@@ -43,7 +43,7 @@ function groupByProject(threads: Thread[], all: Readonly<Record<string, Thread>>
 export function Sidebar() {
   const newThread = useUi((snapshot) => snapshot.commands.find((command) => command.id === NEW_THREAD));
   const threads = useApp((state) => state.threads);
-  const plugins = useApp((state) => state.plugins);
+  const plugins = useApp((state) => state.allPlugins);
   const selected = useApp((state) => state.selected);
   const connected = useApp((state) => state.daemon.status === "connected");
   const views = useUi((snapshot) => snapshot.views);

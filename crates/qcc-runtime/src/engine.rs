@@ -154,6 +154,15 @@ impl ThreadEngine {
         self.emit(dropped, now)
     }
 
+    /// Take one message off the queue before it is delivered. Returns its text, or
+    /// `None` when nothing with that id is queued (it may have been delivered).
+    pub fn unqueue(&mut self, queue_id: &str, now: u64) -> Option<(String, Vec<ThreadEvent>)> {
+        let (_, text) =
+            self.timeline.queued_inputs().iter().find(|(id, _)| id == queue_id)?.clone();
+        let dropped = EventPayload::InputDropped { queue_id: queue_id.to_owned() };
+        Some((text, self.emit(vec![dropped], now)))
+    }
+
     /// The provider refused the submitted input: no turn will open for it.
     pub fn input_rejected(&mut self) {
         self.awaiting_turn = false;

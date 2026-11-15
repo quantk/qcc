@@ -131,6 +131,24 @@ pub struct ThreadSendResult {
 }
 
 method!(
+    /// Take a queued message back before it is delivered: to drop it, edit it, or
+    /// steer it into the running turn instead. Returns its text.
+    ThreadUnqueue, "thread.unqueue", ThreadUnqueueParams => ThreadUnqueueResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadUnqueueParams {
+    pub thread_id: ThreadId,
+    /// From `thread.send` or the `input/queued` event.
+    pub queue_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadUnqueueResult {
+    pub text: String,
+}
+
+method!(
     /// Change a thread's permission mode. Refused while a turn runs. An attached
     /// provider session is released; the next message resumes it in the new mode.
     ThreadSetMode, "thread.set_mode", ThreadSetModeParams => ThreadResult

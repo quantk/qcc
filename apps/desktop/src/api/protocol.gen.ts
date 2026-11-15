@@ -126,7 +126,10 @@ steered?: boolean;
 queue_id?: string | null } | 
 /**  A user message arrived while a turn was running and waits for it to end. */
 { type: "input/queued"; queue_id: string; text: string } | 
-/**  A queued message was discarded before delivery (the thread was stopped). */
+/**
+ *  A queued message was discarded before delivery: the thread was stopped, or the
+ *  user took the message back.
+ */
 { type: "input/dropped"; queue_id: string } | { type: "turn/started"; turn_id: TurnId } | { type: "turn/completed"; turn_id: TurnId; status: TurnStatus; error?: string | null } | 
 /**  Every item's first event. */
 { type: "item/started"; turn_id: TurnId; item: Item } | { type: "item/text/delta"; item_id: ItemId; text: string } | 
@@ -505,6 +508,16 @@ export type ThreadStopParams = {
 	mode?: StopMode,
 };
 
+export type ThreadUnqueueParams = {
+	thread_id: ThreadId,
+	/**  From `thread.send` or the `input/queued` event. */
+	queue_id: string,
+};
+
+export type ThreadUnqueueResult = {
+	text: string,
+};
+
 export type ThreadUnsubscribeParams = {
 	subscription: number,
 };
@@ -650,6 +663,7 @@ export type Methods = {
 	"daemon.status": { params: Empty; result: DaemonStatusResult },
 	"thread.spawn": { params: ThreadSpawnParams; result: ThreadResult },
 	"thread.send": { params: ThreadSendParams; result: ThreadSendResult },
+	"thread.unqueue": { params: ThreadUnqueueParams; result: ThreadUnqueueResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.stop": { params: ThreadStopParams; result: Empty },

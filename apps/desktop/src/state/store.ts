@@ -298,6 +298,14 @@ export class AppStore {
     return result !== null;
   }
 
+  /** Take a queued message back. Resolves to its text, or null if it was gone. */
+  async unqueue(threadId: ThreadId, queueId: string): Promise<string | null> {
+    const result = await this.attempt(() =>
+      this.api.call("thread.unqueue", { thread_id: threadId, queue_id: queueId }),
+    );
+    return result?.text ?? null;
+  }
+
   stop(threadId: ThreadId) {
     return this.attempt(() => this.api.call("thread.stop", { thread_id: threadId, mode: "interrupt" }));
   }

@@ -26,11 +26,12 @@ use qcc_protocol::methods::{
     ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadListResult,
     ThreadResult, ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetAgent,
     ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
-    ThreadUpdatedNotification, ThreadWait, ThreadWaitParams, ThreadWaitResult, ThreadWatch,
-    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
-    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution, WaitedThread,
+    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadUnqueueResult,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait,
+    ThreadWaitParams, ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult,
+    UiItemContribution, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult,
+    UiViewContribution, WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -421,6 +422,10 @@ impl Core {
                 let result = params::<ThreadSetMode>(raw).and_then(|p| self.thread_set_mode(p));
                 responder.reply(result);
             }
+            ThreadUnqueue::NAME => {
+                let result = params::<ThreadUnqueue>(raw).and_then(|p| self.thread_unqueue(p));
+                responder.reply(result);
+            }
             ThreadSetAgent::NAME => {
                 let result = params::<ThreadSetAgent>(raw).and_then(|p| self.thread_set_agent(p));
                 responder.reply(result);
@@ -725,6 +730,23 @@ impl Core {
         self.commit(events);
         self.queued.insert(thread_id);
         Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    fn thread_unqueue(&mut self, p: ThreadUnqueueParams) -> Result<ThreadUnqueueResult, RpcError> {
+        let ThreadUnqueueParams { thread_id, queue_id } = p;
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        let Some((text, events)) = engine.unqueue(&queue_id, now_ms()) else {
+            return Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                format!("no message {queue_id:?} is queued; it may have been delivered already"),
+            ));
+        };
+        if !engine.has_queued_input() {
+            self.queued.remove(&thread_id);
+        }
+        self.commit(events);
+        Ok(ThreadUnqueueResult { text })
     }
 
     /// The provider session is starting or stopping: input waits, and nothing else

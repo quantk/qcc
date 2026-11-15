@@ -243,6 +243,36 @@ fn question_is_answered_from_the_cli() {
 }
 
 #[test]
+fn a_queued_message_can_be_taken_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let long = (0..5000).map(|n| n.to_string()).collect::<Vec<_>>().join(" ");
+    let id = daemon.spawn(&format!("/slow {long}"));
+    daemon.wait_for(&id, "item/text/delta");
+
+    let sent = daemon.qcc(&["thread", "send", &id, "later", "--json"]).json();
+    assert_eq!(sent["delivery"], "queued");
+    let queue_id = sent["queue_id"].as_str().unwrap().to_owned();
+    assert_eq!(daemon.thread(&id)["queued_inputs"], 1);
+
+    let taken = daemon.qcc(&["thread", "unqueue", &id, &queue_id]);
+    assert!(taken.ok, "{}", taken.stderr);
+    assert_eq!(taken.stdout.trim(), "later");
+    assert!(daemon.thread(&id).get("queued_inputs").is_none());
+    let dropped = daemon.events(&id);
+    let dropped = dropped.iter().find(|event| event["type"] == "input/dropped").unwrap();
+    assert_eq!(dropped["queue_id"], queue_id.as_str());
+
+    // Gone from the queue: neither taken twice nor delivered after the turn.
+    assert!(!daemon.qcc(&["thread", "unqueue", &id, &queue_id]).ok);
+    assert!(daemon.qcc(&["thread", "stop", &id]).ok);
+    let events = daemon.events(&id);
+    assert!(
+        events.iter().all(|event| event["text"] != "later" || event["type"] != "input/submitted")
+    );
+}
+
+#[test]
 fn stop_interrupts_a_running_turn() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

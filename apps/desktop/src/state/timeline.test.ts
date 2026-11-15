@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventPayload, Item, ThreadEvent } from "../api/protocol.gen";
-import { type Timeline, applyEvents, emptyTimeline, pendingInteractions } from "./timeline";
+import { type Timeline, applyEvents, emptyTimeline, pendingInteractions, queuedMessages } from "./timeline";
 
 function events(...payloads: EventPayload[]): ThreadEvent[] {
   return payloads.map((payload, index) => ({ thread_id: "t", seq: index + 1, ts: 1000 + index, ...payload }));
@@ -94,5 +94,23 @@ describe("timeline", () => {
       { kind: "notice", level: "info", text: "Interrupted" },
       { kind: "notice", level: "error", text: "Environment failed: not a git repository" },
     ]);
+  });
+});
+
+describe("queued messages", () => {
+  it("are listed until delivered or dropped", () => {
+    const event = (seq: number, payload: object) => ({ thread_id: "t", seq, ts: seq, ...payload }) as ThreadEvent;
+    let timeline = applyEvents(emptyTimeline, [
+      event(1, { type: "input/queued", queue_id: "a", text: "first" }),
+      event(2, { type: "input/queued", queue_id: "b", text: "second" }),
+      event(3, { type: "input/queued", queue_id: "c", text: "third" }),
+    ]);
+    expect(queuedMessages(timeline).map((m) => m.queueId)).toEqual(["a", "b", "c"]);
+    timeline = applyEvents(timeline, [
+      event(4, { type: "input/submitted", text: "first", queue_id: "a" }),
+      event(5, { type: "input/dropped", queue_id: "c" }),
+    ]);
+    expect(queuedMessages(timeline)).toEqual([{ queueId: "b", text: "second" }]);
+    expect(queuedMessages(undefined)).toEqual([]);
   });
 });

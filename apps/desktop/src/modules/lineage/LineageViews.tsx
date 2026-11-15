@@ -34,7 +34,7 @@ function childStatus(thread: Thread): string {
 
 /** The threads a thread started: what each is doing, and the questions they ask. */
 export function ChildrenView({ children }: { children: readonly Thread[] }) {
-  const plugins = useApp((state) => state.plugins);
+  const plugins = useApp((state) => state.allPlugins);
   const now = useNow(1000);
   return (
     <div className="children">

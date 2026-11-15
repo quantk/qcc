@@ -24,7 +24,7 @@ const LANES: Lane[] = [
 ];
 
 function AgentCard({ thread, now }: { thread: Thread; now: number }) {
-  const plugins = useApp((state) => state.plugins);
+  const plugins = useApp((state) => state.allPlugins);
   const attention = attentionOf(thread);
   const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
   const parent = useApp((state) => (thread.parent ? state.threads[thread.parent] : undefined));

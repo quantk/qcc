@@ -97,7 +97,8 @@ pub enum EventPayload {
     #[serde(rename = "input/queued")]
     InputQueued { queue_id: String, text: String },
 
-    /// A queued message was discarded before delivery (the thread was stopped).
+    /// A queued message was discarded before delivery: the thread was stopped, or the
+    /// user took the message back.
     #[serde(rename = "input/dropped")]
     InputDropped { queue_id: String },
 

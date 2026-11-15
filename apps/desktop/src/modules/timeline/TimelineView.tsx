@@ -39,16 +39,12 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
           <MessageContent className="gap-1">
             <Bubble
               align="end"
-              variant={entry.queued ? "outline" : "muted"}
-              className={
-                entry.queued
-                  ? "opacity-65 *:data-[slot=bubble-content]:border-dashed *:data-[slot=bubble-content]:bg-transparent"
-                  : "*:data-[slot=bubble-content]:bg-accent"
-              }
+              variant="muted"
+              className="*:data-[slot=bubble-content]:bg-accent"
             >
               <BubbleContent className="whitespace-pre-wrap">{entry.text}</BubbleContent>
             </Bubble>
-            {(entry.queued || entry.steered) && <MessageFooter>{entry.queued ? "queued" : "steered"}</MessageFooter>}
+            {entry.steered && <MessageFooter>steered into the running turn</MessageFooter>}
           </MessageContent>
         </Message>
       );
@@ -73,7 +69,8 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
         <MessageScrollerViewport aria-label="Timeline">
           <MessageScrollerContent className="mx-auto w-full max-w-[860px] gap-2.5 px-6 pt-5 pb-7">
             {timeline.entries.length === 0 && <p className="hint">Nothing here yet. Send the first message below.</p>}
-            {timeline.entries.map((entry) => (
+            {/* Queued messages are listed above the composer, where they can be changed. */}
+            {timeline.entries.filter((entry) => !(entry.kind === "user" && entry.queued)).map((entry) => (
               <MessageScrollerItem key={entry.key} messageId={entry.key} scrollAnchor={entry.kind === "user"}>
                 <EntryView thread={thread} entry={entry} />
               </MessageScrollerItem>

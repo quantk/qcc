@@ -13,7 +13,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
   const thread = threads[threadId];
   const timeline = useApp((state) => state.timelines[threadId]);
   const loading = useApp((state) => state.loading);
-  const plugins = useApp((state) => state.plugins);
+  const plugins = useApp((state) => state.allPlugins);
   const allTabs = useUi((snapshot) => snapshot.tabs);
   const allActions = useUi((snapshot) => snapshot.actions);
   const [chosen, setChosen] = useState<string | null>(null);

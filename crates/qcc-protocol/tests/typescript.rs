@@ -39,6 +39,7 @@ fn generate() -> String {
         .method::<DaemonStatus>()
         .method::<ThreadSpawn>()
         .method::<ThreadSend>()
+        .method::<ThreadUnqueue>()
         .method::<ThreadSetMode>()
         .method::<ThreadSetAgent>()
         .method::<ThreadStop>()

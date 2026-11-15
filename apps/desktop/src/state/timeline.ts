@@ -180,3 +180,14 @@ export function applyEvents(timeline: Timeline, events: readonly ThreadEvent[]):
 export function pendingInteractions(timeline: Timeline): Entry[] {
   return timeline.entries.filter((entry) => entry.kind === "interaction" && !entry.resolution);
 }
+
+export type QueuedMessage = { queueId: string; text: string };
+
+/** Messages waiting for the running turn to end, oldest first. */
+export function queuedMessages(timeline: Timeline | undefined): QueuedMessage[] {
+  const queued: QueuedMessage[] = [];
+  for (const entry of timeline?.entries ?? []) {
+    if (entry.kind === "user" && entry.queued && entry.queueId) queued.push({ queueId: entry.queueId, text: entry.text });
+  }
+  return queued;
+}

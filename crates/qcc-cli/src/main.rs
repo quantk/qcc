@@ -13,9 +13,9 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use qcc_client::protocol::methods::{
     DaemonStatus, Delivery, Empty, InteractionResolve, InteractionResolveParams, PluginList,
-    SendMode, StopMode, ThreadGet, ThreadGetParams, ThreadList, ThreadSend, ThreadSendParams,
-    ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
-    ThreadStopParams,
+    SendMode, StopMode, ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet,
+    ThreadGetParams, ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -76,6 +76,14 @@ enum ThreadCommand {
         /// Working directory of the thread [default: the current directory].
         #[arg(long)]
         cwd: Option<PathBuf>,
+        /// Give the thread a working directory of its own, made from --cwd by this
+        /// environment (`git-worktree`: a worktree on a new branch).
+        #[arg(long, value_name = "ENVIRONMENT")]
+        env: Option<String>,
+        /// What the environment starts from: for git-worktree a branch, tag or
+        /// commit [default: the current HEAD].
+        #[arg(long, value_name = "REF", requires = "env")]
+        base: Option<String>,
         #[arg(long)]
         model: Option<String>,
         /// Parent thread [default: $QCC_THREAD_ID, set inside agent sessions].
@@ -113,7 +121,23 @@ enum ThreadCommand {
         release: bool,
     },
     /// List threads, oldest first.
-    List,
+    List {
+        /// Include archived threads.
+        #[arg(long)]
+        archived: bool,
+    },
+    /// List the files a thread changed in its environment.
+    Changes { thread: String },
+    /// Print everything a thread changed in its environment as a unified diff.
+    Diff { thread: String },
+    /// Put a thread away: release its session and remove its environment. The
+    /// timeline stays readable.
+    Archive {
+        thread: String,
+        /// Remove the environment even if uncommitted work is lost.
+        #[arg(long)]
+        force: bool,
+    },
     /// Show a thread and its whole timeline.
     Show { thread: String },
     /// Print a thread's events.
@@ -213,6 +237,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             provider,
             prompt,
             cwd,
+            env,
+            base,
             model,
             parent,
             permission_mode,
@@ -228,6 +254,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .call::<ThreadSpawn>(ThreadSpawnParams {
                     provider: ProviderId::new(provider),
                     cwd: cwd.display().to_string(),
+                    environment: env,
+                    base,
                     prompt,
                     model,
                     parent: parent.map(ThreadId::new),
@@ -307,8 +335,51 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Thread(ThreadCommand::List) => {
-            let result = client.call::<ThreadList>(Empty {}).await?;
+        Command::Thread(ThreadCommand::Changes { thread }) => {
+            let result = client
+                .call::<ThreadChanges>(ThreadGetParams { thread_id: ThreadId::new(thread) })
+                .await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(render::changes(&result.changes));
+            }
+        }
+
+        Command::Thread(ThreadCommand::Diff { thread }) => {
+            let result = client
+                .call::<ThreadDiff>(ThreadGetParams { thread_id: ThreadId::new(thread) })
+                .await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                // The patch as it is, so it can be piped into `git apply`.
+                use std::io::Write;
+                let mut stdout = std::io::stdout().lock();
+                if stdout.write_all(result.diff.as_bytes()).and_then(|()| stdout.flush()).is_err() {
+                    std::process::exit(0);
+                }
+                if result.truncated {
+                    eprintln!("qcc: the diff is too large and was cut short");
+                }
+            }
+        }
+
+        Command::Thread(ThreadCommand::Archive { thread, force }) => {
+            let result = client
+                .call::<ThreadArchive>(ThreadArchiveParams {
+                    thread_id: ThreadId::new(thread),
+                    force,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::List { archived }) => {
+            let result =
+                client.call::<ThreadList>(ThreadListParams { include_archived: archived }).await?;
             if json {
                 print_json(&result)?;
             } else {

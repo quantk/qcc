@@ -385,8 +385,18 @@ fn plugins_and_daemon_are_listed() {
     let plugins = daemon.qcc(&["plugin", "list", "--json"]).json();
     let ids: Vec<&str> =
         plugins["plugins"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["provider-acp", "provider-claude-code", "provider-codex", "provider-echo"]);
-    let echo = &plugins["plugins"][3];
+    assert_eq!(
+        ids,
+        [
+            "env-git-worktree",
+            "provider-acp",
+            "provider-claude-code",
+            "provider-codex",
+            "provider-echo"
+        ]
+    );
+    assert_eq!(plugins["plugins"][0]["environments"][0]["id"], "git-worktree");
+    let echo = &plugins["plugins"][4];
     assert_eq!(echo["bundled"], true);
     assert_eq!(echo["providers"][0]["id"], "echo");
     assert_eq!(echo["providers"][0]["capabilities"]["resume"], true);
@@ -551,4 +561,263 @@ fn permission_mode_is_set_at_spawn_and_can_be_changed() {
         codex["permission_modes"],
         serde_json::json!(["ask", "accept-edits", "auto", "full"])
     );
+}
+
+// ----- environments -----------------------------------------------------------------
+
+/// Run git in `dir`, isolated from the configuration of whoever runs the tests.
+fn git(dir: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "Test")
+        .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+        .env("GIT_COMMITTER_NAME", "Test")
+        .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+        .output()
+        .expect("git runs");
+    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+    String::from_utf8(output.stdout).unwrap()
+}
+
+fn write(path: PathBuf, contents: &str) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, contents).unwrap();
+}
+
+/// A repository with one commit and the given tracked files.
+fn repo(dir: &Path, files: &[(&str, &str)]) -> PathBuf {
+    let repo = dir.join("app");
+    std::fs::create_dir_all(&repo).unwrap();
+    git(&repo, &["init", "--quiet", "--initial-branch", "main"]);
+    for (name, contents) in files {
+        write(repo.join(name), contents);
+    }
+    git(&repo, &["add", "--all"]);
+    git(&repo, &["commit", "--quiet", "--message", "initial"]);
+    repo
+}
+
+fn spawn_in_worktree(daemon: &Daemon, repo: &Path, extra: &[&str]) -> Output {
+    let mut args =
+        vec!["thread", "spawn", "--provider", "echo", "--env", "git-worktree", "--json", "--cwd"];
+    args.push(repo.to_str().unwrap());
+    args.extend(extra);
+    daemon.qcc(&args)
+}
+
+#[test]
+fn a_thread_gets_a_worktree_of_its_own_and_reports_what_it_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(
+        dir.path(),
+        &[
+            ("README.md", "hello\n"),
+            ("src/a.txt", "one\ntwo\n"),
+            (".gitignore", ".env\nscratch/\n"),
+            (".worktreeinclude", ".env\n"),
+            (
+                ".qcc-env-setup.sh",
+                "mkdir -p scratch && echo \"$QCC_THREAD_ID from $QCC_SOURCE_DIR\" > scratch/setup\n",
+            ),
+        ],
+    );
+    // Local, untracked, and wanted in every worktree.
+    write(repo.join(".env"), "SECRET=1\n");
+    let daemon = Daemon::start(&data);
+
+    let output = spawn_in_worktree(&daemon, &repo.join("src"), &["--prompt", "hi", "--follow"]);
+    assert!(output.ok, "{}", output.stderr);
+    let streamed = output.json_lines();
+    // The directory comes first: no agent runs before it exists.
+    assert_eq!(
+        types(&streamed)[..4],
+        ["thread/created", "input/submitted", "environment/ready", "session/started"]
+    );
+    let id = streamed[0]["thread_id"].as_str().unwrap().to_owned();
+    let worktree = data.join("environments/git-worktree").join(&id).join("app");
+
+    // Started in a subdirectory, the thread works in the same one of its worktree.
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["cwd"], worktree.join("src").to_str().unwrap());
+    assert_eq!(thread["environment"]["state"], "ready");
+    assert_eq!(thread["environment"]["source_dir"], repo.join("src").to_str().unwrap());
+    assert_eq!(std::fs::read_to_string(worktree.join("src/a.txt")).unwrap(), "one\ntwo\n");
+    assert_eq!(std::fs::read_to_string(worktree.join(".env")).unwrap(), "SECRET=1\n");
+    assert_eq!(
+        std::fs::read_to_string(worktree.join("scratch/setup")).unwrap(),
+        format!("{id} from {}\n", repo.display())
+    );
+    let branch = format!("qcc/{id}");
+    assert_eq!(git(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(), branch);
+
+    // The worktree outlives the daemon that made it.
+    daemon.stop();
+    let daemon = Daemon::start(&data);
+    assert_eq!(daemon.thread(&id)["cwd"], worktree.join("src").to_str().unwrap());
+
+    let clean = daemon.qcc(&["thread", "changes", &id, "--json"]).json();
+    assert_eq!(clean["changes"]["files"], serde_json::json!([]));
+    assert_eq!(clean["changes"]["branch"], branch.as_str());
+
+    // One committed change, one uncommitted, one deletion, one file git has not seen.
+    write(worktree.join("src/a.txt"), "one\ntwo\nthree\n");
+    git(&worktree, &["commit", "--quiet", "--all", "--message", "three"]);
+    write(worktree.join("README.md"), "hello\nworld\n");
+    std::fs::remove_file(worktree.join(".worktreeinclude")).unwrap();
+    write(worktree.join("docs/new.md"), "brand new\n");
+
+    let changes = daemon.qcc(&["thread", "changes", &id, "--json"]).json();
+    assert_eq!(
+        changes["changes"]["files"],
+        serde_json::json!([
+            { "path": ".worktreeinclude", "kind": "deleted", "additions": 0, "deletions": 1 },
+            { "path": "README.md", "kind": "modified", "additions": 1, "deletions": 0 },
+            { "path": "docs/new.md", "kind": "untracked" },
+            { "path": "src/a.txt", "kind": "modified", "additions": 1, "deletions": 0 },
+        ])
+    );
+    let human = daemon.qcc(&["thread", "changes", &id]);
+    assert!(human.stdout.contains("M  src/a.txt  +1 -0\n"), "{}", human.stdout);
+    assert!(human.stdout.contains("?  docs/new.md"), "{}", human.stdout);
+
+    let diff = daemon.qcc(&["thread", "diff", &id]);
+    assert!(diff.ok, "{}", diff.stderr);
+    for expected in ["+three\n", "+world\n", "+++ b/docs/new.md\n", "+brand new\n", "-.env\n"] {
+        assert!(diff.stdout.contains(expected), "no {expected:?} in:\n{}", diff.stdout);
+    }
+    // The patch is a real one: it applies to the checkout the thread started from.
+    write(dir.path().join("thread.patch"), &diff.stdout);
+    git(&repo, &["apply", "--check", dir.path().join("thread.patch").to_str().unwrap()]);
+
+    // None of this touched the main checkout.
+    assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "one\ntwo\n");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+
+    // Archiving would throw the uncommitted work away, so it has to be forced.
+    let refused = daemon.qcc(&["thread", "archive", &id]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("uncommitted changes"), "{}", refused.stderr);
+    assert!(worktree.is_dir());
+    assert_eq!(daemon.thread(&id).get("archived"), None);
+
+    let archived = daemon.qcc(&["thread", "archive", &id, "--force", "--json"]);
+    assert!(archived.ok, "{}", archived.stderr);
+    assert_eq!(archived.json()["thread"]["archived"], true);
+    assert_eq!(archived.json()["thread"]["environment"]["state"], "removed");
+    assert!(!worktree.exists());
+    assert!(!worktree.parent().unwrap().exists(), "the thread's directory was left behind");
+    // The commit exists nowhere else, so the branch that holds it stays.
+    assert_eq!(git(&repo, &["branch", "--list", &branch]).trim(), branch);
+
+    assert_eq!(daemon.qcc(&["thread", "list", "--json"]).json()["threads"], serde_json::json!([]));
+    let all = daemon.qcc(&["thread", "list", "--archived", "--json"]).json();
+    assert_eq!(all["threads"][0]["id"], id.as_str());
+    let sent = daemon.qcc(&["thread", "send", &id, "anyone?"]);
+    assert!(!sent.ok);
+    assert!(sent.stderr.contains("is archived"), "{}", sent.stderr);
+    // The timeline is still there to read.
+    let kinds = types(&daemon.events(&id)).join(" ");
+    assert!(kinds.ends_with("session/ended environment/removed thread/archived"), "{kinds}");
+}
+
+#[test]
+fn an_untouched_worktree_is_archived_with_its_branch_and_runs_teardown() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(
+        dir.path(),
+        &[
+            ("a.txt", "one\n"),
+            (".qcc-env-teardown.sh", "echo gone > \"$QCC_SOURCE_DIR/../torn\"\n"),
+        ],
+    );
+    git(&repo, &["branch", "release"]);
+    write(repo.join("a.txt"), "main moved on\n");
+    git(&repo, &["commit", "--quiet", "--all", "--message", "more"]);
+    let daemon = Daemon::start(&dir.path().join("data"));
+
+    // No prompt: the worktree is made right away all the same, from the base asked for.
+    let output = spawn_in_worktree(&daemon, &repo, &["--base", "release"]);
+    assert!(output.ok, "{}", output.stderr);
+    let id = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    let ready = daemon.wait_for(&id, "environment/ready");
+    let worktree = PathBuf::from(ready["cwd"].as_str().unwrap());
+    assert_eq!(std::fs::read_to_string(worktree.join("a.txt")).unwrap(), "one\n");
+    daemon.wait_for(&id, "session/started");
+
+    let archived = daemon.qcc(&["thread", "archive", &id]);
+    assert!(archived.ok, "{}", archived.stderr);
+    assert!(!worktree.exists());
+    assert_eq!(std::fs::read_to_string(dir.path().join("torn")).unwrap(), "gone\n");
+    // Nothing was committed on it, so nothing is lost with the branch.
+    assert_eq!(git(&repo, &["branch", "--list", "qcc/*"]), "");
+    assert_eq!(git(&repo, &["worktree", "list", "--porcelain"]).matches("worktree ").count(), 1);
+    // Archiving twice is not an error.
+    assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+}
+
+#[test]
+fn a_thread_never_runs_in_the_source_when_its_environment_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = dir.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let daemon = Daemon::start(&dir.path().join("data"));
+
+    let output = spawn_in_worktree(&daemon, &plain, &["--prompt", "hi", "--follow"]);
+    assert!(!output.ok);
+    let events = output.json_lines();
+    let kinds = types(&events);
+    assert!(kinds.contains(&"environment/failed"), "{kinds:?}");
+    assert!(!kinds.contains(&"session/started"), "{kinds:?}");
+    let id = events[0]["thread_id"].as_str().unwrap().to_owned();
+    let failed = daemon.wait_for(&id, "environment/failed");
+    assert!(failed["message"].as_str().unwrap().contains("is not inside a git repository"));
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["status"], "failed");
+    assert_eq!(thread["environment"]["state"], "failed");
+    let changes = daemon.qcc(&["thread", "changes", &id]);
+    assert!(changes.stderr.contains("has no environment"), "{}", changes.stderr);
+
+    // Once the directory is a repository, the next message tries again and runs.
+    git(&plain, &["init", "--quiet", "--initial-branch", "main"]);
+    write(plain.join("a.txt"), "one\n");
+    git(&plain, &["add", "--all"]);
+    git(&plain, &["commit", "--quiet", "--message", "initial"]);
+    let output = daemon.qcc(&["thread", "send", &id, "again", "--json", "--follow"]);
+    assert!(output.ok, "{}", output.stderr);
+    assert_eq!(
+        types(&output.json_lines())[..4],
+        ["input/submitted", "environment/preparing", "environment/ready", "session/started"]
+    );
+    assert_ne!(daemon.thread(&id)["cwd"], plain.to_str().unwrap());
+
+    // A setup script that fails leaves no worktree and no branch behind.
+    let broken = repo(
+        dir.path(),
+        &[("a.txt", "one\n"), (".qcc-env-setup.sh", "echo no deps >&2; exit 3\n")],
+    );
+    let output = spawn_in_worktree(&daemon, &broken, &[]);
+    let id = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    let failed = daemon.wait_for(&id, "environment/failed");
+    assert_eq!(failed["message"], ".qcc-env-setup.sh: no deps");
+    assert_eq!(git(&broken, &["branch", "--list", "qcc/*"]), "");
+    assert_eq!(git(&broken, &["worktree", "list", "--porcelain"]).matches("worktree ").count(), 1);
+    // A thread whose environment was never made archives without one.
+    assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+
+    // Requests that cannot mean anything are refused up front.
+    let unknown = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--env", "docker"]);
+    assert!(unknown.stderr.contains("no plugin provides environment \"docker\""));
+    let plain_thread = daemon.spawn("no environment");
+    let diff = daemon.qcc(&["thread", "diff", &plain_thread]);
+    assert!(!diff.ok);
+    assert!(diff.stderr.contains("has no environment"), "{}", diff.stderr);
+    let bad_base = spawn_in_worktree(&daemon, &broken, &["--base", "nope"]);
+    let id = bad_base.json()["thread"]["id"].as_str().unwrap().to_owned();
+    let failed = daemon.wait_for(&id, "environment/failed");
+    assert!(failed["message"].as_str().unwrap().contains("\"nope\" does not name a commit"));
 }

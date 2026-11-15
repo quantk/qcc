@@ -5,7 +5,7 @@
 /// addressed to it. Each plugin instance is a single-threaded actor: events are
 /// delivered one at a time, and nothing a plugin imports ever blocks on the outside
 /// world. Long-running things (an agent process writing to stdout, a timer) come back
-/// as events.
+/// as events, and a request that has to wait for one is answered later (`deferred`).
 ///
 /// Every import is gated by a permission the plugin requests in its manifest.
 package qcc:plugin@0.1.0;
@@ -281,21 +281,66 @@ interface types {
     thread: thread-id,
     /// The directory the thread was asked to work on.
     source-dir: string,
+    /// A directory set aside for this plugin's environments. What goes where inside
+    /// it is the plugin's business.
+    root: string,
+    /// What the new directory starts from; its meaning belongs to the environment
+    /// (a git ref, for a git one). Absent: the environment's default.
+    base: option<string>,
   }
 
   record environment-remove {
     thread: thread-id,
     cwd: string,
+    /// Remove even if work would be lost.
+    force: bool,
+  }
+
+  record environment-query {
+    thread: thread-id,
+    cwd: string,
   }
 
   variant environment-request {
+    /// Make the thread's working directory. Answered with `environment-ready`.
     prepare(environment-prepare),
+    /// Remove what `prepare` made. Refused if work would be lost, unless forced.
     remove(environment-remove),
+    /// What the thread changed. Answered with `environment-changes`.
+    changes(environment-query),
+    /// The same as one patch. Answered with `environment-diff`.
+    diff(environment-query),
   }
 
   record environment-call {
     environment: string,
     request: environment-request,
+  }
+
+  enum change-kind { added, modified, deleted, untracked }
+
+  record changed-file {
+    /// Relative to the root of the environment.
+    path: string,
+    kind: change-kind,
+    /// Line counts; absent for binary files and files not yet tracked.
+    additions: option<u32>,
+    deletions: option<u32>,
+  }
+
+  record environment-changes {
+    /// The branch the directory is on, if it has such a notion.
+    branch: option<string>,
+    /// What the changes are measured against.
+    base: option<string>,
+    files: list<changed-file>,
+  }
+
+  record environment-diff {
+    /// A unified diff of everything the thread changed.
+    diff: string,
+    /// The diff was cut short because it is too large.
+    truncated: bool,
   }
 
   record process-output {
@@ -331,6 +376,11 @@ interface types {
     models(list<model-info>),
     /// The working directory prepared for the thread.
     environment-ready(string),
+    environment-changes(environment-changes),
+    environment-diff(environment-diff),
+    /// The answer is not known yet: it will be given through `completions.complete`
+    /// with this token, which the plugin picks. For work that waits on a process.
+    deferred(u64),
   }
 }
 
@@ -338,6 +388,13 @@ interface types {
 interface log {
   enum level { debug, info, warn, error }
   log: func(level: level, message: string);
+}
+
+/// Always available. Answers a request whose `handle` returned `deferred`.
+interface completions {
+  use types.{outcome};
+  /// `token` is the one returned in `deferred`. The answer itself cannot be `deferred`.
+  complete: func(token: u64, answer: result<outcome, string>) -> result<_, string>;
 }
 
 /// Permission `deltas`. Hand deltas to the core's assembler.
@@ -380,6 +437,7 @@ interface process {
 
 world plugin {
   import log;
+  import completions;
   import deltas;
   import kv;
   import timers;

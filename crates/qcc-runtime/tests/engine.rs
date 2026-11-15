@@ -13,6 +13,7 @@ fn new_thread(id: &str) -> NewThread {
         id: id.into(),
         provider: "echo".into(),
         cwd: "/work".into(),
+        environment: None,
         model: None,
         parent: None,
         permission_mode: None,

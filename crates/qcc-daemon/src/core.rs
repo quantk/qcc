@@ -1,24 +1,27 @@
 //! The core task: the single owner of all daemon state.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    Delta, EventPayload, PermissionMode, ProviderId, ThreadEvent, ThreadId, ThreadStatus,
+    Delta, EnvironmentState, EventPayload, PermissionMode, ProviderId, ThreadEnvironment,
+    ThreadEvent, ThreadId, ThreadStatus,
 };
 use qcc_plugin_host::{
-    Contribution, Outcome, PluginError, PluginHost, PluginRequest, ProviderRequest, SessionStart,
+    Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
+    PluginRequest, ProviderRequest, SessionStart,
 };
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
     DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
-    SendMode, StopMode, THREAD_EVENT, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
-    ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListResult, ThreadResult,
-    ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetMode, ThreadSetModeParams,
-    ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnsubscribe,
-    ThreadUnsubscribeParams,
+    SendMode, StopMode, THREAD_EVENT, ThreadArchive, ThreadArchiveParams, ThreadChanges,
+    ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents,
+    ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
+    ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
+    ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -61,6 +64,36 @@ pub(crate) enum Action {
     Resolve,
     Interrupt,
     Release,
+    /// Release, as the first step of archiving the thread.
+    Archive {
+        force: bool,
+    },
+}
+
+/// A worktree may have dependencies to install before it is ready.
+const PREPARE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const REMOVE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Ask an environment plugin, and stop waiting if it never answers.
+async fn call_environment(
+    plugin: PluginHandle,
+    environment: String,
+    request: EnvironmentRequest,
+    limit: Duration,
+) -> Result<Outcome, PluginError> {
+    let request = PluginRequest::Environment { environment, request };
+    match tokio::time::timeout(limit, plugin.call(request)).await {
+        Ok(result) => result,
+        Err(_) => Err(PluginError::Rejected(format!(
+            "the environment did not answer within {} s",
+            limit.as_secs()
+        ))),
+    }
+}
+
+fn environment_error(message: impl Into<String>) -> RpcError {
+    RpcError::new(codes::ENVIRONMENT_ERROR, message)
 }
 
 pub(crate) enum Command {
@@ -94,6 +127,19 @@ pub(crate) enum Command {
         result: Result<Outcome, PluginError>,
         responder: Option<Responder>,
     },
+    /// The environment plugin answered `prepare`. `prompt` is the message that is
+    /// waiting for the working directory.
+    EnvironmentPrepared {
+        thread: ThreadId,
+        prompt: Option<String>,
+        result: Result<Outcome, PluginError>,
+    },
+    /// The environment plugin answered `remove` for a thread being archived.
+    EnvironmentRemoved {
+        thread: ThreadId,
+        result: Result<Outcome, PluginError>,
+        responder: Responder,
+    },
     Shutdown,
 }
 
@@ -122,6 +168,8 @@ pub(crate) struct Core {
     sessions: HashMap<ThreadId, Session>,
     /// Threads with input waiting for their running turn to end.
     queued: HashSet<ThreadId>,
+    /// Threads on their way to the archive. They take no input meanwhile.
+    archiving: HashSet<ThreadId>,
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
     /// Set when the journal cannot be written. The daemon stops rather than let
     /// memory and disk disagree.
@@ -184,6 +232,7 @@ impl Core {
             host,
             sessions: HashMap::new(),
             queued,
+            archiving: HashSet::new(),
             subscribers: HashMap::new(),
             fatal: None,
         })
@@ -238,6 +287,12 @@ impl Core {
             Command::CallFinished { thread, action, result, responder } => {
                 self.call_finished(thread, action, result, responder);
             }
+            Command::EnvironmentPrepared { thread, prompt, result } => {
+                self.environment_prepared(thread, prompt, result);
+            }
+            Command::EnvironmentRemoved { thread, result, responder } => {
+                self.environment_removed(thread, result, responder);
+            }
             Command::Shutdown => {}
         }
     }
@@ -270,10 +325,31 @@ impl Core {
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadList::NAME => {
-                let mut threads: Vec<_> = self.supervisor.threads().cloned().collect();
-                threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
-                responder.reply(Ok(ThreadListResult { threads }));
+                let result =
+                    params::<ThreadList>(raw).map(|ThreadListParams { include_archived }| {
+                        let mut threads: Vec<_> = self
+                            .supervisor
+                            .threads()
+                            .filter(|thread| include_archived || !thread.archived)
+                            .cloned()
+                            .collect();
+                        threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+                        ThreadListResult { threads }
+                    });
+                responder.reply(result);
             }
+            ThreadArchive::NAME => match params::<ThreadArchive>(raw) {
+                Ok(p) => self.thread_archive(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ThreadChanges::NAME => match params::<ThreadChanges>(raw) {
+                Ok(p) => self.environment_query(&p.thread_id, false, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ThreadDiff::NAME => match params::<ThreadDiff>(raw) {
+                Ok(p) => self.environment_query(&p.thread_id, true, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             ThreadGet::NAME => {
                 let result = params::<ThreadGet>(raw).and_then(|ThreadGetParams { thread_id }| {
                     let thread = self.supervisor.thread(&thread_id).cloned();
@@ -326,6 +402,30 @@ impl Core {
             ));
         }
 
+        let environment = match p.environment {
+            Some(id) => {
+                if self.host.environment(&id).is_none() {
+                    return Err(RpcError::new(
+                        codes::INVALID_PARAMS,
+                        format!("no plugin provides environment {id:?}"),
+                    ));
+                }
+                Some(ThreadEnvironment {
+                    id,
+                    source_dir: p.cwd.clone(),
+                    base: p.base,
+                    state: EnvironmentState::Pending,
+                })
+            }
+            None if p.base.is_some() => {
+                return Err(RpcError::new(
+                    codes::INVALID_PARAMS,
+                    "`base` means something only to an environment",
+                ));
+            }
+            None => None,
+        };
+
         let id = ThreadId(format!("thr_{}", uuid::Uuid::now_v7().simple()));
         let now = now_ms();
         let mut events = self
@@ -335,6 +435,7 @@ impl Core {
                     id: id.clone(),
                     provider: p.provider,
                     cwd: p.cwd,
+                    environment,
                     model: p.model,
                     parent: p.parent,
                     permission_mode: p.permission_mode,
@@ -391,6 +492,7 @@ impl Core {
             .and_then(|provider| self.host.provider(&provider))
             .is_some_and(|(_, info)| info.capabilities.steer);
         let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        self.check_open(&thread_id)?;
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let now = now_ms();
@@ -421,6 +523,18 @@ impl Core {
         self.commit(events);
         self.queued.insert(thread_id);
         Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    /// An archived thread takes no input, and neither does one being archived.
+    fn check_open(&self, id: &ThreadId) -> Result<(), RpcError> {
+        let thread = self.supervisor.thread(id).ok_or_else(|| thread_not_found(id))?;
+        if thread.archived {
+            return Err(RpcError::new(codes::THREAD_ARCHIVED, format!("thread {id} is archived")));
+        }
+        if self.archiving.contains(id) {
+            return Err(RpcError::new(codes::THREAD_BUSY, "the thread is being archived"));
+        }
+        Ok(())
     }
 
     /// Hand a submitted message to the provider, attaching a session first if needed.
@@ -470,6 +584,7 @@ impl Core {
             .map(|thread| thread.provider.clone())
             .ok_or_else(|| thread_not_found(&thread_id))?;
         self.check_mode(&provider, permission_mode)?;
+        self.check_open(&thread_id)?;
         let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
@@ -609,6 +724,14 @@ impl Core {
         let Some(thread) = self.supervisor.thread(id).cloned() else {
             return;
         };
+        // The agent must never run in the source directory of a thread that asked
+        // for a directory of its own.
+        if let Some(environment) = thread.environment.clone()
+            && environment.state != EnvironmentState::Ready
+        {
+            self.prepare_environment(id, environment, prompt);
+            return;
+        }
         let Some((plugin, info)) = self.host.provider(&thread.provider) else {
             let message = format!("no plugin provides {:?}", thread.provider.as_str());
             self.session_failed(id, message);
@@ -670,6 +793,230 @@ impl Core {
                 self.session_failed(&id, error.to_string());
             }
         }
+    }
+
+    // ----- environments ---------------------------------------------------------------
+
+    /// Ask the thread's environment for its working directory. The session starts
+    /// when the answer comes back as [`Command::EnvironmentPrepared`].
+    fn prepare_environment(
+        &mut self,
+        id: &ThreadId,
+        environment: ThreadEnvironment,
+        prompt: Option<String>,
+    ) {
+        if environment.state == EnvironmentState::Removed {
+            self.session_failed(id, "the thread's environment was removed".into());
+            return;
+        }
+        if environment.state == EnvironmentState::Failed
+            && let Ok(engine) = self.supervisor.engine(id)
+        {
+            let events = engine.record(EventPayload::EnvironmentPreparing, now_ms());
+            self.commit(events);
+        }
+        let Some(plugin) = self.host.environment(&environment.id).map(|(plugin, _)| plugin.clone())
+        else {
+            let message = format!("no plugin provides environment {:?}", environment.id);
+            self.environment_failed(id, message);
+            return;
+        };
+        let root = self.config.environment_root(&environment.id);
+        if let Err(error) = std::fs::create_dir_all(&root) {
+            self.environment_failed(id, format!("cannot create {}: {error}", root.display()));
+            return;
+        }
+        let request = EnvironmentRequest::Prepare {
+            thread: id.clone(),
+            source_dir: environment.source_dir,
+            root: root.display().to_string(),
+            base: environment.base,
+        };
+        // Until the directory exists the thread is as busy as one whose provider is
+        // starting: input queues behind it.
+        self.sessions.entry(id.clone()).or_default().starting = true;
+        let (commands, thread) = (self.commands.clone(), id.clone());
+        tokio::spawn(async move {
+            let result = call_environment(plugin, environment.id, request, PREPARE_TIMEOUT).await;
+            let _ = commands.send(Command::EnvironmentPrepared { thread, prompt, result });
+        });
+    }
+
+    fn environment_prepared(
+        &mut self,
+        id: ThreadId,
+        prompt: Option<String>,
+        result: Result<Outcome, PluginError>,
+    ) {
+        match self.sessions.get_mut(&id) {
+            Some(session) if session.starting => session.starting = false,
+            _ => return,
+        }
+        match result {
+            Ok(Outcome::EnvironmentReady { cwd }) => {
+                if let Ok(engine) = self.supervisor.engine(&id) {
+                    let events = engine.record(EventPayload::EnvironmentReady { cwd }, now_ms());
+                    self.commit(events);
+                }
+                self.start_session(&id, prompt);
+            }
+            Ok(other) => {
+                self.environment_failed(
+                    &id,
+                    format!("environment answered prepare with {other:?}"),
+                );
+            }
+            Err(error) => self.environment_failed(&id, error.to_string()),
+        }
+    }
+
+    fn environment_failed(&mut self, id: &ThreadId, message: String) {
+        if let Ok(engine) = self.supervisor.engine(id) {
+            let failed = EventPayload::EnvironmentFailed { message: message.clone() };
+            let events = engine.record(failed, now_ms());
+            self.commit(events);
+        }
+        self.session_failed(id, format!("cannot prepare the working directory: {message}"));
+    }
+
+    /// The environment of a thread that has one ready, and the plugin behind it.
+    fn ready_environment(
+        &self,
+        id: &ThreadId,
+    ) -> Result<Option<(PluginHandle, String, String)>, RpcError> {
+        let thread = self.supervisor.thread(id).ok_or_else(|| thread_not_found(id))?;
+        let Some(environment) =
+            thread.environment.as_ref().filter(|e| e.state == EnvironmentState::Ready)
+        else {
+            return Ok(None);
+        };
+        let (plugin, _) = self.host.environment(&environment.id).ok_or_else(|| {
+            environment_error(format!("no plugin provides environment {:?}", environment.id))
+        })?;
+        Ok(Some((plugin.clone(), environment.id.clone(), thread.cwd.clone())))
+    }
+
+    /// `thread.changes` and `thread.diff`: answered by the environment plugin, off
+    /// the core task.
+    fn environment_query(&mut self, id: &ThreadId, diff: bool, responder: Responder) {
+        let (plugin, environment, cwd) = match self.ready_environment(id) {
+            Ok(Some(found)) => found,
+            Ok(None) => {
+                return responder.reply::<Empty>(Err(environment_error(format!(
+                    "thread {id} has no environment to track its changes; \
+                     start threads with an environment for that"
+                ))));
+            }
+            Err(error) => return responder.reply::<Empty>(Err(error)),
+        };
+        let thread = id.clone();
+        let request = if diff {
+            EnvironmentRequest::Diff { thread, cwd }
+        } else {
+            EnvironmentRequest::Changes { thread, cwd }
+        };
+        tokio::spawn(async move {
+            match call_environment(plugin, environment, request, QUERY_TIMEOUT).await {
+                Ok(Outcome::EnvironmentChanges(changes)) => {
+                    responder.reply(Ok(ThreadChangesResult { changes }));
+                }
+                Ok(Outcome::EnvironmentDiff { diff, truncated }) => {
+                    responder.reply(Ok(ThreadDiffResult { diff, truncated }));
+                }
+                Ok(other) => responder.reply::<Empty>(Err(environment_error(format!(
+                    "environment answered with {other:?}"
+                )))),
+                Err(error) => responder.reply::<Empty>(Err(environment_error(error.to_string()))),
+            }
+        });
+    }
+
+    // ----- archiving ------------------------------------------------------------------
+
+    /// Release the session, then remove the environment, then mark the thread.
+    fn thread_archive(&mut self, p: ThreadArchiveParams, responder: Responder) {
+        let ThreadArchiveParams { thread_id, force } = p;
+        let Some(thread) = self.supervisor.thread(&thread_id).cloned() else {
+            return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
+        };
+        if thread.archived {
+            return responder.reply(Ok(ThreadResult { thread }));
+        }
+        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        let Ok(engine) = self.supervisor.engine(&thread_id) else {
+            return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
+        };
+        if engine.busy() || starting || self.archiving.contains(&thread_id) {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "the thread is working; stop it before archiving it",
+            )));
+        }
+        let dropped = engine.drop_queued(now_ms());
+        let live = engine.session_live();
+        self.commit(dropped);
+        self.queued.remove(&thread_id);
+        self.archiving.insert(thread_id.clone());
+        if live {
+            self.call_provider(&thread_id, Action::Archive { force }, Some(responder), |thread| {
+                ProviderRequest::Stop { thread }
+            });
+        } else {
+            self.remove_environment(thread_id, force, responder);
+        }
+    }
+
+    fn remove_environment(&mut self, id: ThreadId, force: bool, responder: Responder) {
+        let (plugin, environment, cwd) = match self.ready_environment(&id) {
+            Ok(Some(found)) => found,
+            // Nothing was made, so there is nothing to remove.
+            Ok(None) => return self.finish_archive(&id, false, responder),
+            // The plugin that made the directory is gone; forcing leaves it behind.
+            Err(_) if force => return self.finish_archive(&id, false, responder),
+            Err(error) => {
+                self.archiving.remove(&id);
+                return responder.reply::<Empty>(Err(error));
+            }
+        };
+        let request = EnvironmentRequest::Remove { thread: id.clone(), cwd, force };
+        let commands = self.commands.clone();
+        tokio::spawn(async move {
+            let result = call_environment(plugin, environment, request, REMOVE_TIMEOUT).await;
+            let _ = commands.send(Command::EnvironmentRemoved { thread: id, result, responder });
+        });
+    }
+
+    fn environment_removed(
+        &mut self,
+        id: ThreadId,
+        result: Result<Outcome, PluginError>,
+        responder: Responder,
+    ) {
+        match result {
+            Ok(_) => self.finish_archive(&id, true, responder),
+            Err(error) => {
+                // The thread stays as it was, minus its session.
+                self.archiving.remove(&id);
+                responder.reply::<Empty>(Err(environment_error(error.to_string())));
+            }
+        }
+    }
+
+    fn finish_archive(&mut self, id: &ThreadId, removed: bool, responder: Responder) {
+        self.archiving.remove(id);
+        self.sessions.remove(id);
+        let Ok(engine) = self.supervisor.engine(id) else {
+            return responder.reply::<Empty>(Err(thread_not_found(id)));
+        };
+        let now = now_ms();
+        let mut events = Vec::new();
+        if removed {
+            events.extend(engine.record(EventPayload::EnvironmentRemoved, now));
+        }
+        events.extend(engine.record(EventPayload::ThreadArchived, now));
+        let thread = engine.thread().clone();
+        self.commit(events);
+        responder.reply(Ok(ThreadResult { thread }));
     }
 
     /// Run a provider request for a thread off the core task. The answer comes back
@@ -734,13 +1081,19 @@ impl Core {
                     self.commit(events);
                 }
             }
-            Action::Release => {
+            Action::Release | Action::Archive { .. } => {
                 if let Ok(engine) = self.supervisor.engine(&id) {
                     let mut events = engine.force_settle(now);
                     events.extend(engine.session_released(Some("released".into()), now));
                     self.commit(events);
                 }
             }
+        }
+        if let Action::Archive { force } = action {
+            if let Some(responder) = responder {
+                self.remove_environment(id, force, responder);
+            }
+            return;
         }
         if let Some(responder) = responder {
             // Whatever the provider said, the thread is settled now, which is what

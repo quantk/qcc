@@ -2,8 +2,8 @@
 
 use qcc_client::protocol::methods::PluginInfo;
 use qcc_domain::{
-    EventPayload, InteractionRequest, Item, ItemShape, ItemStatus, Thread, ThreadEvent,
-    ThreadStatus, TurnStatus,
+    ChangeKind, EnvironmentChanges, EnvironmentState, EventPayload, InteractionRequest, Item,
+    ItemShape, ItemStatus, Thread, ThreadEvent, ThreadStatus, TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -16,9 +16,9 @@ fn status(status: ThreadStatus) -> &'static str {
 
 pub fn thread_line(thread: &Thread) -> String {
     format!(
-        "{}  {:<6}  {:<12}  {}",
+        "{}  {:<8}  {:<12}  {}",
         thread.id,
-        status(thread.status),
+        if thread.archived { "archived" } else { status(thread.status) },
         thread.provider,
         thread.title.as_deref().unwrap_or("(untitled)")
     )
@@ -32,6 +32,21 @@ pub fn thread_details(thread: &Thread) -> String {
         format!("provider  {}", thread.provider),
         format!("cwd       {}", thread.cwd),
     ];
+    if thread.archived {
+        lines[2] = "status    archived".into();
+    }
+    if let Some(environment) = &thread.environment {
+        let state = match environment.state {
+            EnvironmentState::Pending => "pending",
+            EnvironmentState::Ready => "ready",
+            EnvironmentState::Failed => "failed",
+            EnvironmentState::Removed => "removed",
+        };
+        lines.push(format!(
+            "env       {} ({state}), from {}",
+            environment.id, environment.source_dir
+        ));
+    }
     if let Some(mode) = thread.permission_mode {
         lines.push(format!("mode      {}", mode.as_str()));
     }
@@ -39,6 +54,33 @@ pub fn thread_details(thread: &Thread) -> String {
         lines.push(format!("parent    {parent}"));
     }
     lines.push(String::new());
+    lines.join("\n")
+}
+
+pub fn changes(changes: &EnvironmentChanges) -> String {
+    let mut lines = Vec::new();
+    if let Some(branch) = &changes.branch {
+        lines.push(format!("branch  {branch}"));
+    }
+    if let Some(base) = &changes.base {
+        lines.push(format!("base    {base}"));
+    }
+    if changes.files.is_empty() {
+        lines.push("no changes".into());
+    }
+    for file in &changes.files {
+        let kind = match file.kind {
+            ChangeKind::Added => 'A',
+            ChangeKind::Modified => 'M',
+            ChangeKind::Deleted => 'D',
+            ChangeKind::Untracked => '?',
+        };
+        let stat = match (file.additions, file.deletions) {
+            (Some(additions), Some(deletions)) => format!("  +{additions} -{deletions}"),
+            _ => String::new(),
+        };
+        lines.push(format!("{kind}  {}{stat}", file.path));
+    }
     lines.join("\n")
 }
 
@@ -171,7 +213,13 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::ProviderError { message } => format!("error: {message}"),
         EventPayload::ProviderWarning { message } => format!("warning: {message}"),
         EventPayload::SessionEnded { reason: Some(reason) } => format!("session ended: {reason}"),
-        EventPayload::ThreadCreated { .. }
+        EventPayload::EnvironmentReady { cwd } => format!("working directory: {cwd}"),
+        EventPayload::EnvironmentRemoved => "(the working directory was removed)".to_owned(),
+        EventPayload::ThreadArchived => "(archived)".to_owned(),
+        // The failure follows as a provider error, in full.
+        EventPayload::EnvironmentFailed { .. }
+        | EventPayload::EnvironmentPreparing
+        | EventPayload::ThreadCreated { .. }
         | EventPayload::ThreadStatusChanged { .. }
         | EventPayload::SessionStarted { .. }
         | EventPayload::SessionIdentified { .. }

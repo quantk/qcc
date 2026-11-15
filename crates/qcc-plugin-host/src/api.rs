@@ -2,8 +2,8 @@
 //! crate.
 
 use qcc_domain::{
-    EnvironmentInfo, InteractionResolution, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
-    ThreadId,
+    EnvironmentChanges, EnvironmentInfo, InteractionResolution, ModelInfo, PermissionMode,
+    ProviderId, ProviderInfo, ThreadId,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +54,26 @@ pub enum ProviderRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EnvironmentRequest {
-    Prepare { thread: ThreadId, source_dir: String },
-    Remove { thread: ThreadId, cwd: String },
+    Prepare {
+        thread: ThreadId,
+        source_dir: String,
+        /// A directory set aside for the plugin's environments.
+        root: String,
+        base: Option<String>,
+    },
+    Remove {
+        thread: ThreadId,
+        cwd: String,
+        force: bool,
+    },
+    Changes {
+        thread: ThreadId,
+        cwd: String,
+    },
+    Diff {
+        thread: ThreadId,
+        cwd: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,4 +88,6 @@ pub enum Outcome {
     SessionStarted { provider_session: Option<String> },
     Models(Vec<ModelInfo>),
     EnvironmentReady { cwd: String },
+    EnvironmentChanges(EnvironmentChanges),
+    EnvironmentDiff { diff: String, truncated: bool },
 }

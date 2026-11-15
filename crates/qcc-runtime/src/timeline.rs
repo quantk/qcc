@@ -183,6 +183,11 @@ impl Timeline {
                 Ok(())
             }
             EventPayload::ThreadCreated { .. }
+            | EventPayload::ThreadArchived
+            | EventPayload::EnvironmentPreparing
+            | EventPayload::EnvironmentReady { .. }
+            | EventPayload::EnvironmentFailed { .. }
+            | EventPayload::EnvironmentRemoved
             | EventPayload::PermissionModeChanged { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }

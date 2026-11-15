@@ -1,0 +1,18 @@
+[package]
+name = "env-git-worktree"
+description = "Git worktree environment: a working copy and a branch of its own for every thread"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qcc-plugin-sdk.workspace = true
+serde_json.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

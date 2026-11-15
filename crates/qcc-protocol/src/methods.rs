@@ -1,8 +1,8 @@
 //! Methods and notifications of the daemon API.
 
 use qcc_domain::{
-    EnvironmentInfo, InteractionId, InteractionResolution, PermissionMode, ProviderId,
-    ProviderInfo, Thread, ThreadEvent, ThreadId,
+    EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution, PermissionMode,
+    ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -52,8 +52,15 @@ method!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadSpawnParams {
     pub provider: ProviderId,
-    /// Working directory of the thread.
+    /// Working directory of the thread, or what its environment is made from.
     pub cwd: String,
+    /// Id of a contributed environment that makes the thread a working directory
+    /// of its own from `cwd` (`git-worktree`). Absent: the thread works in `cwd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// What the environment starts from (a git ref). Absent: its default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -156,7 +163,13 @@ pub struct ThreadStopParams {
     pub mode: StopMode,
 }
 
-method!(ThreadList, "thread.list", Empty => ThreadListResult);
+method!(ThreadList, "thread.list", ThreadListParams => ThreadListResult);
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadListParams {
+    #[serde(default)]
+    pub include_archived: bool,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadListResult {
@@ -169,6 +182,43 @@ method!(ThreadGet, "thread.get", ThreadGetParams => ThreadResult);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ThreadGetParams {
     pub thread_id: ThreadId,
+}
+
+method!(
+    /// Put a thread away: release its session, remove its environment and leave it
+    /// out of listings. Its timeline stays readable. Refused while a turn runs, and
+    /// when removing the environment would lose work unless `force` is set.
+    ThreadArchive, "thread.archive", ThreadArchiveParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadArchiveParams {
+    pub thread_id: ThreadId,
+    #[serde(default)]
+    pub force: bool,
+}
+
+method!(
+    /// The files a thread changed in its environment.
+    ThreadChanges, "thread.changes", ThreadGetParams => ThreadChangesResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadChangesResult {
+    pub changes: EnvironmentChanges,
+}
+
+method!(
+    /// Everything a thread changed in its environment, as one unified diff.
+    ThreadDiff, "thread.diff", ThreadGetParams => ThreadDiffResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadDiffResult {
+    pub diff: String,
+    /// The diff was cut short because it is too large.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
 }
 
 method!(

@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use qcc_domain::{
-    EventPayload, PermissionMode, ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus,
+    EventPayload, PermissionMode, ProviderId, Thread, ThreadEnvironment, ThreadEvent, ThreadId,
+    ThreadStatus,
 };
 
 use crate::engine::ThreadEngine;
@@ -19,6 +20,7 @@ pub struct NewThread {
     pub id: ThreadId,
     pub provider: ProviderId,
     pub cwd: String,
+    pub environment: Option<ThreadEnvironment>,
     pub model: Option<String>,
     pub parent: Option<ThreadId>,
     pub permission_mode: Option<PermissionMode>,
@@ -48,6 +50,7 @@ impl Supervisor {
             id: new.id.clone(),
             provider: new.provider,
             cwd: new.cwd,
+            environment: new.environment,
             model: new.model,
             parent: new.parent,
             permission_mode: new.permission_mode,
@@ -58,6 +61,7 @@ impl Supervisor {
             updated_at: now,
             last_seq: 0,
             queued_inputs: 0,
+            archived: false,
         };
         let (engine, events) = ThreadEngine::create(thread, (self.mint)(), now);
         self.engines.insert(new.id, engine);

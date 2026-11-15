@@ -73,3 +73,37 @@ pub struct ModelInfo {
     pub id: String,
     pub name: String,
 }
+
+/// How a file differs from what an environment started from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    /// New and not yet known to version control.
+    Untracked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChangedFile {
+    /// Relative to the root of the environment.
+    pub path: String,
+    pub kind: ChangeKind,
+    /// Line counts; absent for binary files and untracked ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additions: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletions: Option<u32>,
+}
+
+/// What a thread changed in its environment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EnvironmentChanges {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// What the changes are measured against.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    pub files: Vec<ChangedFile>,
+}

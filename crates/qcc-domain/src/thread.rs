@@ -23,6 +23,34 @@ pub enum ThreadStatus {
     Failed,
 }
 
+/// Where a thread's environment is in its life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EnvironmentState {
+    /// Not prepared yet, or being prepared.
+    Pending,
+    /// The thread works in the directory the environment made.
+    Ready,
+    /// Preparation failed; the next message tries again.
+    Failed,
+    /// The directory was removed. The thread cannot run any more.
+    Removed,
+}
+
+/// The working directory a thread asked an environment plugin to make for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThreadEnvironment {
+    /// Id of the contributed environment.
+    pub id: String,
+    /// The directory the thread was asked to work on. Its own `cwd` points into
+    /// the environment once that is ready.
+    pub source_dir: String,
+    /// What the environment starts from; its meaning belongs to the environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<String>,
+    pub state: EnvironmentState,
+}
+
 /// The unit of work: one conversation with one provider in one working directory.
 ///
 /// This is a projection: every field after creation changes only through
@@ -31,7 +59,12 @@ pub enum ThreadStatus {
 pub struct Thread {
     pub id: ThreadId,
     pub provider: ProviderId,
+    /// Where the agent works. For a thread with an environment this is the source
+    /// directory until the environment is ready.
     pub cwd: String,
+    /// Absent: the thread works directly in `cwd`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<ThreadEnvironment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,6 +86,9 @@ pub struct Thread {
     /// Messages waiting for the running turn to end.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub queued_inputs: u32,
+    /// Put away: it takes no more input and is left out of listings.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub archived: bool,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -94,7 +130,23 @@ impl Thread {
             EventPayload::PermissionModeChanged { permission_mode } => {
                 self.permission_mode = *permission_mode;
             }
+            EventPayload::EnvironmentPreparing => self.set_environment(EnvironmentState::Pending),
+            EventPayload::EnvironmentReady { cwd } => {
+                self.cwd.clone_from(cwd);
+                self.set_environment(EnvironmentState::Ready);
+            }
+            EventPayload::EnvironmentFailed { .. } => {
+                self.set_environment(EnvironmentState::Failed);
+            }
+            EventPayload::EnvironmentRemoved => self.set_environment(EnvironmentState::Removed),
+            EventPayload::ThreadArchived => self.archived = true,
             _ => {}
+        }
+    }
+
+    fn set_environment(&mut self, state: EnvironmentState) {
+        if let Some(environment) = &mut self.environment {
+            environment.state = state;
         }
     }
 }

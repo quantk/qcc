@@ -1,0 +1,12 @@
+id = "env-git-worktree"
+name = "Git worktree"
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+kv = true
+timers = true
+# git does the work; bash runs the repository's own setup and teardown scripts and
+# copies the files `.worktreeinclude` names; rmdir removes the emptied directory.
+process = ["git", "bash", "rmdir"]

@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -134,6 +135,8 @@ pub(crate) fn spawn(
         next_timer: 0,
         processes: HashMap::new(),
         next_process: 0,
+        deferred: HashMap::new(),
+        early: HashMap::new(),
     };
     let thread = std::thread::Builder::new()
         .name(format!("plugin-{}", manifest.id))
@@ -177,7 +180,14 @@ struct State {
     next_timer: u64,
     processes: HashMap<u64, Box<dyn ProcessHandle>>,
     next_process: u64,
+    /// Callers waiting for an answer the plugin deferred, by the plugin's token.
+    deferred: HashMap<u64, Reply>,
+    /// Answers given during the very `handle` call that defers them: the token is
+    /// not registered until that call returns. Emptied after every call.
+    early: HashMap<u64, Result<wit::Outcome, PluginError>>,
 }
+
+type Reply = oneshot::Sender<Result<wit::Outcome, PluginError>>;
 
 impl State {
     fn denied(&self, permission: &str) -> String {
@@ -238,12 +248,29 @@ impl Actor {
                 },
             };
             match message {
-                Message::Call { event, reply } => {
-                    let _ = reply.send(self.handle(&event));
-                }
+                Message::Call { event, reply } => match self.handle(&event) {
+                    Ok(wit::Outcome::Deferred(token)) => self.defer(token, reply),
+                    answer => {
+                        let _ = reply.send(answer);
+                    }
+                },
                 Message::Internal(event) => self.handle_internal(&event),
                 Message::Shutdown => break,
             }
+        }
+    }
+
+    /// The plugin will answer later. Park the caller until it does.
+    fn defer(&mut self, token: u64, reply: Reply) {
+        let state = self.store.data_mut();
+        if let Some(answer) = state.early.remove(&token) {
+            let _ = reply.send(answer);
+        } else if let Entry::Vacant(slot) = state.deferred.entry(token) {
+            slot.insert(reply);
+        } else {
+            let _ = reply.send(Err(PluginError::Rejected(format!(
+                "plugin deferred two requests with the same token {token}"
+            ))));
         }
     }
 
@@ -265,8 +292,14 @@ impl Actor {
         if let wit::Event::ProcessExit(exit) = event {
             self.store.data_mut().processes.remove(&exit.process);
         }
-        if let Err(PluginError::Rejected(error)) = self.handle(event) {
-            tracing::warn!(plugin = %self.store.data().plugin_id, %error, "plugin rejected an event");
+        match self.handle(event) {
+            Err(PluginError::Rejected(error)) => {
+                tracing::warn!(plugin = %self.store.data().plugin_id, %error, "plugin rejected an event");
+            }
+            Ok(wit::Outcome::Deferred(_)) => {
+                tracing::warn!(plugin = %self.store.data().plugin_id, "plugin deferred an event nobody waits on");
+            }
+            _ => {}
         }
     }
 
@@ -275,7 +308,11 @@ impl Actor {
             return Err(PluginError::Crashed(reason.clone()));
         }
         self.store.set_epoch_deadline(budget_ticks());
-        match self.plugin.call_handle(&mut self.store, event) {
+        let result = self.plugin.call_handle(&mut self.store, event);
+        if !matches!(result, Ok(Ok(wit::Outcome::Deferred(_)))) {
+            self.store.data_mut().early.clear();
+        }
+        match result {
             Ok(Ok(outcome)) => Ok(outcome),
             Ok(Err(message)) => Err(PluginError::Rejected(message)),
             Err(trap) => {
@@ -285,6 +322,10 @@ impl Actor {
                 let state = self.store.data_mut();
                 state.processes.clear();
                 state.timers.clear();
+                state.early.clear();
+                for (_, reply) in state.deferred.drain() {
+                    let _ = reply.send(Err(PluginError::Crashed(reason.clone())));
+                }
                 tracing::error!(plugin = %state.plugin_id, error = %format!("{trap:#}"), "plugin crashed");
                 (state.services.on_crash)(&state.plugin_id, &reason);
                 self.crashed = Some(reason.clone());
@@ -312,6 +353,25 @@ impl imports::log::Host for State {
             Level::Warn => tracing::warn!(plugin, "{message}"),
             Level::Error => tracing::error!(plugin, "{message}"),
         }
+    }
+}
+
+impl imports::completions::Host for State {
+    fn complete(&mut self, token: u64, answer: Result<wit::Outcome, String>) -> Result<(), String> {
+        if matches!(answer, Ok(wit::Outcome::Deferred(_))) {
+            return Err("a deferred request cannot be answered with `deferred`".into());
+        }
+        let answer = answer.map_err(PluginError::Rejected);
+        match self.deferred.remove(&token) {
+            Some(reply) => {
+                // The caller may have stopped waiting; that is its business.
+                let _ = reply.send(answer);
+            }
+            None => {
+                self.early.insert(token, answer);
+            }
+        }
+        Ok(())
     }
 }
 

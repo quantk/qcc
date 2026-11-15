@@ -84,6 +84,10 @@ pub mod codes {
     pub const PROVIDER_ERROR: i32 = -32004;
     /// The thread is in the middle of a turn or of starting its session.
     pub const THREAD_BUSY: i32 = -32005;
+    /// The thread's environment could not do what was asked, or the thread has none.
+    pub const ENVIRONMENT_ERROR: i32 = -32006;
+    /// The thread is archived.
+    pub const THREAD_ARCHIVED: i32 = -32007;
 }
 
 /// Either kind of message a peer can receive.

@@ -24,7 +24,8 @@ pub use ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
 pub use provider::{
-    EnvironmentInfo, ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo,
+    ChangeKind, ChangedFile, EnvironmentChanges, EnvironmentInfo, ModelInfo, PermissionMode,
+    ProviderCapabilities, ProviderInfo,
 };
-pub use thread::{Thread, ThreadStatus, TurnStatus};
+pub use thread::{EnvironmentState, Thread, ThreadEnvironment, ThreadStatus, TurnStatus};
 pub use usage::{TokenUsage, UsageSnapshot};

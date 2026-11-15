@@ -65,19 +65,20 @@ pub mod lines;
 
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
-pub use bindings::qcc::plugin::{deltas, kv, process, timers};
+pub use bindings::qcc::plugin::{completions, deltas, kv, process, timers};
 
 use types::{
-    Contribution, EnvironmentInfo, EnvironmentPrepare, EnvironmentRemove, EnvironmentRequest,
-    Event, InteractionAnswer, ModelInfo, Outcome, ProviderInfo, ProviderRequest, SessionStart,
-    SessionStarted, ThreadInput,
+    Contribution, EnvironmentChanges, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
+    EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, ModelInfo,
+    Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted, ThreadInput,
 };
 
 /// Everything a plugin usually needs.
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Environment, Plugin, ProcessEvent, Provider, deltas, kv, log, process, timers,
+        Environment, Plugin, ProcessEvent, Provider, Reply, completions, deltas, kv, log, process,
+        timers,
     };
 }
 
@@ -144,16 +145,44 @@ pub trait Provider {
     }
 }
 
-/// Prepares and removes the working directory of a thread.
+/// When a request is answered.
+///
+/// No host import blocks, so work that waits on a process cannot finish inside the
+/// call that asked for it. Such a request returns [`Reply::Later`] with a token of the
+/// plugin's choosing and is answered by [`completions::complete`] once the result is
+/// known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reply<T> {
+    Now(T),
+    Later(u64),
+}
+
+/// Makes and removes the working directory of a thread, and reports what the thread
+/// changed in it.
 pub trait Environment {
     fn info(&self) -> EnvironmentInfo;
 
-    /// Returns the directory the thread works in.
-    fn prepare(&mut self, request: EnvironmentPrepare) -> Result<String, String>;
+    /// Make the directory the thread works in and return its path. Answer a
+    /// deferred call with [`Outcome::EnvironmentReady`].
+    fn prepare(&mut self, request: EnvironmentPrepare) -> Result<Reply<String>, String>;
 
-    fn remove(&mut self, request: EnvironmentRemove) -> Result<(), String> {
+    /// Remove what `prepare` made. Refuse when work would be lost and
+    /// `request.force` is not set. Answer a deferred call with [`Outcome::Done`].
+    fn remove(&mut self, request: EnvironmentRemove) -> Result<Reply<()>, String> {
         let _ = request;
-        Ok(())
+        Ok(Reply::Now(()))
+    }
+
+    /// Answer a deferred call with [`Outcome::EnvironmentChanges`].
+    fn changes(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentChanges>, String> {
+        let _ = query;
+        Err("this environment does not track changes".into())
+    }
+
+    /// Answer a deferred call with [`Outcome::EnvironmentDiff`].
+    fn diff(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentDiff>, String> {
+        let _ = query;
+        Err("this environment does not track changes".into())
     }
 }
 
@@ -282,9 +311,17 @@ pub mod __private {
                     .ok_or_else(|| format!("unknown environment {:?}", call.environment))?;
                 match call.request {
                     EnvironmentRequest::Prepare(request) => {
-                        environment.prepare(request).map(Outcome::EnvironmentReady)
+                        environment.prepare(request).map(|r| reply(r, Outcome::EnvironmentReady))
                     }
-                    EnvironmentRequest::Remove(request) => environment.remove(request).map(done),
+                    EnvironmentRequest::Remove(request) => {
+                        environment.remove(request).map(|r| reply(r, done))
+                    }
+                    EnvironmentRequest::Changes(query) => {
+                        environment.changes(query).map(|r| reply(r, Outcome::EnvironmentChanges))
+                    }
+                    EnvironmentRequest::Diff(query) => {
+                        environment.diff(query).map(|r| reply(r, Outcome::EnvironmentDiff))
+                    }
                 }
             }
             Event::ProcessStdout(output) => {
@@ -314,5 +351,12 @@ pub mod __private {
 
     fn done(_: ()) -> Outcome {
         Outcome::Done
+    }
+
+    fn reply<T>(reply: Reply<T>, now: impl FnOnce(T) -> Outcome) -> Outcome {
+        match reply {
+            Reply::Now(value) => now(value),
+            Reply::Later(token) => Outcome::Deferred(token),
+        }
     }
 }

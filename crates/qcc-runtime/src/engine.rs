@@ -170,6 +170,12 @@ impl ThreadEngine {
         self.emit(vec![EventPayload::PermissionModeChanged { permission_mode }], now)
     }
 
+    /// Record a step in the life of the thread's environment or of the thread
+    /// itself (`environment/*`, `thread/archived`). These carry no timeline grammar.
+    pub fn record(&mut self, payload: EventPayload, now: u64) -> Vec<ThreadEvent> {
+        self.emit(vec![payload], now)
+    }
+
     pub fn session_started(
         &mut self,
         provider_session: Option<String>,

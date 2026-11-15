@@ -39,6 +39,11 @@ impl Config {
         self.data_dir.join("plugin-data").join(plugin)
     }
 
+    /// Where an environment plugin makes the working directories of its threads.
+    pub fn environment_root(&self, environment: &str) -> PathBuf {
+        self.data_dir.join("environments").join(environment)
+    }
+
     pub fn database(&self) -> PathBuf {
         self.data_dir.join("qcc.db")
     }

@@ -54,6 +54,24 @@ pub enum EventPayload {
         permission_mode: Option<PermissionMode>,
     },
 
+    /// The thread was put away. Always its last state change.
+    #[serde(rename = "thread/archived")]
+    ThreadArchived,
+
+    /// The environment plugin was asked (again) to make the working directory.
+    #[serde(rename = "environment/preparing")]
+    EnvironmentPreparing,
+
+    /// The working directory exists; the thread works in `cwd` from now on.
+    #[serde(rename = "environment/ready")]
+    EnvironmentReady { cwd: String },
+
+    #[serde(rename = "environment/failed")]
+    EnvironmentFailed { message: String },
+
+    #[serde(rename = "environment/removed")]
+    EnvironmentRemoved,
+
     /// A user message was handed to the provider.
     #[serde(rename = "input/submitted")]
     InputSubmitted {

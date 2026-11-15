@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use qcc_domain::{ProviderId, ProviderInfo};
+use qcc_domain::{EnvironmentInfo, ProviderId, ProviderInfo};
 use wasmtime::component::Component;
 use wasmtime::{Cache, CacheConfig, Config, Engine};
 
@@ -147,6 +147,17 @@ impl PluginHost {
         self.plugins.iter().find_map(|plugin| {
             plugin.contributions().iter().find_map(|contribution| match contribution {
                 Contribution::Provider(info) if &info.id == id => Some((plugin, info)),
+                _ => None,
+            })
+        })
+    }
+
+    /// The plugin that contributes an environment. With two of the same id the one
+    /// loaded first wins.
+    pub fn environment(&self, id: &str) -> Option<(&PluginHandle, &EnvironmentInfo)> {
+        self.plugins.iter().find_map(|plugin| {
+            plugin.contributions().iter().find_map(|contribution| match contribution {
+                Contribution::Environment(info) if info.id == id => Some((plugin, info)),
                 _ => None,
             })
         })

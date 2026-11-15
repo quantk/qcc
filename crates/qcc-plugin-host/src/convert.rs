@@ -1,9 +1,10 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
 use qcc_domain::{
-    Delta, EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
-    ItemShape, ItemStatus, ModelInfo, OptionKind, PermissionMode, ProviderCapabilities,
-    ProviderInfo, TextChannel, TokenUsage, TurnStatus, UsageSnapshot,
+    ChangeKind, ChangedFile, Delta, EnvironmentChanges, EnvironmentInfo, InteractionOption,
+    InteractionRequest, InteractionResolution, ItemKey, ItemShape, ItemStatus, ModelInfo,
+    OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, TextChannel, TokenUsage,
+    TurnStatus, UsageSnapshot,
 };
 
 use crate::api::{
@@ -192,6 +193,32 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
             models.into_iter().map(|m| ModelInfo { id: m.id, name: m.name }).collect(),
         ),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
+        wit::Outcome::EnvironmentChanges(changes) => {
+            Outcome::EnvironmentChanges(EnvironmentChanges {
+                branch: changes.branch,
+                base: changes.base,
+                files: changes
+                    .files
+                    .into_iter()
+                    .map(|file| ChangedFile {
+                        path: file.path,
+                        kind: match file.kind {
+                            wit::ChangeKind::Added => ChangeKind::Added,
+                            wit::ChangeKind::Modified => ChangeKind::Modified,
+                            wit::ChangeKind::Deleted => ChangeKind::Deleted,
+                            wit::ChangeKind::Untracked => ChangeKind::Untracked,
+                        },
+                        additions: file.additions,
+                        deletions: file.deletions,
+                    })
+                    .collect(),
+            })
+        }
+        wit::Outcome::EnvironmentDiff(diff) => {
+            Outcome::EnvironmentDiff { diff: diff.diff, truncated: diff.truncated }
+        }
+        // The actor resolves deferred answers; one never leaves it.
+        wit::Outcome::Deferred(_) => Outcome::Done,
     }
 }
 
@@ -250,14 +277,29 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
             wit::Event::Environment(wit::EnvironmentCall {
                 environment,
                 request: match request {
-                    EnvironmentRequest::Prepare { thread, source_dir } => {
+                    EnvironmentRequest::Prepare { thread, source_dir, root, base } => {
                         wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
                             thread: thread.0,
                             source_dir,
+                            root,
+                            base,
                         })
                     }
-                    EnvironmentRequest::Remove { thread, cwd } => {
+                    EnvironmentRequest::Remove { thread, cwd, force } => {
                         wit::EnvironmentRequest::Remove(wit::EnvironmentRemove {
+                            thread: thread.0,
+                            cwd,
+                            force,
+                        })
+                    }
+                    EnvironmentRequest::Changes { thread, cwd } => {
+                        wit::EnvironmentRequest::Changes(wit::EnvironmentQuery {
+                            thread: thread.0,
+                            cwd,
+                        })
+                    }
+                    EnvironmentRequest::Diff { thread, cwd } => {
+                        wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
                         })

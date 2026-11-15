@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use qcc_domain::{
     EventPayload, InteractionId, InteractionResolution, Item, ItemId, ItemStatus, TurnId,
-    TurnStatus,
+    TurnStatus, UserInput,
 };
 
 /// A canonical timeline that breaks its own grammar.
@@ -48,8 +48,8 @@ pub struct Timeline {
     next_item_ordinal: u64,
     pending_interactions: Vec<InteractionId>,
     seen_turns: HashSet<TurnId>,
-    /// Inputs waiting for the running turn to end: `(queue id, text)`, oldest first.
-    queued: Vec<(String, String)>,
+    /// Inputs waiting for the running turn to end: `(queue id, input)`, oldest first.
+    queued: Vec<(String, UserInput)>,
 }
 
 impl Timeline {
@@ -65,8 +65,8 @@ impl Timeline {
         &self.pending_interactions
     }
 
-    /// Inputs waiting for delivery: `(queue id, text)`, oldest first.
-    pub fn queued_inputs(&self) -> &[(String, String)] {
+    /// Inputs waiting for delivery: `(queue id, input)`, oldest first.
+    pub fn queued_inputs(&self) -> &[(String, UserInput)] {
         &self.queued
     }
 
@@ -169,8 +169,9 @@ impl Timeline {
                 }
                 Ok(())
             }
-            EventPayload::InputQueued { queue_id, text } => {
-                self.queued.push((queue_id.clone(), text.clone()));
+            EventPayload::InputQueued { queue_id, text, notes } => {
+                let input = UserInput { text: text.clone(), notes: notes.clone() };
+                self.queued.push((queue_id.clone(), input));
                 Ok(())
             }
             EventPayload::InputSubmitted { queue_id: Some(queue_id), .. }

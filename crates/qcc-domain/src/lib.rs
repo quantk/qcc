@@ -20,7 +20,7 @@ pub mod thread;
 pub mod usage;
 
 pub use delta::{Delta, ItemKey, TextChannel};
-pub use event::{EventPayload, ThreadEvent};
+pub use event::{EventPayload, ThreadEvent, UserInput};
 pub use ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};

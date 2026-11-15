@@ -137,12 +137,14 @@ export type EventPayload =
 { type: "environment/ready"; cwd: string } | { type: "environment/failed"; message: string } | { type: "environment/removed" } | 
 /**  A user message was handed to the provider. */
 { type: "input/submitted"; text: string; 
+/**  What qcc told the agent along with the message (see [`UserInput::notes`]). */
+notes?: string[]; 
 /**  Fed into the running turn instead of starting one. */
 steered?: boolean; 
 /**  The queued input this delivery takes off the queue. */
 queue_id?: string | null } | 
 /**  A user message arrived while a turn was running and waits for it to end. */
-{ type: "input/queued"; queue_id: string; text: string } | 
+{ type: "input/queued"; queue_id: string; text: string; notes?: string[] } | 
 /**
  *  A queued message was discarded before delivery: the thread was stopped, or the
  *  user took the message back.
@@ -232,6 +234,11 @@ export type McpTransport =
 { type: "stdio"; command: string; args?: string[]; env?: { [key in string]: string } } | 
 /**  A server the agent reaches over streamable HTTP. */
 { type: "http"; url: string; headers?: { [key in string]: string } };
+
+/**  Something a user's message is about, which the agent is told along with it. */
+export type MessageContext = 
+/**  The user is looking at this thread. */
+{ type: "thread"; thread_id: ThreadId };
 
 export type ModelInfo = {
 	/**  What the agent is started with. */
@@ -658,6 +665,11 @@ export type ThreadSendParams = {
 	thread_id: ThreadId,
 	text: string,
 	delivery?: SendMode,
+	/**
+	 *  What the message is about. qcc tells the agent in a short note along with
+	 *  it; the note is kept in the timeline with the message.
+	 */
+	context?: MessageContext[],
 };
 
 export type ThreadSendResult = {

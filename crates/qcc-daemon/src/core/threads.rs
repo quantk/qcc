@@ -2,16 +2,17 @@
 
 use qcc_domain::{
     EnvironmentState, EventPayload, PermissionMode, ProviderId, Thread, ThreadEnvironment,
-    ThreadEvent, ThreadId,
+    ThreadEvent, ThreadId, ThreadState, UserInput,
 };
 use qcc_plugin_host::{EnvironmentRequest, Outcome, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
-    Delivery, Empty, InteractionResolveParams, SendMode, StopMode, ThreadDeliverParams,
-    ThreadDeliverResult, ThreadEventsParams, ThreadEventsResult, ThreadIsolateParams,
-    ThreadRenameParams, ThreadResult, ThreadSendParams, ThreadSendResult, ThreadSetAgentParams,
-    ThreadSetMcpParams, ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams,
-    ThreadSpawnParams, ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
+    Delivery, Empty, InteractionResolveParams, MessageContext, SendMode, StopMode,
+    ThreadDeliverParams, ThreadDeliverResult, ThreadEventsParams, ThreadEventsResult,
+    ThreadIsolateParams, ThreadRenameParams, ThreadResult, ThreadSendParams, ThreadSendResult,
+    ThreadSetAgentParams, ThreadSetMcpParams, ThreadSetModeParams, ThreadSetParentParams,
+    ThreadSetProjectParams, ThreadSpawnParams, ThreadStopParams, ThreadUnqueueParams,
+    ThreadUnqueueResult,
 };
 use qcc_runtime::NewThread;
 
@@ -150,13 +151,14 @@ impl Core {
                 now,
             )
             .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
-        if let Some(prompt) = &p.prompt
+        let prompt = p.prompt.map(UserInput::from);
+        if let Some(prompt) = &prompt
             && let Ok(engine) = self.supervisor.engine(&id)
         {
             events.extend(engine.submit_input(prompt.clone(), now));
         }
         self.commit(events);
-        self.start_session(&id, p.prompt);
+        self.start_session(&id, prompt);
 
         let thread = self.supervisor.thread(&id).cloned().ok_or_else(|| thread_not_found(&id))?;
         Ok(ThreadResult { thread })
@@ -230,7 +232,9 @@ impl Core {
         &mut self,
         p: ThreadSendParams,
     ) -> Result<ThreadSendResult, RpcError> {
-        let ThreadSendParams { thread_id, text, delivery } = p;
+        let ThreadSendParams { thread_id, text, delivery, context } = p;
+        let notes = context.iter().map(|context| self.context_note(context)).collect();
+        let input = UserInput { text, notes };
         let provider = self.supervisor.thread(&thread_id).map(|thread| thread.provider.clone());
         let can_steer = provider
             .and_then(|provider| self.host.provider(&provider))
@@ -243,9 +247,13 @@ impl Core {
 
         // Nothing in the way: the message starts a turn. Queued messages go first.
         if !engine.busy() && !held && !engine.has_queued_input() {
-            let events = engine.submit_input(text.clone(), now);
+            let input = self.with_pending_notes(&thread_id, input);
+            let Ok(engine) = self.supervisor.engine(&thread_id) else {
+                return Err(thread_not_found(&thread_id));
+            };
+            let events = engine.submit_input(input.clone(), now);
             self.commit(events);
-            self.deliver(&thread_id, text);
+            self.deliver(&thread_id, input);
             return Ok(ThreadSendResult { delivery: Delivery::Started, queue_id: None });
         }
 
@@ -255,16 +263,20 @@ impl Core {
             && engine.turn_open()
             && engine.session_live()
         {
-            let events = engine.steer_input(text.clone(), now);
+            let input = self.with_pending_notes(&thread_id, input);
+            let Ok(engine) = self.supervisor.engine(&thread_id) else {
+                return Err(thread_not_found(&thread_id));
+            };
+            let events = engine.steer_input(input.clone(), now);
             self.commit(events);
             self.call_provider(&thread_id, Action::Steer, None, |thread| ProviderRequest::Steer {
                 thread,
-                text,
+                input,
             });
             return Ok(ThreadSendResult { delivery: Delivery::Steered, queue_id: None });
         }
 
-        let events = engine.queue_input(text, now);
+        let events = engine.queue_input(input, now);
         let queue_id = events.iter().find_map(|event| match &event.payload {
             EventPayload::InputQueued { queue_id, .. } => Some(queue_id.clone()),
             _ => None,
@@ -456,15 +468,59 @@ impl Core {
     }
 
     /// Hand a submitted message to the provider, attaching a session first if needed.
-    fn deliver(&mut self, id: &ThreadId, text: String) {
+    fn deliver(&mut self, id: &ThreadId, input: UserInput) {
         let live = self.supervisor.engine(id).is_ok_and(|engine| engine.session_live());
         if live {
             self.call_provider(id, Action::Input, None, |thread| ProviderRequest::Input {
                 thread,
-                text,
+                input,
             });
         } else {
-            self.start_session(id, Some(text));
+            self.start_session(id, Some(input));
+        }
+    }
+
+    /// What qcc has to tell the thread's agent with its next message, taken off the
+    /// list. Nothing when no session is attached: the next one is told at its start.
+    fn take_notes(&mut self, id: &ThreadId) -> Vec<String> {
+        let live = self.supervisor.engine(id).is_ok_and(|engine| engine.session_live());
+        let Some(session) = self.sessions.get_mut(id) else { return Vec::new() };
+        let notes = std::mem::take(&mut session.notes);
+        if live { notes } else { Vec::new() }
+    }
+
+    fn with_pending_notes(&mut self, id: &ThreadId, mut input: UserInput) -> UserInput {
+        input.notes.extend(self.take_notes(id));
+        input
+    }
+
+    /// Something to tell the thread's agent with its next message.
+    pub(super) fn add_note(&mut self, id: &ThreadId, note: String) {
+        self.sessions.entry(id.clone()).or_default().notes.push(note);
+    }
+
+    /// The note a message's context becomes: a line the agent can act on.
+    fn context_note(&mut self, context: &MessageContext) -> String {
+        match context {
+            MessageContext::Thread { thread_id } => {
+                let Some(summary) = self.summary(thread_id) else {
+                    return format!("The user is looking at qcc thread {thread_id}.");
+                };
+                let thread = summary.thread;
+                let state = match Some(summary.state) {
+                    Some(ThreadState::Working) => "working",
+                    Some(ThreadState::Waiting) => "waiting for the user",
+                    Some(ThreadState::Failed) => "failed",
+                    Some(ThreadState::Archived) => "archived",
+                    Some(ThreadState::Idle) | None => "idle",
+                };
+                let title = thread.title.as_deref().unwrap_or("untitled");
+                format!(
+                    "The user is looking at qcc thread {thread_id} ({title:?}, run by {}, {state}). \
+                     `qcc thread show {thread_id}` reads it.",
+                    thread.provider
+                )
+            }
         }
     }
 
@@ -510,13 +566,26 @@ impl Core {
                 self.queued.remove(&id);
                 continue;
             };
-            let delivery = engine.deliver_queued(now);
+            if engine.busy() {
+                continue;
+            }
+            let notes = self.take_notes(&id);
+            let Ok(engine) = self.supervisor.engine(&id) else { continue };
+            let delivery = engine.deliver_queued(&notes, now);
             if !engine.has_queued_input() {
                 self.queued.remove(&id);
             }
-            if let Some((text, events)) = delivery {
-                self.commit(events);
-                self.deliver(&id, text);
+            match delivery {
+                Some((input, events)) => {
+                    self.commit(events);
+                    self.deliver(&id, input);
+                }
+                // Not delivered after all: keep what was to go with it.
+                None => {
+                    for note in notes {
+                        self.add_note(&id, note);
+                    }
+                }
             }
         }
     }

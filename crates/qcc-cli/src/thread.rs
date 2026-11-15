@@ -7,12 +7,12 @@ use std::sync::Arc;
 use anyhow::bail;
 use clap::Subcommand;
 use qcc_client::protocol::methods::{
-    Delivery, Empty, SendMode, SettingsGet, StopMode, ThreadArchive, ThreadArchiveParams,
-    ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams,
-    ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename,
-    ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
-    ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams, ThreadSetParent,
-    ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
+    Delivery, Empty, MessageContext, SendMode, SettingsGet, StopMode, ThreadArchive,
+    ThreadArchiveParams, ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet,
+    ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
+    ThreadRename, ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
+    ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams,
+    ThreadSetParent, ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
     ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
     ThreadWait, ThreadWaitParams,
 };
@@ -78,6 +78,9 @@ pub(crate) enum ThreadCommand {
         /// anyway if the provider cannot steer.
         #[arg(long)]
         steer: bool,
+        /// Tell the agent the message is about this thread. Repeatable.
+        #[arg(long = "about", value_name = "THREAD")]
+        about: Vec<String>,
         /// Stream the thread's events until the turn that takes this message settles.
         #[arg(long)]
         follow: bool,
@@ -272,7 +275,7 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Send { thread, text, steer, follow } => {
+        ThreadCommand::Send { thread, text, steer, about, follow } => {
             let thread_id = ThreadId::new(thread);
             // Read the cursor first so the stream starts at this message.
             let cursor = client
@@ -286,6 +289,10 @@ pub(crate) async fn run(
                     thread_id: thread_id.clone(),
                     text,
                     delivery,
+                    context: about
+                        .into_iter()
+                        .map(|thread| MessageContext::Thread { thread_id: ThreadId::new(thread) })
+                        .collect(),
                 })
                 .await?;
             if !json {

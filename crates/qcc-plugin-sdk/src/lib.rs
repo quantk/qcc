@@ -86,6 +86,7 @@ pub mod prelude {
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas,
         extra_dirs_prompt, kv, log, process, session_context, skills_prompt, threads, timers,
+        with_notes,
     };
 }
 
@@ -282,6 +283,25 @@ pub fn skills_prompt(skills: &[SkillRef]) -> Option<String> {
         text.push_str(&format!("\n- {}: {} (file: {})", skill.name, skill.description, skill.path));
     }
     Some(text)
+}
+
+/// A user message with what qcc tells the agent along with it (`thread-input.notes`)
+/// put in front, marked as qcc's so the agent does not take it for the user's words.
+/// The text alone when there are no notes. For bridges whose agent has no other
+/// place for such facts.
+pub fn with_notes(notes: &[String], text: &str) -> String {
+    if notes.is_empty() {
+        return text.to_owned();
+    }
+    let mut message = String::from(
+        "<qcc-notes>\nqcc, which runs this session, adds (the user did not write this):\n",
+    );
+    for note in notes {
+        message.push_str(&format!("- {note}\n"));
+    }
+    message.push_str("</qcc-notes>\n\n");
+    message.push_str(text);
+    message
 }
 
 /// The paragraph that tells an agent about the other folders of its project, or

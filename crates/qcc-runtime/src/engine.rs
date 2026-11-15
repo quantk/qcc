@@ -1,6 +1,6 @@
 use qcc_domain::{
     Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, ProjectId,
-    ProviderId, Thread, ThreadEvent, ThreadStatus, TurnStatus,
+    ProviderId, Thread, ThreadEvent, ThreadStatus, TurnStatus, UserInput,
 };
 
 use crate::assembler::{DeltaAssembler, GrammarViolation};
@@ -106,41 +106,52 @@ impl ThreadEngine {
     }
 
     /// A user message that starts a turn. The caller delivers it to the provider.
-    pub fn submit_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
+    pub fn submit_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
         self.assembler.note_input();
         self.awaiting_turn = !self.turn_open();
-        let submitted = EventPayload::InputSubmitted { text, steered: false, queue_id: None };
+        let UserInput { text, notes } = input;
+        let submitted =
+            EventPayload::InputSubmitted { text, notes, steered: false, queue_id: None };
         self.emit(vec![submitted], now)
     }
 
     /// A user message fed into the running turn.
-    pub fn steer_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
-        let submitted = EventPayload::InputSubmitted { text, steered: true, queue_id: None };
+    pub fn steer_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
+        let UserInput { text, notes } = input;
+        let submitted = EventPayload::InputSubmitted { text, notes, steered: true, queue_id: None };
         self.emit(vec![submitted], now)
     }
 
     /// A user message that waits for the running turn to end.
-    pub fn queue_input(&mut self, text: String, now: u64) -> Vec<ThreadEvent> {
+    pub fn queue_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
         let queue_id = self.assembler.mint_queue_id();
-        self.emit(vec![EventPayload::InputQueued { queue_id, text }], now)
+        let UserInput { text, notes } = input;
+        self.emit(vec![EventPayload::InputQueued { queue_id, text, notes }], now)
     }
 
     /// Take the oldest queued message off the queue if the thread can start a turn.
-    /// Returns its text for the caller to deliver. One message per turn: the next one
-    /// waits until this one's turn has come and gone.
-    pub fn deliver_queued(&mut self, now: u64) -> Option<(String, Vec<ThreadEvent>)> {
+    /// Returns it for the caller to deliver, with `notes` added to its own: what
+    /// qcc has to tell the agent now. One message per turn: the next one waits
+    /// until this one's turn has come and gone.
+    pub fn deliver_queued(
+        &mut self,
+        notes: &[String],
+        now: u64,
+    ) -> Option<(UserInput, Vec<ThreadEvent>)> {
         if self.busy() {
             return None;
         }
-        let (queue_id, text) = self.timeline.queued_inputs().first().cloned()?;
+        let (queue_id, mut input) = self.timeline.queued_inputs().first().cloned()?;
+        input.notes.extend_from_slice(notes);
         self.assembler.note_input();
         self.awaiting_turn = true;
         let submitted = EventPayload::InputSubmitted {
-            text: text.clone(),
+            text: input.text.clone(),
+            notes: input.notes.clone(),
             steered: false,
             queue_id: Some(queue_id),
         };
-        Some((text, self.emit(vec![submitted], now)))
+        Some((input, self.emit(vec![submitted], now)))
     }
 
     /// Discard everything queued: the user stopped the thread.
@@ -157,10 +168,10 @@ impl ThreadEngine {
     /// Take one message off the queue before it is delivered. Returns its text, or
     /// `None` when nothing with that id is queued (it may have been delivered).
     pub fn unqueue(&mut self, queue_id: &str, now: u64) -> Option<(String, Vec<ThreadEvent>)> {
-        let (_, text) =
+        let (_, input) =
             self.timeline.queued_inputs().iter().find(|(id, _)| id == queue_id)?.clone();
         let dropped = EventPayload::InputDropped { queue_id: queue_id.to_owned() };
-        Some((text, self.emit(vec![dropped], now)))
+        Some((input.text, self.emit(vec![dropped], now)))
     }
 
     /// The provider refused the submitted input: no turn will open for it.

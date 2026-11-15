@@ -150,6 +150,7 @@ impl Core {
                     thread_id: thread,
                     text,
                     delivery: SendMode::Queue,
+                    context: Vec::new(),
                 })
                 .map(|_| ThreadsAnswer::Done)
                 .map_err(|error| error.message),

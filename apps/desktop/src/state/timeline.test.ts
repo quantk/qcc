@@ -17,6 +17,17 @@ const message = (text: string, status: Item["status"] = "pending"): Item => ({
 });
 
 describe("timeline", () => {
+  it("keeps what qcc told the agent with a message", () => {
+    const timeline = fold(
+      { type: "input/submitted", text: "hi", notes: ["The user is looking at thread t2."] },
+      { type: "input/submitted", text: "again" },
+    );
+    expect(timeline.entries.map((entry) => (entry.kind === "user" ? entry.notes : null))).toEqual([
+      ["The user is looking at thread t2."],
+      [],
+    ]);
+  });
+
   it("streams text into an item and settles it with the final shape", () => {
     const timeline = fold(
       { type: "input/submitted", text: "hi" },

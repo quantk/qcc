@@ -311,6 +311,10 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::InputSubmitted { text, steered: true, .. } => {
             format!("> {text}  (into the running turn)")
         }
+        EventPayload::InputSubmitted { text, notes, .. } if !notes.is_empty() => {
+            let notes: Vec<String> = notes.iter().map(|note| format!("  (qcc: {note})")).collect();
+            format!("> {text}\n{}", notes.join("\n"))
+        }
         EventPayload::InputSubmitted { text, .. } => format!("> {text}"),
         EventPayload::InputQueued { text, .. } => format!("(queued) {text}"),
         EventPayload::InputDropped { .. } => "(a queued message was dropped)".to_owned(),

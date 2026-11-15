@@ -10,6 +10,29 @@ use crate::provider::{McpServerStatus, PermissionMode};
 use crate::thread::{Thread, ThreadStatus, TurnStatus};
 use crate::usage::UsageSnapshot;
 
+/// A message for the agent: what the user wrote, and what qcc tells the agent
+/// along with it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UserInput {
+    pub text: String,
+    /// Short facts the agent should know when it reads the message, written by qcc,
+    /// not the user: what the user is looking at, a skill offered since the session
+    /// started. The bridge hands them over the way its agent takes them.
+    pub notes: Vec<String>,
+}
+
+impl From<String> for UserInput {
+    fn from(text: String) -> Self {
+        Self { text, notes: Vec::new() }
+    }
+}
+
+impl From<&str> for UserInput {
+    fn from(text: &str) -> Self {
+        text.to_owned().into()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadEvent {
     pub thread_id: ThreadId,
@@ -113,6 +136,9 @@ pub enum EventPayload {
     #[serde(rename = "input/submitted")]
     InputSubmitted {
         text: String,
+        /// What qcc told the agent along with the message (see [`UserInput::notes`]).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
         /// Fed into the running turn instead of starting one.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         steered: bool,
@@ -123,7 +149,12 @@ pub enum EventPayload {
 
     /// A user message arrived while a turn was running and waits for it to end.
     #[serde(rename = "input/queued")]
-    InputQueued { queue_id: String, text: String },
+    InputQueued {
+        queue_id: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
+    },
 
     /// A queued message was discarded before delivery: the thread was stopped, or the
     /// user took the message back.

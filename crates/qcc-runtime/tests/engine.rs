@@ -315,32 +315,32 @@ fn queued_input_is_delivered_one_turn_at_a_time() {
     assert!(engine.busy() && !engine.turn_open());
     journal.extend(engine.queue_input("second".into(), 4));
     journal.extend(engine.queue_input("third".into(), 5));
-    assert_eq!(engine.deliver_queued(6), None, "nothing is delivered behind pending input");
+    assert_eq!(engine.deliver_queued(&[], 6), None, "nothing is delivered behind pending input");
 
     journal.extend(engine.apply_deltas([Delta::TurnOpen], 7));
     journal.extend(engine.steer_input("a nudge".into(), 8));
-    assert_eq!(engine.deliver_queued(9), None, "nothing is delivered into a running turn");
+    assert_eq!(engine.deliver_queued(&[], 9), None, "nothing is delivered into a running turn");
     journal.extend(engine.apply_deltas([boundary()], 10));
 
-    let (text, events) = engine.deliver_queued(11).expect("the turn is over");
-    assert_eq!(text, "second");
+    let (text, events) = engine.deliver_queued(&[], 11).expect("the turn is over");
+    assert_eq!(text.text, "second");
     assert!(matches!(
         &events[0].payload,
-        EventPayload::InputSubmitted { text, steered: false, queue_id: Some(id) }
+        EventPayload::InputSubmitted { text, steered: false, queue_id: Some(id), .. }
             if text == "second" && id == "q_1"
     ));
     journal.extend(events);
-    assert_eq!(engine.deliver_queued(12), None, "one message per turn");
+    assert_eq!(engine.deliver_queued(&[], 12), None, "one message per turn");
     assert!(engine.has_queued_input());
 
     // The provider refuses it: the queue must not be stuck behind a turn that never opens.
     engine.input_rejected();
-    let (text, events) = engine.deliver_queued(13).unwrap();
-    assert_eq!(text, "third");
+    let (text, events) = engine.deliver_queued(&[], 13).unwrap();
+    assert_eq!(text.text, "third");
     journal.extend(events);
     assert!(!engine.has_queued_input());
     journal.extend(engine.apply_deltas([Delta::TurnOpen, boundary()], 14));
-    assert_eq!(engine.deliver_queued(15), None);
+    assert_eq!(engine.deliver_queued(&[], 15), None);
 
     let wire = serde_json::to_value(&journal).unwrap();
     let inputs: Vec<String> = wire
@@ -387,8 +387,8 @@ fn stopping_drops_the_queue_and_a_restart_keeps_it() {
     journal.extend(second.recover(persisted, journal.iter().map(|e| &e.payload), 50));
     let engine = second.engine(&"t1".into()).unwrap();
     assert!(engine.has_queued_input() && !engine.busy());
-    let (text, events) = engine.deliver_queued(51).unwrap();
-    assert_eq!(text, "later");
+    let (text, events) = engine.deliver_queued(&[], 51).unwrap();
+    assert_eq!(text.text, "later");
     journal.extend(events);
 
     journal.extend(engine.session_started(None, true, 52));

@@ -336,7 +336,7 @@ mod tests {
         journal.extend(supervisor.create(new_thread("b"), 2).unwrap());
         for (id, ts) in [("a", 10), ("b", 20)] {
             let engine = supervisor.engine(&id.into()).unwrap();
-            journal.extend(engine.submit_input(format!("hello from {id}"), ts));
+            journal.extend(engine.submit_input(format!("hello from {id}").into(), ts));
             journal.extend(engine.session_started(Some(format!("sess-{id}")), false, ts + 1));
             journal.extend(engine.apply_deltas(
                 [

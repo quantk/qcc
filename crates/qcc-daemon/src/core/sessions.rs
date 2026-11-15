@@ -1,6 +1,8 @@
 //! Provider sessions: starting them, calling providers and taking their deltas.
 
-use qcc_domain::{Delta, EnvironmentState, EventPayload, McpServer, ProviderId, Role, ThreadId};
+use qcc_domain::{
+    Delta, EnvironmentState, EventPayload, McpServer, ProviderId, Role, ThreadId, UserInput,
+};
 use qcc_plugin_host::{Outcome, PluginError, PluginRequest, ProviderRequest, SessionStart};
 use qcc_protocol::methods::Empty;
 use qcc_protocol::paths;
@@ -34,7 +36,7 @@ impl Core {
 
     /// Ask the thread's provider to start a session, resuming the previous one when
     /// the provider can. The answer comes back as [`Command::SessionStartFinished`].
-    pub(super) fn start_session(&mut self, id: &ThreadId, prompt: Option<String>) {
+    pub(super) fn start_session(&mut self, id: &ThreadId, prompt: Option<UserInput>) {
         let Some(thread) = self.supervisor.thread(id).cloned() else {
             return;
         };
@@ -57,12 +59,14 @@ impl Core {
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
         let prompt = match prompt {
-            Some(message) if thread.handover => Some(self.handover_prompt(id, message)),
+            Some(UserInput { text, notes }) if thread.handover => {
+                Some(UserInput { text: self.handover_prompt(id, text), notes })
+            }
             prompt => prompt,
         };
         let request = PluginRequest::Provider {
             provider: thread.provider,
-            request: ProviderRequest::Start(SessionStart {
+            request: ProviderRequest::Start(Box::new(SessionStart {
                 thread: id.clone(),
                 cwd: thread.cwd,
                 model: thread.model,
@@ -75,9 +79,12 @@ impl Core {
                 extra_dirs,
                 mcp_servers,
                 mcp_disabled,
-            }),
+            })),
         };
-        self.sessions.entry(id.clone()).or_default().starting = true;
+        let session = self.sessions.entry(id.clone()).or_default();
+        session.starting = true;
+        // The new session is told everything from the start.
+        session.notes.clear();
         let (plugin, commands, thread) = (plugin.clone(), self.commands.clone(), id.clone());
         tokio::spawn(async move {
             let result = plugin.call(request).await;
@@ -206,10 +213,9 @@ impl Core {
         }
         let session = std::mem::take(session);
         // A change that came while the session started is not in it.
-        if session.release_when_idle
-            && let Some(next) = self.sessions.get_mut(&id)
-        {
-            next.release_when_idle = true;
+        if let Some(next) = self.sessions.get_mut(&id) {
+            next.release_when_idle = session.release_when_idle;
+            next.notes = session.notes;
         }
         match result {
             Ok(Outcome::SessionStarted { provider_session }) => {

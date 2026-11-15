@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use qcc_domain::{
     Delta, EventPayload, ModelInfo, Project, ProviderId, SkillRef, ThreadEnvironment, ThreadEvent,
-    ThreadId, ThreadStatus,
+    ThreadId, ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -146,7 +146,7 @@ pub(crate) enum Command {
     /// waiting for the working directory.
     EnvironmentPrepared {
         thread: ThreadId,
-        prompt: Option<String>,
+        prompt: Option<UserInput>,
         result: Result<Outcome, PluginError>,
     },
     /// The environment plugin answered `remove` for a thread being archived.
@@ -210,6 +210,9 @@ struct Session {
     /// The thread's MCP servers changed and its provider takes that only in a new
     /// session: release this one as soon as no turn runs.
     release_when_idle: bool,
+    /// What qcc has to tell the agent with its next message: news since the
+    /// session started. A new session is told everything anyway and drops them.
+    notes: Vec<String>,
 }
 
 struct Subscriber {

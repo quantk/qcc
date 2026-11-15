@@ -10,6 +10,7 @@ import type {
   DeliverMode,
   InteractionId,
   InteractionResolution,
+  MessageContext,
   ModelInfo,
   PermissionMode,
   PluginInfo,
@@ -414,9 +415,15 @@ export class AppStore {
   }
 
   /** Resolves to whether the daemon took the message. */
-  async send(threadId: ThreadId, text: string, delivery: SendMode): Promise<boolean> {
+  /** `context` says what the message is about; the agent is told in a note. */
+  async send(
+    threadId: ThreadId,
+    text: string,
+    delivery: SendMode,
+    context: MessageContext[] = [],
+  ): Promise<boolean> {
     const result = await this.attempt(() =>
-      this.api.call("thread.send", { thread_id: threadId, text, delivery }),
+      this.api.call("thread.send", { thread_id: threadId, text, delivery, context }),
     );
     return result !== null;
   }

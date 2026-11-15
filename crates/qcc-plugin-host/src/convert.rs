@@ -6,7 +6,7 @@ use qcc_domain::{
     ItemShape, ItemStatus, McpServer, McpServerStatus, McpState, McpTransport, ModelInfo,
     OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, Role, SkillInfo, TextChannel,
     ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
-    UiViewInfo, UsageSnapshot,
+    UiViewInfo, UsageSnapshot, UserInput,
 };
 
 use crate::api::{
@@ -356,6 +356,10 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
     }
 }
 
+fn thread_input(thread: ThreadId, input: UserInput) -> wit::ThreadInput {
+    wit::ThreadInput { thread: thread.0, text: input.text, notes: input.notes }
+}
+
 fn session_start(start: SessionStart) -> wit::SessionStart {
     wit::SessionStart {
         thread: start.thread.0,
@@ -363,7 +367,8 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
         model: start.model,
         effort: start.effort,
         resume: start.resume,
-        prompt: start.prompt,
+        prompt_notes: start.prompt.as_ref().map(|prompt| prompt.notes.clone()).unwrap_or_default(),
+        prompt: start.prompt.map(|prompt| prompt.text),
         permission_mode: start.permission_mode.map(mode_to_wit),
         env: start.env,
         skills: start
@@ -410,12 +415,12 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
         PluginRequest::Provider { provider, request } => wit::Event::Provider(wit::ProviderCall {
             provider: provider.0,
             request: match request {
-                ProviderRequest::Start(start) => wit::ProviderRequest::Start(session_start(start)),
-                ProviderRequest::Input { thread, text } => {
-                    wit::ProviderRequest::Input(wit::ThreadInput { thread: thread.0, text })
+                ProviderRequest::Start(start) => wit::ProviderRequest::Start(session_start(*start)),
+                ProviderRequest::Input { thread, input } => {
+                    wit::ProviderRequest::Input(thread_input(thread, input))
                 }
-                ProviderRequest::Steer { thread, text } => {
-                    wit::ProviderRequest::Steer(wit::ThreadInput { thread: thread.0, text })
+                ProviderRequest::Steer { thread, input } => {
+                    wit::ProviderRequest::Steer(thread_input(thread, input))
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),

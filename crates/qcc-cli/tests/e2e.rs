@@ -1379,6 +1379,35 @@ fn the_effort_reaches_the_session_and_changes_between_turns() {
 }
 
 #[test]
+fn a_message_tells_the_agent_what_it_is_about() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let other = daemon.spawn("hello");
+    daemon.wait_for(&other, "turn/completed");
+    let id = daemon.spawn("first");
+    daemon.wait_for(&id, "turn/completed");
+
+    let sent = daemon.qcc(&["thread", "send", &id, "/notes", "--about", &other]);
+    assert!(sent.ok, "{}", sent.stderr);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while messages(&daemon.events(&id)).len() < 2 {
+        assert!(Instant::now() < deadline, "the second turn never ran");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let events = daemon.events(&id);
+    let reply = messages(&events)[1];
+    assert!(reply.contains(&format!("looking at qcc thread {other}")), "{reply}");
+    assert!(reply.contains("\"hello\", run by echo, idle"), "{reply}");
+    // The note stays with the message in the timeline, apart from its text.
+    let submitted = events.iter().rfind(|event| event["type"] == "input/submitted").unwrap();
+    assert_eq!(submitted["text"], "/notes");
+    assert_eq!(submitted["notes"][0].as_str(), Some(reply));
+    // A message without context carries no notes.
+    let first = events.iter().find(|event| event["type"] == "input/submitted").unwrap();
+    assert!(first.get("notes").is_none(), "{first}");
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

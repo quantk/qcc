@@ -62,7 +62,10 @@ impl Provider for Codex {
         self.sessions.apply(&start.thread, handshake)?;
         if let Some(prompt) = &start.prompt {
             // Held by the bridge until the agent finished its handshake.
-            let output = self.sessions.bridge(&start.thread)?.prompt(prompt);
+            let output = self
+                .sessions
+                .bridge(&start.thread)?
+                .prompt(&with_notes(&start.prompt_notes, prompt));
             self.sessions.apply(&start.thread, output)?;
         }
         // A new thread is named by the agent after the handshake; the bridge reports
@@ -71,12 +74,14 @@ impl Provider for Codex {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output = self.sessions.bridge(&input.thread)?.prompt(&input.text);
+        let output =
+            self.sessions.bridge(&input.thread)?.prompt(&with_notes(&input.notes, &input.text));
         self.sessions.apply(&input.thread, output)
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output = self.sessions.bridge(&input.thread)?.steer(&input.text);
+        let output =
+            self.sessions.bridge(&input.thread)?.steer(&with_notes(&input.notes, &input.text));
         self.sessions.apply(&input.thread, output)
     }
 

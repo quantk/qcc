@@ -1,6 +1,6 @@
 //! Thread environments: preparing, querying and removing them, and archiving threads.
 
-use qcc_domain::{EnvironmentState, EventPayload, ThreadEnvironment, ThreadId};
+use qcc_domain::{EnvironmentState, EventPayload, ThreadEnvironment, ThreadId, UserInput};
 use qcc_plugin_host::{EnvironmentRequest, Outcome, PluginError, PluginHandle, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
@@ -19,7 +19,7 @@ impl Core {
         &mut self,
         id: &ThreadId,
         environment: ThreadEnvironment,
-        prompt: Option<String>,
+        prompt: Option<UserInput>,
     ) {
         if environment.state == EnvironmentState::Removed {
             self.session_failed(id, "the thread's environment was removed".into());
@@ -62,7 +62,7 @@ impl Core {
     pub(super) fn environment_prepared(
         &mut self,
         id: ThreadId,
-        prompt: Option<String>,
+        prompt: Option<UserInput>,
         result: Result<Outcome, PluginError>,
     ) {
         match self.sessions.get_mut(&id) {

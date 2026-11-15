@@ -398,6 +398,9 @@ interface types {
     resume: option<string>,
     /// The first user message, if the session starts with one.
     prompt: option<string>,
+    /// What qcc tells the agent along with the first message, as with
+    /// `thread-input.notes`.
+    prompt-notes: list<string>,
     /// Absent: the agent's own configuration decides what it may do unasked.
     permission-mode: option<permission-mode>,
     /// Variables the agent process must see (`QCC_THREAD_ID`, `QCC_SOCKET`).
@@ -433,6 +436,11 @@ interface types {
   record thread-input {
     thread: thread-id,
     text: string,
+    /// Short facts qcc tells the agent along with the message, not written by the
+    /// user (what the user is looking at, a skill offered since the session
+    /// started). The bridge hands them over the way its agent takes them;
+    /// `qcc_plugin_sdk::with_notes` puts them in front of the text.
+    notes: list<string>,
   }
 
   record interaction-answer {

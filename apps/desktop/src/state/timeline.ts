@@ -16,6 +16,8 @@ export type Entry =
       key: string;
       ts: number;
       text: string;
+      /** What qcc told the agent along with the message. */
+      notes: readonly string[];
       steered: boolean;
       /** Waiting for the running turn to end. */
       queued: boolean;
@@ -78,11 +80,28 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
   switch (event.type) {
     case "input/submitted": {
       if (event.queue_id) entries = replaceLast(entries, isQueued(event.queue_id), () => null) ?? entries;
-      push({ kind: "user", key, ts, text: event.text, steered: event.steered ?? false, queued: false });
+      push({
+        kind: "user",
+        key,
+        ts,
+        text: event.text,
+        notes: event.notes ?? [],
+        steered: event.steered ?? false,
+        queued: false,
+      });
       break;
     }
     case "input/queued":
-      push({ kind: "user", key, ts, text: event.text, steered: false, queued: true, queueId: event.queue_id });
+      push({
+        kind: "user",
+        key,
+        ts,
+        text: event.text,
+        notes: event.notes ?? [],
+        steered: false,
+        queued: true,
+        queueId: event.queue_id,
+      });
       break;
     case "input/dropped":
       entries = replaceLast(entries, isQueued(event.queue_id), () => null) ?? entries;

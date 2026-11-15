@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use qcc_domain::{
     Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, PermissionMode,
-    ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
+    ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus, TurnStatus, UserInput,
 };
 use qcc_plugin_host::services::{KvStore, ProcessBackend};
 use qcc_plugin_host::{
@@ -227,24 +227,24 @@ impl Harness {
         resume: Option<String>,
     ) -> Result<(), PluginError> {
         if let Some(prompt) = prompt {
-            let events = self.engine.submit_input(prompt.to_owned(), 0);
+            let events = self.engine.submit_input(prompt.into(), 0);
             self.events.extend(events);
         }
         let resumed = resume.is_some();
-        let outcome = self.call(ProviderRequest::Start(SessionStart {
+        let outcome = self.call(ProviderRequest::Start(Box::new(SessionStart {
             thread: self.thread_id.clone(),
             cwd: "/work".into(),
             model: self.model.clone(),
             effort: self.effort.clone(),
             resume,
-            prompt: prompt.map(str::to_owned),
+            prompt: prompt.map(UserInput::from),
             permission_mode: self.permission_mode,
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
             skills: Vec::new(),
             extra_dirs: Vec::new(),
             mcp_servers: Vec::new(),
             mcp_disabled: Vec::new(),
-        }));
+        })));
         match outcome {
             Ok(Outcome::SessionStarted { provider_session }) => {
                 let events = self.engine.session_started(provider_session, resumed, 0);
@@ -262,20 +262,20 @@ impl Harness {
     }
 
     pub fn input(&mut self, text: &str) -> Result<(), PluginError> {
-        let events = self.engine.submit_input(text.to_owned(), 0);
+        let events = self.engine.submit_input(text.into(), 0);
         self.events.extend(events);
         let thread = self.thread_id.clone();
-        self.call(ProviderRequest::Input { thread, text: text.to_owned() })?;
+        self.call(ProviderRequest::Input { thread, input: text.into() })?;
         self.pump();
         Ok(())
     }
 
     /// Feed a message into the running turn.
     pub fn steer(&mut self, text: &str) -> Result<(), PluginError> {
-        let events = self.engine.steer_input(text.to_owned(), 0);
+        let events = self.engine.steer_input(text.into(), 0);
         self.events.extend(events);
         let thread = self.thread_id.clone();
-        self.call(ProviderRequest::Steer { thread, text: text.to_owned() })?;
+        self.call(ProviderRequest::Steer { thread, input: text.into() })?;
         self.pump();
         Ok(())
     }

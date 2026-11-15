@@ -17,6 +17,7 @@
 //! | `/skills`            | says what the session was told (skills, project folders)     |
 //! | `/mcp`               | lists the MCP servers the session was given                  |
 //! | `/agent`             | says the model and effort the session was started with       |
+//! | `/notes`             | says what qcc told it along with the message                 |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -170,7 +171,7 @@ impl Session {
 
 impl Echo {
     /// Run one prompt. Opens a turn and either settles it or leaves it waiting.
-    fn run(&mut self, thread: &str, prompt: &str) -> Result<(), String> {
+    fn run(&mut self, thread: &str, prompt: &str, notes: &[String]) -> Result<(), String> {
         let session = self.sessions.get_mut(thread).ok_or("the session was not started")?;
         if session.turn.is_some() {
             return Err("a turn is already running".into());
@@ -313,6 +314,13 @@ impl Echo {
                 out.push(completed());
             }
             "/crash" => panic!("echo provider was asked to crash"),
+            "/notes" => {
+                let reply = if notes.is_empty() { "no notes".into() } else { notes.join("\n") };
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/agent" => {
                 let reply = session.agent.clone();
                 out.push(text(reply.clone()));
@@ -423,7 +431,7 @@ impl Provider for Echo {
         self.sessions.get_mut(&start.thread).expect("just inserted").mcp_on = mcp_on;
         deltas::emit(&start.thread, &reset)?;
         if let Some(prompt) = &start.prompt {
-            self.run(&start.thread, prompt)?;
+            self.run(&start.thread, prompt, &start.prompt_notes)?;
         }
         Ok(SessionStarted {
             provider_session: Some(start.resume.unwrap_or(format!("echo-{}", start.thread))),
@@ -431,7 +439,7 @@ impl Provider for Echo {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        self.run(&input.thread, &input.text)
+        self.run(&input.thread, &input.text, &input.notes)
     }
 
     fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {

@@ -117,6 +117,18 @@ pub struct ThreadSendParams {
     pub text: String,
     #[serde(default)]
     pub delivery: SendMode,
+    /// What the message is about. qcc tells the agent in a short note along with
+    /// it; the note is kept in the timeline with the message.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context: Vec<MessageContext>,
+}
+
+/// Something a user's message is about, which the agent is told along with it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum MessageContext {
+    /// The user is looking at this thread.
+    Thread { thread_id: ThreadId },
 }
 
 /// What became of a sent message.

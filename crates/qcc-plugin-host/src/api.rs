@@ -4,7 +4,7 @@
 use qcc_domain::{
     CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionResolution,
     McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread,
-    ThreadId, ThreadState, TranscriptEntry, UiViewInfo,
+    ThreadId, ThreadState, TranscriptEntry, UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +26,7 @@ pub struct SessionStart {
     pub effort: Option<String>,
     /// Provider session handle from an earlier start of this thread.
     pub resume: Option<String>,
-    pub prompt: Option<String>,
+    pub prompt: Option<UserInput>,
     /// Absent: the agent's own configuration decides.
     pub permission_mode: Option<PermissionMode>,
     /// Variables the agent process must see.
@@ -42,15 +42,15 @@ pub struct SessionStart {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderRequest {
-    Start(SessionStart),
+    Start(Box<SessionStart>),
     Input {
         thread: ThreadId,
-        text: String,
+        input: UserInput,
     },
     /// Input for the running turn; only for providers that declared `steer`.
     Steer {
         thread: ThreadId,
-        text: String,
+        input: UserInput,
     },
     Interrupt {
         thread: ThreadId,

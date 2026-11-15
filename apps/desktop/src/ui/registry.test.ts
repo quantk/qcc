@@ -24,6 +24,20 @@ describe("UiRegistry", () => {
     expect(ui.activeModules()).toEqual(["b"]);
   });
 
+  it("orders side panels and takes them out with their module", () => {
+    const ui = new UiRegistry();
+    ui.activate({
+      id: "a",
+      activate(ui) {
+        ui.threadPanel({ id: "usage", title: "Usage", order: 10, render: Nothing });
+        ui.threadPanel({ id: "info", title: "Info", order: 0, render: Nothing });
+      },
+    });
+    expect(ui.getSnapshot().panels.map((panel) => panel.id)).toEqual(["info", "usage"]);
+    ui.deactivate("a");
+    expect(ui.getSnapshot().panels).toEqual([]);
+  });
+
   it("replaces what a module registered when it is activated again", () => {
     const ui = new UiRegistry();
     const module = (title: string) => ({

@@ -10,6 +10,7 @@ import type {
   ThreadEvent,
   UsageSnapshot,
 } from "../api/protocol.gen";
+import { type ThreadStats, applyStats, emptyStats } from "./stats";
 
 export type Entry =
   | {
@@ -43,9 +44,11 @@ export type Timeline = {
   entries: readonly Entry[];
   turnOpen: boolean;
   usage?: UsageSnapshot;
+  /** Turns, token counts and compactions, for the panels that sum them up. */
+  stats: ThreadStats;
 };
 
-export const emptyTimeline: Timeline = { lastSeq: 0, entries: [], turnOpen: false };
+export const emptyTimeline: Timeline = { lastSeq: 0, entries: [], turnOpen: false, stats: emptyStats };
 
 function replaceLast(
   entries: readonly Entry[],
@@ -206,7 +209,7 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     case "provider/unhandled":
       break;
   }
-  return { lastSeq: event.seq, entries, turnOpen, usage };
+  return { lastSeq: event.seq, entries, turnOpen, usage, stats: applyStats(timeline.stats, event) };
 }
 
 export function applyEvents(timeline: Timeline, events: readonly ThreadEvent[]): Timeline {

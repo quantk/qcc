@@ -3,6 +3,7 @@
 
 import type { UiModule } from "../ui/registry";
 import { changesModule } from "./changes";
+import { insightsModule } from "./insights";
 import { lineageModule } from "./lineage";
 import { mcpModule } from "./mcp";
 import { navigationModule } from "./navigation";
@@ -31,5 +32,6 @@ export const builtinModules: UiModule[] = [
   pluginCommandsModule,
   mcpModule,
   skillsModule,
+  insightsModule,
   settingsModule,
 ];

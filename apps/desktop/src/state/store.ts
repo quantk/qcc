@@ -35,6 +35,33 @@ import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
 const COLLAPSED = "qcc.collapsed-families";
+const SIDE_PANEL = "qcc.side-panel";
+
+/** The panel at the right of a thread: whether it is open and which tab it shows. */
+export type SidePanel = { open: boolean; tab: string | null };
+
+/**
+ * Narrower than this, the side panel would squeeze the thread: it covers the thread
+ * when asked for instead, and is closed until then.
+ */
+export const SIDE_PANEL_BESIDE = "(min-width: 1100px)";
+
+function panelFitsBeside(): boolean {
+  return globalThis.matchMedia?.(SIDE_PANEL_BESIDE).matches ?? true;
+}
+
+function readSidePanel(): SidePanel {
+  try {
+    const saved: unknown = JSON.parse(globalThis.localStorage?.getItem(SIDE_PANEL) ?? "null");
+    if (saved && typeof saved === "object") {
+      const { open, tab } = saved as Record<string, unknown>;
+      return { open: open !== false, tab: typeof tab === "string" ? tab : null };
+    }
+  } catch {
+    // Fall through to the default.
+  }
+  return { open: true, tab: null };
+}
 
 /** Null when nothing was ever recorded: the first run of the app. */
 function readSeen(): Seen | null {
@@ -110,6 +137,9 @@ export type AppState = {
   history: History;
   /** Threads whose children the sidebar keeps folded under them. */
   collapsed: ReadonlySet<ThreadId>;
+  sidePanel: SidePanel;
+  /** The side panel covers the thread in a narrow window. Not remembered. */
+  sideOverlay: boolean;
   /** The skills plugins offer; whether one is off is in the settings. */
   skills: readonly SkillStatus[];
   /** The skills each agent finds by itself, as it reported them. */
@@ -142,6 +172,8 @@ export class AppStore {
     seen: readSeen() ?? {},
     history: startHistory,
     collapsed: readCollapsed(),
+    sidePanel: readSidePanel(),
+    sideOverlay: false,
     skills: [],
     agentSkills: {},
   };
@@ -386,6 +418,22 @@ export class AppStore {
       // Not remembered; it still applies to this window.
     }
     this.set({ showExamples: show, plugins: visiblePlugins(this.state.allPlugins, show) });
+  };
+
+  /** Open or close the panel at the right of a thread, or show one of its tabs. */
+  setSidePanel = (patch: Partial<SidePanel>) => {
+    const sidePanel = { ...this.state.sidePanel, ...patch };
+    try {
+      globalThis.localStorage?.setItem(SIDE_PANEL, JSON.stringify(sidePanel));
+    } catch {
+      // Not remembered past this window.
+    }
+    this.set({ sidePanel });
+  };
+
+  toggleSidePanel = () => {
+    if (panelFitsBeside()) this.setSidePanel({ open: !this.state.sidePanel.open });
+    else this.set({ sideOverlay: !this.state.sideOverlay });
   };
 
   /** Fold the threads a thread started under it in the sidebar, or unfold them. */

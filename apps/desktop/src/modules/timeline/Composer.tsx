@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProviderInfo, SendMode, Thread } from "../../api/protocol.gen";
 import { store } from "../../state/store";
+import { contextUsed } from "../../state/stats";
 import { type QueuedMessage, type Timeline, queuedMessages } from "../../state/timeline";
 import { compactNumber } from "../../util/format";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
@@ -104,7 +105,7 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   }
 
   const usage = timeline.usage;
-  const used = usage ? usage.last.input_tokens + (usage.last.cached_input_tokens ?? 0) : null;
+  const used = usage ? contextUsed(usage) : null;
   const status = statusText(thread);
   return (
     <div className="border-t px-6 pt-2.5 pb-3.5">

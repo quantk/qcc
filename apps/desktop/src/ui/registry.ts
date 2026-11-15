@@ -30,6 +30,20 @@ export type ThreadTab = {
   render: ComponentType<ThreadContext>;
 };
 
+/**
+ * A tab of the side panel at the right of a thread: something to keep in view
+ * beside whichever thread tab is open, such as its numbers.
+ */
+export type ThreadPanel = {
+  id: string;
+  title: string;
+  /** Panels are shown in ascending order; the first visible one opens by default. */
+  order: number;
+  /** Absent: shown for every thread. */
+  when?: (context: ThreadContext) => boolean;
+  render: ComponentType<ThreadContext>;
+};
+
 /** A screen of its own, reachable from the top of the sidebar. */
 export type AppView = {
   id: string;
@@ -99,6 +113,7 @@ export function itemKey(item: Item): string {
 type Snapshot = {
   views: readonly AppView[];
   tabs: readonly ThreadTab[];
+  panels: readonly ThreadPanel[];
   actions: readonly ThreadAction[];
   commands: readonly Command[];
   menu: readonly ThreadMenuItem[];
@@ -113,6 +128,7 @@ export class UiRegistry {
   private snapshot: Snapshot = {
     views: [],
     tabs: [],
+    panels: [],
     actions: [],
     commands: [],
     menu: [],
@@ -173,6 +189,11 @@ export class UiRegistry {
   threadTab(tab: ThreadTab): () => void {
     this.update({ tabs: [...this.snapshot.tabs.filter((other) => other.id !== tab.id), tab].sort(byOrder) });
     return this.track(() => this.update({ tabs: this.snapshot.tabs.filter((other) => other !== tab) }));
+  }
+
+  threadPanel(panel: ThreadPanel): () => void {
+    this.update({ panels: [...this.snapshot.panels.filter((other) => other.id !== panel.id), panel].sort(byOrder) });
+    return this.track(() => this.update({ panels: this.snapshot.panels.filter((other) => other !== panel) }));
   }
 
   threadMenuItem(item: ThreadMenuItem): () => void {

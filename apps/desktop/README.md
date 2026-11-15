@@ -42,11 +42,21 @@ plugin's UI does:
 | --- | --- | --- |
 | A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/mcp`, `modules/skills` |
 | A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage`, `modules/mcp`, `modules/skills` |
+| A tab of the side panel at the right of a thread | `ui.threadPanel` | `modules/insights` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
 | A command (palette, shortcut) | `ui.command` | `modules/new-thread`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
+
+The side panel stays in view beside whichever thread tab is open, so it is the place
+for what is worth glancing at while reading the timeline. `modules/insights` puts
+three tabs there: Usage (how full the context is, the context at each request, compactions,
+tokens the thread spent over all its sessions), Activity (turns and their times,
+messages, commands, files, tools) and Details (agent, model, permissions, session,
+directory, dates). The numbers come from `state/stats.ts`, folded from the same events
+as the timeline. Ctrl+B or the button in the thread header shows and hides the panel;
+in a window too narrow for it, it opens over the thread and Escape puts it away.
 
 A module is an id and an `activate` function:
 

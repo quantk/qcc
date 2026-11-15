@@ -1,5 +1,6 @@
 // Back and forward between the threads and screens visited, as in a browser:
-// Alt+Left and Alt+Right, the mouse's back and forward buttons, the palette.
+// Alt+Left and Alt+Right, the mouse's back and forward buttons, the palette. And
+// the panel at the right of a thread, which belongs to the same frame.
 
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
@@ -13,6 +14,12 @@ export const navigationModule: UiModule = {
   activate(ui) {
     ui.command({ id: "nav.back", title: "Back", shortcut: "Alt+Left", run: () => store().navigate(-1) });
     ui.command({ id: "nav.forward", title: "Forward", shortcut: "Alt+Right", run: () => store().navigate(1) });
+    ui.command({
+      id: "view.side-panel",
+      title: "Show or hide the side panel",
+      shortcut: "Ctrl+B",
+      run: () => store().toggleSidePanel(),
+    });
 
     // The webview would otherwise take the side buttons for its own history and
     // reload the page; they are ours on every phase of the click.

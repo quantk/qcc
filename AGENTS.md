@@ -120,8 +120,8 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - Unit-тесты рядом с кодом; интеграционные — в `crates/*/tests` и `plugins/*/tests`; сквозные
   сценарии CLI + демон + плагины — `crates/qcc-cli/tests/e2e.rs` (на провайдере `echo`).
 - Провайдер `echo` — тестовый агент: `/slow`, `/tool`, `/ask`, `/approve`, `/exec`, `/fail`,
-  `/skills`, `/crash` и др. (см. doc-комментарий `plugins/provider-echo/src/lib.rs`). Новые сценарии
-  ядра проверяйте на нём, а не на реальных агентах.
+  `/skills`, `/mcp`, `/crash` и др. (см. doc-комментарий `plugins/provider-echo/src/lib.rs`).
+  Новые сценарии ядра проверяйте на нём, а не на реальных агентах.
 - **Живые проверки на реальных агентах** стоят денег и меняют файлы. Если они нужны:
   - запускайте отдельный демон с `QCC_DATA_DIR`/`QCC_SOCKET` во временном каталоге, а рабочий
     каталог треда — тоже во временном (не `~` и не этот репозиторий);

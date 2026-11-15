@@ -495,6 +495,19 @@ export class AppStore {
     return result !== null;
   }
 
+  /**
+   * Change the MCP servers alone. The settings are read again first, so neither a
+   * change from the CLI nor an unsaved draft of the settings screen is lost.
+   * Resolves to whether the daemon took it.
+   */
+  async changeMcpServers(change: (settings: Settings) => Settings): Promise<boolean> {
+    const current = await this.attempt(() => this.api.call("settings.get", {}));
+    if (!current) return false;
+    const result = await this.attempt(() => this.api.call("settings.set", { settings: change(current.settings) }));
+    if (result) this.set({ settings: result });
+    return result !== null;
+  }
+
   /** Resolves to the project, or null when the daemon refused (the error is shown). */
   async saveProject(id: ProjectId | null, name: string, folders: string[]): Promise<Project | null> {
     const result = await this.attempt(() =>

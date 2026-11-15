@@ -9,3 +9,4 @@ export { InteractionOutcome, InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";
 export { ModelPicker } from "./ModelPicker";
 export { ThreadMenu } from "./ThreadMenu";
+export { EnvEditor } from "./EnvEditor";

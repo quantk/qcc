@@ -10,10 +10,10 @@ import type {
   Settings,
 } from "../../api/protocol.gen";
 import { modeLabel, providersOf, visiblePlugins } from "../../state/selectors";
-import { type EnvRow, envOf, envRows, providerSettings, withProgram, withProvider } from "../../state/settings";
+import { envOf, envRows, providerSettings, withProgram, withProvider } from "../../state/settings";
 import { store, useApp } from "../../state/store";
 import { MAX_ZOOM, MIN_ZOOM, formatZoom, zoomIn, zoomOut } from "../../state/zoom";
-import { Choice, ModelPicker } from "../../ui/kit";
+import { Choice, EnvEditor, ModelPicker } from "../../ui/kit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -53,14 +53,19 @@ export function SettingsView() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const settings = draft ?? loaded?.settings ?? {};
-  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(loaded?.settings ?? {});
+  const dirty =
+    draft !== null &&
+    JSON.stringify({ ...draft, mcp_servers: undefined }) !==
+      JSON.stringify({ ...(loaded?.settings ?? {}), mcp_servers: undefined });
   const plugins = useMemo(() => visiblePlugins(allPlugins, showExamples), [allPlugins, showExamples]);
   const providers = useMemo(() => providersOf(plugins), [plugins]);
 
   const save = async () => {
     if (!draft) return;
     setSaving(true);
-    if (await store().saveSettings(draft)) setDraft(null);
+    // MCP servers have a screen of their own and are saved from there at once.
+    const latest = store().getState().settings?.settings.mcp_servers;
+    if (await store().saveSettings({ ...draft, mcp_servers: latest })) setDraft(null);
     setSaving(false);
   };
 
@@ -221,7 +226,11 @@ function AgentSettings(props: {
       </div>
       <Field>
         <FieldLabel>Environment of its sessions</FieldLabel>
-        <EnvEditor rows={envRows(own.env)} change={(rows) => update({ env: envOf(rows) })} />
+        <EnvEditor
+          rows={envRows(own.env)}
+          change={(rows) => update({ env: envOf(rows) })}
+          title="A variable every session of this agent sees: an API key, a config directory"
+        />
       </Field>
     </article>
   );
@@ -271,58 +280,6 @@ function ProgramRow(props: { program: ProgramStatus; value: string; change: (pat
         </Button>
       </p>
     </Field>
-  );
-}
-
-function EnvEditor(props: { rows: EnvRow[]; change: (rows: EnvRow[]) => void }) {
-  // Rows being typed are kept here: a row without a name yet is not a setting.
-  const [extra, setExtra] = useState<EnvRow[]>([]);
-  const rows = [...props.rows, ...extra];
-  const set = (index: number, row: EnvRow | null) => {
-    const next = rows.slice();
-    if (row) next[index] = row;
-    else next.splice(index, 1);
-    setExtra(next.filter((candidate) => !candidate.name.trim()));
-    props.change(next);
-  };
-  return (
-    <div className="flex flex-col gap-1.5">
-      {rows.map((row, index) => (
-        <div key={index} className="flex gap-1.5">
-          <Input
-            aria-label="Variable name"
-            // A row just added is there to be typed into.
-            autoFocus={index >= props.rows.length && !row.name}
-            value={row.name}
-            placeholder="NAME"
-            spellCheck={false}
-            className="w-2/5 font-mono text-xs"
-            onChange={(event) => set(index, { ...row, name: event.target.value })}
-          />
-          <Input
-            aria-label="Value"
-            type="password"
-            value={row.value}
-            placeholder="value"
-            spellCheck={false}
-            className="font-mono text-xs"
-            onChange={(event) => set(index, { ...row, value: event.target.value })}
-          />
-          <Button variant="ghost" size="icon" aria-label="Remove the variable" onClick={() => set(index, null)}>
-            <XIcon />
-          </Button>
-        </div>
-      ))}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="self-start"
-        onClick={() => setExtra([...extra, { name: "", value: "" }])}
-        title="A variable every session of this agent sees: an API key, a config directory"
-      >
-        <PlusIcon /> Add variable
-      </Button>
-    </div>
   );
 }
 

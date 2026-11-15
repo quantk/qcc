@@ -655,65 +655,9 @@ textarea {
 
 /* ----- composer ----- */
 
-.composer {
-  border-top: 1px solid var(--border);
-  padding: 8px 24px 14px;
-}
-
-.composer.archived {
-  color: var(--text-muted);
-  text-align: center;
-  padding: 14px;
-}
-
-.composer-status,
-.composer-box {
-  max-width: 812px;
-  margin: 0 auto;
-}
-
-.composer-status {
-  display: flex;
-  gap: 14px;
-  color: var(--text-muted);
-  font-size: 12px;
-  min-height: 20px;
-  padding: 0 2px 4px;
-}
-
 .status-working {
   color: var(--brand);
   animation: pulse 1.4s ease-in-out infinite;
-}
-
-.composer-box {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  background: var(--raised);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 6px 6px 6px 4px;
-}
-
-.composer-box:focus-within {
-  border-color: var(--brand);
-}
-
-.composer-box textarea {
-  border: none;
-  background: none;
-  resize: none;
-  outline: none;
-  line-height: 1.45;
-  padding: 5px 8px;
-  overflow-x: hidden;
-}
-
-.composer-actions {
-  display: flex;
-  gap: 6px;
-  flex: none;
 }
 
 /* ----- changes and diffs ----- */

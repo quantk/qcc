@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
 const REMEMBERED = "qcc.new-thread";
@@ -18,7 +19,6 @@ const OTHER = "\u0000other";
 type Remembered = {
   provider?: string;
   cwd?: string;
-  environment?: string;
   mode?: string;
   model?: string;
   project?: string;
@@ -50,7 +50,8 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
     if (first && !first.folders.includes(last.cwd ?? "")) return first.folders[0] ?? "";
     return last.cwd ?? "";
   });
-  const [environment, setEnvironment] = useState(last.environment ?? "");
+  // A separate copy is a decision for each thread: it starts off and is not remembered.
+  const [environment, setEnvironment] = useState("");
   const [base, setBase] = useState("");
   // A model means something only to the agent it was chosen for.
   const [model, setModel] = useState<string | null>(last.model || null);
@@ -90,7 +91,6 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
     const next: Remembered = {
       provider: provider.id,
       cwd: cwd.trim(),
-      environment: chosenEnvironment,
       mode,
       model: model ?? undefined,
       project: project?.id,
@@ -195,16 +195,35 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
               </div>
             </Field>
             )}
-            <Field>
-              <FieldLabel>Workspace</FieldLabel>
-              <Choice
-                aria-label="Workspace"
-                className="w-full"
-                value={chosenEnvironment || null}
-                options={environmentOptions}
-                onChange={(value) => setEnvironment(value ?? "")}
-              />
-            </Field>
+            {environments.length > 0 && (
+              <Field orientation="horizontal" className="items-start justify-between gap-4">
+                <div className="flex flex-col gap-0.5">
+                  <FieldLabel htmlFor="new-thread-isolated">Separate git worktree</FieldLabel>
+                  <p className="text-[13px] text-muted-foreground">
+                    {chosenEnvironment
+                      ? "The agent works in a copy on a new branch; your checkout stays as it is."
+                      : "Off: the agent works right in this directory."}
+                  </p>
+                </div>
+                <Switch
+                  id="new-thread-isolated"
+                  checked={Boolean(chosenEnvironment)}
+                  onCheckedChange={(checked) => setEnvironment(checked ? (environments[0]?.id ?? "") : "")}
+                />
+              </Field>
+            )}
+            {chosenEnvironment && environments.length > 1 && (
+              <Field>
+                <FieldLabel>Kind of copy</FieldLabel>
+                <Choice
+                  aria-label="Kind of copy"
+                  className="w-full"
+                  value={chosenEnvironment}
+                  options={environmentOptions.filter((option) => option.value !== null)}
+                  onChange={(value) => setEnvironment(value ?? "")}
+                />
+              </Field>
+            )}
             {chosenEnvironment && (
               <Field>
                 <FieldLabel htmlFor="new-thread-base">Start from</FieldLabel>

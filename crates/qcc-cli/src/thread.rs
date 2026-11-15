@@ -7,14 +7,14 @@ use std::sync::Arc;
 use anyhow::bail;
 use clap::Subcommand;
 use qcc_client::protocol::methods::{
-    Delivery, Empty, MessageContext, SendMode, SettingsGet, StopMode, ThreadArchive,
+    Delivery, Empty, MessageContext, SendMode, SettingsGet, SkillList, StopMode, ThreadArchive,
     ThreadArchiveParams, ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet,
     ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
     ThreadRename, ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
     ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams,
-    ThreadSetParent, ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
-    ThreadWait, ThreadWaitParams,
+    ThreadSetParent, ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams,
+    ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
+    ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -65,6 +65,12 @@ pub(crate) enum ThreadCommand {
         /// [default: the agent's own configuration].
         #[arg(long, value_name = "MODE")]
         permission_mode: Option<PermissionMode>,
+        /// Give the thread a skill offered on request (`qcc skill list`). Repeatable.
+        #[arg(long = "skill", value_name = "NAME")]
+        skills: Vec<String>,
+        /// Leave out a skill every session gets. Repeatable.
+        #[arg(long = "without-skill", value_name = "NAME")]
+        without_skills: Vec<String>,
         /// Stream the thread's events until the first turn settles.
         #[arg(long)]
         follow: bool,
@@ -88,6 +94,18 @@ pub(crate) enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// The skills a thread's sessions get; with --on and --off, turn skills on or
+    /// off for this thread alone. Off takes effect with its next session; on is told
+    /// to a running session with the next message.
+    Skills {
+        thread: String,
+        /// Turn this skill on in the thread. Repeatable.
+        #[arg(long = "on", value_name = "NAME")]
+        on: Vec<String>,
+        /// Turn this skill off in the thread. Repeatable.
+        #[arg(long = "off", value_name = "NAME")]
+        off: Vec<String>,
+    },
     /// The MCP servers of a thread's session and the ones it keeps off; with --off
     /// and --on, turn servers set up in qcc (`qcc mcp list`) off or on for this
     /// thread alone, not the threads it starts. The agent's own servers are shown,
@@ -214,6 +232,8 @@ pub(crate) async fn run(
             parent,
             project,
             permission_mode,
+            skills,
+            without_skills,
             follow,
         } => {
             let project = match project {
@@ -259,6 +279,8 @@ pub(crate) async fn run(
                     parent,
                     project,
                     permission_mode,
+                    skills_enabled: skills,
+                    skills_disabled: without_skills,
                 })
                 .await?;
             if follow {
@@ -348,6 +370,54 @@ pub(crate) async fn run(
                 out("no MCP servers reported, none kept off");
             } else {
                 out(render::mcp_servers(&thread));
+            }
+        }
+
+        ThreadCommand::Skills { thread, on, off } => {
+            let thread_id = ThreadId::new(thread);
+            let mut thread = client
+                .call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() })
+                .await?
+                .thread;
+            let switches = off.into_iter().map(|name| (name, false));
+            for (skill, enabled) in switches.chain(on.into_iter().map(|name| (name, true))) {
+                let params = ThreadSetSkillParams { thread_id: thread_id.clone(), skill, enabled };
+                thread = client.call::<ThreadSetSkill>(params).await?.thread;
+            }
+            let listed = client.call::<SkillList>(Empty {}).await?;
+            let rows: Vec<(String, bool, bool)> = listed
+                .skills
+                .iter()
+                .map(|skill| {
+                    let on = !skill.disabled
+                        && if skill.on_request {
+                            thread.skills_enabled.contains(&skill.name)
+                        } else {
+                            !thread.skills_disabled.contains(&skill.name)
+                        };
+                    (skill.name.clone(), on, skill.on_request)
+                })
+                .collect();
+            if json {
+                let skills: Vec<_> = rows
+                    .iter()
+                    .map(|(name, on, on_request)| {
+                        serde_json::json!({"name": name, "on": on, "on_request": on_request})
+                    })
+                    .collect();
+                print_json(&serde_json::json!({
+                    "skills": skills,
+                    "skills_enabled": thread.skills_enabled,
+                    "skills_disabled": thread.skills_disabled,
+                }))?;
+            } else if rows.is_empty() {
+                out("no plugin offers skills");
+            } else {
+                for (name, on, on_request) in rows {
+                    let state = if on { "on" } else { "off" };
+                    let request = if on_request { "  (on request)" } else { "" };
+                    out(format!("{name:<24} {state}{request}"));
+                }
             }
         }
 

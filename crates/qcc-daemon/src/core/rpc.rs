@@ -6,11 +6,11 @@ use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandList, CommandRun, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
     PluginList, ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate,
-    ProviderModels, SettingsGet, SettingsSet, ThreadArchive, ThreadChanges, ThreadDeliver,
-    ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
+    ProviderModels, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadChanges,
+    ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
     ThreadListParams, ThreadListResult, ThreadRename, ThreadResult, ThreadSend, ThreadSetAgent,
-    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSpawn, ThreadStop,
-    ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
+    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn,
+    ThreadStop, ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
     ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
     UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams,
 };
@@ -89,6 +89,14 @@ impl Core {
             }
             ThreadUnqueue::NAME => {
                 let result = params::<ThreadUnqueue>(raw).and_then(|p| self.thread_unqueue(p));
+                responder.reply(result);
+            }
+            ThreadSetSkill::NAME => {
+                let result = params::<ThreadSetSkill>(raw).and_then(|p| self.thread_set_skill(p));
+                responder.reply(result);
+            }
+            SkillList::NAME => {
+                let result = params::<SkillList>(raw).map(|Empty {}| self.skill_list());
                 responder.reply(result);
             }
             ThreadSetAgent::NAME => {

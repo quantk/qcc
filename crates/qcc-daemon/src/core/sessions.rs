@@ -75,7 +75,7 @@ impl Core {
                 prompt,
                 permission_mode: thread.permission_mode,
                 env: self.session_env(id),
-                skills: self.skills.clone(),
+                skills: self.session_skills(&thread.skills_enabled, &thread.skills_disabled),
                 extra_dirs,
                 mcp_servers,
                 mcp_disabled,

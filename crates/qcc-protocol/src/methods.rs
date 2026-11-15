@@ -85,6 +85,12 @@ pub struct ThreadSpawnParams {
     /// decides. Must be a mode the provider lists in its capabilities.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,
+    /// Skills offered on request that the thread gets (`skill.list`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_enabled: Vec<String>,
+    /// Skills every session gets that the thread goes without.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_disabled: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -196,6 +202,20 @@ method!(
 pub struct ThreadSetMcpParams {
     pub thread_id: ThreadId,
     pub server: String,
+    pub enabled: bool,
+}
+
+method!(
+    /// Turn a skill on or off in one thread. Off takes effect when the thread's next
+    /// session starts: the agent may have read it already. On is told to a running
+    /// session with the next message, so it need not start again.
+    ThreadSetSkill, "thread.set_skill", ThreadSetSkillParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadSetSkillParams {
+    pub thread_id: ThreadId,
+    pub skill: String,
     pub enabled: bool,
 }
 
@@ -597,6 +617,35 @@ pub struct PluginPermissions {
     pub process: Vec<String>,
 }
 
+// ----- skills -----------------------------------------------------------------------
+
+method!(
+    /// The skills plugins offer, and which of them the user turned off.
+    SkillList, "skill.list", Empty => SkillListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SkillListResult {
+    /// By name.
+    pub skills: Vec<SkillStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SkillStatus {
+    pub name: String,
+    pub description: String,
+    /// The plugin that offers it.
+    pub plugin: String,
+    /// Given only to threads that ask for it, not to every session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_request: bool,
+    /// Turned off in the settings: no session gets it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
+    /// Where agents read it.
+    pub path: String,
+}
+
 // ----- providers --------------------------------------------------------------------
 
 method!(
@@ -637,6 +686,16 @@ pub struct Settings {
     /// configuration names, by server name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub mcp_servers: BTreeMap<String, McpServerSettings>,
+    /// What the user set for skills plugins offer, by skill name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub skills: BTreeMap<String, SkillSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SkillSettings {
+    /// No session gets it, whatever a thread asks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

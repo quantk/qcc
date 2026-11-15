@@ -40,8 +40,8 @@ plugin's UI does:
 
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
-| A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/mcp` |
-| A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage`, `modules/mcp` |
+| A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/mcp`, `modules/skills` |
+| A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage`, `modules/mcp`, `modules/skills` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |

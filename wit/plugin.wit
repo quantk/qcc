@@ -289,8 +289,8 @@ interface types {
     params: list<command-param>,
   }
 
-  /// Instructions for agents, offered to every agent session. Requires the
-  /// `skills` permission: what it says reaches every agent.
+  /// Instructions for agents. Requires the `skills` permission: what it says can
+  /// reach every agent. The user turns a skill off for all threads or for one.
   record skill-info {
     /// Lowercase letters, digits and dashes.
     name: string,
@@ -298,6 +298,9 @@ interface types {
     description: string,
     /// Markdown.
     body: string,
+    /// Offered only to threads that ask for it (`spawn-options.skills-enabled`, or
+    /// the user turning it on in a thread), not to every session.
+    on-request: bool,
   }
 
   variant contribution {
@@ -738,6 +741,11 @@ interface threads {
     environment: option<string>,
     base: option<string>,
     permission-mode: option<permission-mode>,
+    /// Skills the thread gets on top of those every session gets: the names of
+    /// skills offered on request.
+    skills-enabled: list<string>,
+    /// Skills every session gets that this thread goes without.
+    skills-disabled: list<string>,
   }
 
   enum role { user, agent }

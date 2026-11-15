@@ -168,6 +168,8 @@ impl Orchestration {
             environment: None,
             base: None,
             permission_mode: None,
+            skills_enabled: Vec::new(),
+            skills_disabled: Vec::new(),
         })?;
         Ok(CommandResult {
             message: format!(
@@ -194,6 +196,8 @@ impl Orchestration {
             environment: None,
             base: None,
             permission_mode: None,
+            skills_enabled: Vec::new(),
+            skills_disabled: Vec::new(),
         })?;
         kv::put(&format!("{REVIEW_PREFIX}{}", reviewer.id), source.id.as_bytes())?;
         threads::watch(&reviewer.id)?;
@@ -274,6 +278,7 @@ impl Plugin for Orchestration {
                           between agents or when asked to use other agents."
                 .into(),
             body: SKILL_BODY.into(),
+            on_request: false,
         }]
     }
 

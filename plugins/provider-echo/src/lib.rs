@@ -27,6 +27,8 @@
 //! command or URL contains `fail`, or off when the thread keeps it off. It turns
 //! servers on and off in a running session (`mcp-toggle`).
 //!
+//! It offers a skill on request, `echo-demo`, for tests of skill switching.
+//!
 //! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
 //! `/card` items, both built from the fixed set of UI nodes.
 
@@ -653,6 +655,15 @@ impl Ui for Echo {
 impl Plugin for Echo {
     fn providers(&mut self) -> Vec<&mut dyn Provider> {
         vec![self]
+    }
+
+    fn skills(&self) -> Vec<SkillInfo> {
+        vec![SkillInfo {
+            name: "echo-demo".into(),
+            description: "An example skill, offered only to threads that ask for it.".into(),
+            body: "Say everything twice.".into(),
+            on_request: true,
+        }]
     }
 
     fn ui(&mut self) -> Option<&mut dyn Ui> {

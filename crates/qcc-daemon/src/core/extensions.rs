@@ -141,6 +141,8 @@ impl Core {
                         parent: spawn.parent,
                         project: None,
                         permission_mode: spawn.permission_mode,
+                        skills_enabled: spawn.skills_enabled,
+                        skills_disabled: spawn.skills_disabled,
                     })
                     .map_err(|error| error.message)?;
                 summary(self, &result.thread.id)

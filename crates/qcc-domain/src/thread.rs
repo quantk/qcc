@@ -217,6 +217,13 @@ pub struct Thread {
     /// sessions start without them. Not passed on to the threads it starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_disabled: Vec<String>,
+    /// Skills offered on request that this thread gets, by name, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_enabled: Vec<String>,
+    /// Skills every session gets that this thread goes without, by name, sorted.
+    /// Neither list is passed on to the threads it starts.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills_disabled: Vec<String>,
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -329,6 +336,10 @@ impl Thread {
             EventPayload::EnvironmentRemoved => self.set_environment(EnvironmentState::Removed),
             EventPayload::McpServersChanged { servers } => self.mcp_servers.clone_from(servers),
             EventPayload::McpDisabledChanged { disabled } => self.mcp_disabled.clone_from(disabled),
+            EventPayload::SkillsChanged { enabled, disabled } => {
+                self.skills_enabled.clone_from(enabled);
+                self.skills_disabled.clone_from(disabled);
+            }
             EventPayload::ThreadArchived => self.archived = true,
             _ => {}
         }
@@ -368,6 +379,8 @@ mod tests {
             pending_interactions: Vec::new(),
             mcp_servers: Vec::new(),
             mcp_disabled: Vec::new(),
+            skills_enabled: Vec::new(),
+            skills_disabled: Vec::new(),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

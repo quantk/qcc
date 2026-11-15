@@ -327,6 +327,8 @@ mod tests {
             parent: None,
             project: None,
             permission_mode: None,
+            skills_enabled: Vec::new(),
+            skills_disabled: Vec::new(),
         }
     }
 

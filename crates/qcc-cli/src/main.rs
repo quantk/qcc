@@ -8,6 +8,7 @@ mod mcp;
 mod project;
 mod render;
 mod settings;
+mod skill;
 mod thread;
 
 use std::collections::BTreeMap;
@@ -28,6 +29,7 @@ use serde::Serialize;
 use mcp::McpCommand;
 use project::ProjectCommand;
 use settings::SettingsCommand;
+use skill::SkillCommand;
 use thread::ThreadCommand;
 
 /// Control center for coding agents.
@@ -71,6 +73,9 @@ enum Command {
     /// configuration.
     #[command(subcommand)]
     Mcp(McpCommand),
+    /// Skills plugins offer agents: instructions an agent reads when a task needs them.
+    #[command(subcommand)]
+    Skill(SkillCommand),
     /// Inspect agent providers.
     #[command(subcommand)]
     Provider(ProviderCommand),
@@ -194,6 +199,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Settings(command) => return settings::run(&client, command, json).await,
 
         Command::Mcp(command) => return mcp::run(&client, command, json).await,
+
+        Command::Skill(command) => return skill::run(&client, command, json).await,
 
         Command::Interaction(InteractionCommand::Resolve { thread, interaction, answer }) => {
             let resolution = match answer {

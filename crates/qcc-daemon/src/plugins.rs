@@ -135,9 +135,19 @@ fn valid_skill_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
+/// A skill a plugin offers, written out where agents read it.
+#[derive(Debug, Clone)]
+pub(crate) struct OfferedSkill {
+    pub reference: SkillRef,
+    pub plugin: String,
+    /// Given only to threads that ask for it.
+    pub on_request: bool,
+}
+
 /// Write the skills of plugins allowed to offer them where agents can read them,
-/// replacing what an earlier start wrote.
-pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<SkillRef> {
+/// replacing what an earlier start wrote. A name is the skill's handle, so the
+/// first plugin to offer one keeps it.
+pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<OfferedSkill> {
     let root = config.skills_dir();
     if root.exists()
         && let Err(error) = std::fs::remove_dir_all(&root)
@@ -164,6 +174,14 @@ pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<SkillRef> 
                 );
                 continue;
             }
+            if skills.iter().any(|offered: &OfferedSkill| offered.reference.name == skill.name) {
+                tracing::warn!(
+                    plugin = plugin.id(),
+                    skill = skill.name,
+                    "skill ignored: another plugin offers one of that name"
+                );
+                continue;
+            }
             let dir = root.join(plugin.id()).join(&skill.name);
             let path = dir.join("SKILL.md");
             // A JSON string is a valid YAML scalar, whatever the description says.
@@ -178,10 +196,14 @@ pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<SkillRef> 
                 tracing::error!(path = %path.display(), %error, "cannot write a skill");
                 continue;
             }
-            skills.push(SkillRef {
-                name: skill.name.clone(),
-                description: skill.description.clone(),
-                path: path.display().to_string(),
+            skills.push(OfferedSkill {
+                reference: SkillRef {
+                    name: skill.name.clone(),
+                    description: skill.description.clone(),
+                    path: path.display().to_string(),
+                },
+                plugin: plugin.id().to_owned(),
+                on_request: skill.on_request,
             });
         }
     }

@@ -108,6 +108,8 @@ impl HarnessBuilder {
             pending_interactions: Vec::new(),
             mcp_servers: Vec::new(),
             mcp_disabled: Vec::new(),
+            skills_enabled: Vec::new(),
+            skills_disabled: Vec::new(),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

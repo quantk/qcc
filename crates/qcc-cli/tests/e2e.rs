@@ -1769,6 +1769,93 @@ fn the_user_moves_threads_between_families() {
 }
 
 #[test]
+fn skills_are_switched_for_all_threads_and_for_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let last = |thread: &str| {
+        let told = daemon.qcc(&["thread", "wait", thread, "--json"]).json();
+        told["threads"][0]["last_message"].as_str().unwrap().to_owned()
+    };
+    let listed = daemon.qcc(&["skill", "list", "--json"]).json();
+    let names: Vec<&str> =
+        listed.as_array().unwrap().iter().map(|skill| skill["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["echo-demo", "qcc-orchestration"]);
+    assert_eq!(listed[0]["on_request"], true);
+
+    // A skill offered on request reaches only a thread that asks for it, and one
+    // every session gets can be left out.
+    let plain = daemon.spawn("/skills");
+    let told = last(&plain);
+    assert!(told.contains("qcc-orchestration:") && !told.contains("echo-demo"), "{told}");
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--prompt",
+        "/skills",
+        "--skill",
+        "echo-demo",
+        "--without-skill",
+        "qcc-orchestration",
+        "--json",
+    ]);
+    assert!(output.ok, "{}", output.stderr);
+    let chosen = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    let told = last(&chosen);
+    assert!(told.contains("echo-demo:") && !told.contains("qcc-orchestration"), "{told}");
+    let unknown = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--skill", "nope"]);
+    assert!(!unknown.ok && unknown.stderr.contains("no plugin offers"), "{}", unknown.stderr);
+
+    // Turned on in a running session, the skill is told with the next message.
+    let switched = daemon.qcc(&["thread", "skills", &plain, "--on", "echo-demo"]);
+    assert!(switched.ok, "{}", switched.stderr);
+    assert!(
+        switched.stdout.contains("echo-demo                on  (on request)"),
+        "{}",
+        switched.stdout
+    );
+    assert!(daemon.qcc(&["thread", "send", &plain, "/notes"]).ok);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while messages(&daemon.events(&plain)).len() < 2 {
+        assert!(Instant::now() < deadline, "the second turn never ran");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let note = messages(&daemon.events(&plain))[1].to_owned();
+    assert!(note.contains("qcc now offers the skill echo-demo"), "{note}");
+    // Told once: the next message carries no note.
+    assert!(daemon.qcc(&["thread", "send", &plain, "/notes"]).ok);
+    while messages(&daemon.events(&plain)).len() < 3 {
+        assert!(Instant::now() < deadline, "the third turn never ran");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(messages(&daemon.events(&plain))[2], "no notes");
+    // Turned off, it is gone for the thread's next session, with no note.
+    assert!(daemon.qcc(&["thread", "skills", &plain, "--off", "echo-demo"]).ok);
+    assert!(daemon.thread(&plain).get("skills_enabled").is_none());
+
+    // Turned off for all, no session gets it, whatever a thread asks.
+    assert!(daemon.qcc(&["skill", "disable", "echo-demo"]).ok);
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--prompt",
+        "/skills",
+        "--skill",
+        "echo-demo",
+        "--json",
+    ]);
+    let asked = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    assert!(!last(&asked).contains("echo-demo"));
+    assert!(daemon.qcc(&["skill", "list"]).stdout.contains("(on request, off)"));
+    assert!(daemon.qcc(&["skill", "enable", "echo-demo"]).ok);
+    let settings = daemon.qcc(&["settings", "show", "--json"]).json();
+    assert!(settings.get("skills").is_none(), "{settings}");
+}
+
+#[test]
 fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

@@ -180,6 +180,8 @@ pub struct SpawnThread {
     pub environment: Option<String>,
     pub base: Option<String>,
     pub permission_mode: Option<PermissionMode>,
+    pub skills_enabled: Vec<String>,
+    pub skills_disabled: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -12,6 +12,7 @@ import { pluginCommandsModule } from "./plugin-commands";
 import { pluginUiModule } from "./plugin-ui";
 import { projectsModule } from "./projects";
 import { settingsModule } from "./settings";
+import { skillsModule } from "./skills";
 import { threadControlsModule } from "./thread-controls";
 import { threadMenuModule } from "./thread-menu";
 import { timelineModule } from "./timeline";
@@ -29,5 +30,6 @@ export const builtinModules: UiModule[] = [
   pluginUiModule,
   pluginCommandsModule,
   mcpModule,
+  skillsModule,
   settingsModule,
 ];

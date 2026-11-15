@@ -227,6 +227,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             name: s.name,
             description: s.description,
             body: s.body,
+            on_request: s.on_request,
         }),
     }
 }
@@ -260,6 +261,8 @@ pub(crate) fn spawn_options(options: wit_threads::SpawnOptions) -> SpawnThread {
         environment: options.environment,
         base: options.base,
         permission_mode: options.permission_mode.map(mode_from_wit),
+        skills_enabled: options.skills_enabled,
+        skills_disabled: options.skills_disabled,
     }
 }
 

@@ -6,8 +6,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    Delta, EventPayload, ModelInfo, Project, ProviderId, SkillRef, ThreadEnvironment, ThreadEvent,
-    ThreadId, ThreadStatus, UserInput,
+    Delta, EventPayload, ModelInfo, Project, ProviderId, ThreadEnvironment, ThreadEvent, ThreadId,
+    ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -31,6 +31,7 @@ mod environments;
 mod extensions;
 mod rpc;
 mod sessions;
+mod skills;
 mod threads;
 mod waits;
 
@@ -242,7 +243,7 @@ pub(crate) struct Core {
     next_waiter: u64,
     watches: Vec<Watch>,
     /// Skills plugins offer, written out where agents can read them.
-    skills: Vec<SkillRef>,
+    skills: Vec<plugins::OfferedSkill>,
     /// Oldest first.
     projects: Vec<Project>,
     settings: Settings,

@@ -201,7 +201,7 @@ pub struct CommandInfo {
     pub params: Vec<CommandParam>,
 }
 
-/// Instructions for agents that a plugin offers to every agent session.
+/// Instructions for agents that a plugin offers to agent sessions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct SkillInfo {
     pub name: String,
@@ -209,6 +209,9 @@ pub struct SkillInfo {
     pub description: String,
     /// Markdown.
     pub body: String,
+    /// Offered only to threads that ask for it, not to every session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub on_request: bool,
 }
 
 /// A skill as an agent session gets it: a file it can read.

@@ -12,3 +12,5 @@ deltas = true
 kv = true
 timers = true
 process = ["echo"]
+# An example skill offered on request.
+skills = true

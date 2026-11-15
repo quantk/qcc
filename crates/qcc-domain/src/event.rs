@@ -195,6 +195,16 @@ pub enum EventPayload {
     #[serde(rename = "thread/mcp-disabled")]
     McpDisabledChanged { disabled: Vec<String> },
 
+    /// The skills the thread takes beyond and leaves out of what every session
+    /// gets: both whole lists, sorted.
+    #[serde(rename = "thread/skills")]
+    SkillsChanged {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        enabled: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        disabled: Vec<String>,
+    },
+
     #[serde(rename = "interaction/requested")]
     InteractionRequested {
         interaction_id: InteractionId,

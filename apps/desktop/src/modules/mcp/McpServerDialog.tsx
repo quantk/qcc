@@ -28,7 +28,7 @@ export function McpServerDialog(props: { close: () => void; name?: string; serve
   const save = async () => {
     if (problem || "problem" in built) return;
     setSaving(true);
-    const saved = await store().changeMcpServers((settings) =>
+    const saved = await store().changeSettings((settings) =>
       original ? renamedMcpServer(settings, original, name, built) : withMcpServer(settings, name, built),
     );
     setSaving(false);
@@ -36,7 +36,7 @@ export function McpServerDialog(props: { close: () => void; name?: string; serve
   };
   const remove = async () => {
     if (!original) return;
-    if (await store().changeMcpServers((settings) => withMcpServer(settings, original, null))) close();
+    if (await store().changeSettings((settings) => withMcpServer(settings, original, null))) close();
   };
 
   return (

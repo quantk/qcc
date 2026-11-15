@@ -129,6 +129,12 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(parent) = &thread.parent {
         lines.push(format!("parent    {parent}"));
     }
+    if !thread.skills_enabled.is_empty() {
+        lines.push(format!("skills    {} on", thread.skills_enabled.join(", ")));
+    }
+    if !thread.skills_disabled.is_empty() {
+        lines.push(format!("skills    {} off", thread.skills_disabled.join(", ")));
+    }
     let mcp = mcp_servers(thread);
     if !mcp.is_empty() {
         lines.extend(mcp.lines().map(str::to_owned));
@@ -383,6 +389,20 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
             true => "(every MCP server on)".to_owned(),
             false => format!("(MCP servers off: {})", disabled.join(", ")),
         },
+        EventPayload::SkillsChanged { enabled, disabled } => {
+            let mut parts = Vec::new();
+            if !enabled.is_empty() {
+                parts.push(format!("skills on: {}", enabled.join(", ")));
+            }
+            if !disabled.is_empty() {
+                parts.push(format!("skills off: {}", disabled.join(", ")));
+            }
+            if parts.is_empty() {
+                "(the skills every session gets)".to_owned()
+            } else {
+                format!("({})", parts.join("; "))
+            }
+        }
         EventPayload::ParentChanged { parent } => match parent {
             Some(parent) => format!("(moved under {parent})"),
             None => "(no longer under another thread)".to_owned(),

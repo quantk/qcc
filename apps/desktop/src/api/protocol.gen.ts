@@ -160,7 +160,12 @@ queue_id?: string | null } |
  */
 { type: "mcp/servers"; servers: McpServerStatus[] } | 
 /**  The MCP servers the thread keeps off: the whole list, sorted. */
-{ type: "thread/mcp-disabled"; disabled: string[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
+{ type: "thread/mcp-disabled"; disabled: string[] } | 
+/**
+ *  The skills the thread takes beyond and leaves out of what every session
+ *  gets: both whole lists, sorted.
+ */
+{ type: "thread/skills"; enabled?: string[]; disabled?: string[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
 
 /**  Minted by the delta assembler for every `interaction.request`. */
 export type InteractionId = string;
@@ -454,6 +459,8 @@ export type Settings = {
 	 *  configuration names, by server name.
 	 */
 	mcp_servers?: { [key in string]: McpServerSettings },
+	/**  What the user set for skills plugins offer, by skill name. */
+	skills?: { [key in string]: SkillSettings },
 };
 
 export type SettingsResult = {
@@ -464,6 +471,29 @@ export type SettingsResult = {
 
 export type SettingsSetParams = {
 	settings: Settings,
+};
+
+export type SkillListResult = {
+	/**  By name. */
+	skills: SkillStatus[],
+};
+
+export type SkillSettings = {
+	/**  No session gets it, whatever a thread asks. */
+	disabled?: boolean,
+};
+
+export type SkillStatus = {
+	name: string,
+	description: string,
+	/**  The plugin that offers it. */
+	plugin: string,
+	/**  Given only to threads that ask for it, not to every session. */
+	on_request?: boolean,
+	/**  Turned off in the settings: no session gets it. */
+	disabled?: boolean,
+	/**  Where agents read it. */
+	path: string,
 };
 
 export type StopMode = 
@@ -533,6 +563,13 @@ export type Thread = {
 	 *  sessions start without them. Not passed on to the threads it starts.
 	 */
 	mcp_disabled?: string[],
+	/**  Skills offered on request that this thread gets, by name, sorted. */
+	skills_enabled?: string[],
+	/**
+	 *  Skills every session gets that this thread goes without, by name, sorted.
+	 *  Neither list is passed on to the threads it starts.
+	 */
+	skills_disabled?: string[],
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**
@@ -709,6 +746,12 @@ export type ThreadSetProjectParams = {
 	project?: ProjectId | null,
 };
 
+export type ThreadSetSkillParams = {
+	thread_id: ThreadId,
+	skill: string,
+	enabled: boolean,
+};
+
 export type ThreadSpawnParams = {
 	provider: ProviderId,
 	/**  Working directory of the thread, or what its environment is made from. */
@@ -740,6 +783,10 @@ export type ThreadSpawnParams = {
 	 *  decides. Must be a mode the provider lists in its capabilities.
 	 */
 	permission_mode?: PermissionMode | null,
+	/**  Skills offered on request that the thread gets (`skill.list`). */
+	skills_enabled?: string[],
+	/**  Skills every session gets that the thread goes without. */
+	skills_disabled?: string[],
 };
 
 /**
@@ -927,6 +974,8 @@ export type Methods = {
 	"thread.unqueue": { params: ThreadUnqueueParams; result: ThreadUnqueueResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
+	"thread.set_skill": { params: ThreadSetSkillParams; result: ThreadResult },
+	"skill.list": { params: Empty; result: SkillListResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },
 	"thread.set_parent": { params: ThreadSetParentParams; result: ThreadResult },

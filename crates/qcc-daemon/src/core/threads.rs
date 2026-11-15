@@ -83,6 +83,7 @@ impl Core {
         if let Some(parent) = &parent {
             check_ceiling(parent, p.permission_mode)?;
         }
+        self.check_skills(p.skills_enabled.iter().chain(&p.skills_disabled))?;
         let cwd = std::path::Path::new(&p.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err(RpcError::new(
@@ -147,6 +148,8 @@ impl Core {
                     parent: p.parent,
                     project,
                     permission_mode: p.permission_mode,
+                    skills_enabled: p.skills_enabled,
+                    skills_disabled: p.skills_disabled,
                 },
                 now,
             )
@@ -456,7 +459,7 @@ impl Core {
     }
 
     /// An archived thread takes no input, and neither does one being archived.
-    fn check_open(&self, id: &ThreadId) -> Result<(), RpcError> {
+    pub(super) fn check_open(&self, id: &ThreadId) -> Result<(), RpcError> {
         let thread = self.supervisor.thread(id).ok_or_else(|| thread_not_found(id))?;
         if thread.archived {
             return Err(RpcError::new(codes::THREAD_ARCHIVED, format!("thread {id} is archived")));

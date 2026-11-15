@@ -20,6 +20,7 @@ import type {
   SendMode,
   Settings,
   SettingsResult,
+  SkillStatus,
   Thread,
   ThreadEvent,
   ThreadId,
@@ -107,6 +108,8 @@ export type AppState = {
   history: History;
   /** Threads whose children the sidebar keeps folded under them. */
   collapsed: ReadonlySet<ThreadId>;
+  /** The skills plugins offer; whether one is off is in the settings. */
+  skills: readonly SkillStatus[];
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -135,6 +138,7 @@ export class AppStore {
     seen: readSeen() ?? {},
     history: startHistory,
     collapsed: readCollapsed(),
+    skills: [],
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -198,15 +202,16 @@ export class AppStore {
     const watch = this.nextSubscription++;
     this.watch = watch;
     try {
-      const [list, plugins, projects, settings] = await Promise.all([
+      const [list, plugins, projects, settings, skills] = await Promise.all([
         this.api.call("thread.watch", { subscription: watch }),
         this.api.call("plugin.list", {}),
         this.api.call("project.list", {}),
         this.api.call("settings.get", {}),
+        this.api.call("skill.list", {}),
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
-      this.set({ projects: projects.projects, settings });
+      this.set({ projects: projects.projects, settings, skills: skills.skills });
       this.set({
         allPlugins: plugins.plugins,
         plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
@@ -508,11 +513,11 @@ export class AppStore {
   }
 
   /**
-   * Change the MCP servers alone. The settings are read again first, so neither a
-   * change from the CLI nor an unsaved draft of the settings screen is lost.
-   * Resolves to whether the daemon took it.
+   * Change one part of the settings (MCP servers, skills). The settings are read
+   * again first, so neither a change from the CLI nor an unsaved draft of the
+   * settings screen is lost. Resolves to whether the daemon took it.
    */
-  async changeMcpServers(change: (settings: Settings) => Settings): Promise<boolean> {
+  async changeSettings(change: (settings: Settings) => Settings): Promise<boolean> {
     const current = await this.attempt(() => this.api.call("settings.get", {}));
     if (!current) return false;
     const result = await this.attempt(() => this.api.call("settings.set", { settings: change(current.settings) }));
@@ -537,6 +542,15 @@ export class AppStore {
   async deleteProject(id: ProjectId) {
     const done = await this.attempt(() => this.api.call("project.delete", { id }));
     if (done) this.set({ projects: this.state.projects.filter((project) => project.id !== id) });
+  }
+
+  /** Turn a skill on or off for this thread alone. Resolves to whether the daemon took it. */
+  async setThreadSkill(threadId: ThreadId, skill: string, enabled: boolean): Promise<boolean> {
+    const result = await this.attempt(() =>
+      this.api.call("thread.set_skill", { thread_id: threadId, skill, enabled }),
+    );
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
   }
 
   /** Turn an MCP server on or off for this thread alone. Resolves to whether the daemon took it. */

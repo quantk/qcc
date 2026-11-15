@@ -305,6 +305,23 @@ impl ThreadEngine {
         self.emit(vec![EventPayload::McpDisabledChanged { disabled }], now)
     }
 
+    /// The skills the thread takes beyond, and leaves out of, what every session gets.
+    pub fn set_skills(
+        &mut self,
+        mut enabled: Vec<String>,
+        mut disabled: Vec<String>,
+        now: u64,
+    ) -> Vec<ThreadEvent> {
+        for names in [&mut enabled, &mut disabled] {
+            names.sort();
+            names.dedup();
+        }
+        if enabled == self.thread.skills_enabled && disabled == self.thread.skills_disabled {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::SkillsChanged { enabled, disabled }], now)
+    }
+
     /// Record the user's answer. Returns the provider-side request id the resolution
     /// has to be delivered with.
     pub fn resolve_interaction(

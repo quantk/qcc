@@ -91,7 +91,7 @@ function ProviderBadge({ provider }: { provider: string }) {
 function ServerCard({ name, server, usage }: { name: string; server: McpServerSettings; usage: McpUsage }) {
   const enabled = !server.disabled;
   const toggle = (on: boolean) =>
-    void store().changeMcpServers((settings) => withMcpServer(settings, name, { ...server, disabled: on ? undefined : true }));
+    void store().changeSettings((settings) => withMcpServer(settings, name, { ...server, disabled: on ? undefined : true }));
   return (
     <article className={`flex flex-col gap-1.5 rounded-lg border p-4${enabled ? "" : " opacity-70"}`}>
       <header className="flex items-center gap-2">

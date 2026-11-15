@@ -26,6 +26,9 @@ pub struct NewThread {
     pub parent: Option<ThreadId>,
     pub project: Option<ProjectId>,
     pub permission_mode: Option<PermissionMode>,
+    /// Skills offered on request it gets, and skills of every session it goes without.
+    pub skills_enabled: Vec<String>,
+    pub skills_disabled: Vec<String>,
 }
 
 /// All threads of a daemon. Owns one [`ThreadEngine`] per thread.
@@ -68,6 +71,8 @@ impl Supervisor {
             pending_interactions: Vec::new(),
             mcp_servers: Vec::new(),
             mcp_disabled: Vec::new(),
+            skills_enabled: sorted(new.skills_enabled),
+            skills_disabled: sorted(new.skills_disabled),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,
@@ -104,4 +109,10 @@ impl Supervisor {
     pub fn engine(&mut self, id: &ThreadId) -> Result<&mut ThreadEngine, SupervisorError> {
         self.engines.get_mut(id).ok_or_else(|| SupervisorError::UnknownThread(id.clone()))
     }
+}
+
+fn sorted(mut names: Vec<String>) -> Vec<String> {
+    names.sort();
+    names.dedup();
+    names
 }

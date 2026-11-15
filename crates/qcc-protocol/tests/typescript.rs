@@ -50,7 +50,11 @@ fn generate() -> String {
         .method::<ThreadEvents>()
         .method::<ThreadUnsubscribe>()
         .method::<InteractionResolve>()
-        .method::<PluginList>();
+        .method::<PluginList>()
+        .method::<UiContributions>()
+        .method::<UiRender>()
+        .method::<UiAction>()
+        .method::<UiRenderItem>();
     let types = api
         .types
         .register::<ThreadEventNotification>()

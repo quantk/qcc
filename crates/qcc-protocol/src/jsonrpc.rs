@@ -88,6 +88,8 @@ pub mod codes {
     pub const ENVIRONMENT_ERROR: i32 = -32006;
     /// The thread is archived.
     pub const THREAD_ARCHIVED: i32 = -32007;
+    /// No such plugin, or it does not contribute what was asked for, or it failed.
+    pub const PLUGIN_ERROR: i32 = -32008;
 }
 
 /// Either kind of message a peer can receive.

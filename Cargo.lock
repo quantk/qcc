@@ -3390,6 +3390,7 @@ name = "provider-echo"
 version = "0.1.0"
 dependencies = [
  "qcc-plugin-sdk",
+ "serde_json",
 ]
 
 [[package]]

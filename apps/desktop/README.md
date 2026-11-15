@@ -56,6 +56,18 @@ List it in `src/modules/index.ts` and it is part of the app. `ui.deactivate(id)`
 out everything the module registered; activating the same id again replaces it, which
 is how contributions that arrive at runtime stay current.
 
+## Plugin UI
+
+Plugins of the daemon contribute through the same registry. `modules/plugin-ui` reads
+`ui.contributions` on every connection and turns each entry into a registration: an app
+view, a thread tab (offered for all threads or only for the plugin's own providers) or
+the renderer of the plugin's extension items. What a plugin draws is a tree of UI nodes;
+`ui/kit/NodeView.tsx` draws the closed set of node types with the app's own components
+and ignores everything else, so a plugin's view is data and never code.
+
+Adding a node type means adding a case to `NodeView` and a builder to
+`crates/qcc-plugin-sdk/src/ui.rs`.
+
 Rules that keep modules independent:
 
 - A module talks to the daemon through `store().api.call(...)` and reads state with

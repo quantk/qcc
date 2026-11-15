@@ -1328,3 +1328,128 @@ select.small {
 .agent-card .output {
   max-height: 96px;
 }
+
+/* ----- plugin UI nodes ----- */
+
+.plugin-view,
+.plugin-screen {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.plugin-view {
+  padding: 16px 24px 24px;
+}
+
+.plugin-view > .pn,
+.plugin-view > .notice {
+  max-width: 860px;
+  margin: 0 auto 12px;
+}
+
+.plugin-item {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--raised);
+  padding: 10px 12px;
+}
+
+.pn-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pn-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pn-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.pn-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.tone-muted {
+  color: var(--muted);
+}
+
+.tone-success {
+  color: var(--green);
+}
+
+.tone-warning {
+  color: var(--accent);
+}
+
+.tone-danger {
+  color: var(--red);
+}
+
+.tag.tone-success {
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+}
+
+.pn-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 4px 0;
+  width: 100%;
+}
+
+.pn-kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 16px;
+}
+
+.pn-kv > div {
+  display: contents;
+}
+
+.pn-kv dt {
+  color: var(--muted);
+}
+
+.pn-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.pn-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.pn-table th,
+.pn-table td {
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.pn-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.pn-input {
+  display: flex;
+  gap: 8px;
+  max-width: 480px;
+}
+
+.pn-input button {
+  flex: none;
+}

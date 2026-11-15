@@ -2,9 +2,10 @@
 
 use qcc_domain::{
     EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution, PermissionMode,
-    ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId,
+    ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::Method;
 
@@ -327,4 +328,85 @@ pub struct PluginPermissions {
     pub timers: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
+}
+
+// ----- plugin UI --------------------------------------------------------------------
+
+method!(
+    /// The views and item renderers plugins contribute to the app.
+    UiContributions, "ui.contributions", Empty => UiContributionsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiContributionsResult {
+    pub views: Vec<UiViewContribution>,
+    pub items: Vec<UiItemContribution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiViewContribution {
+    pub plugin: String,
+    #[serde(flatten)]
+    pub view: UiViewInfo,
+    /// The providers the same plugin contributes: what `ownThreads` means.
+    pub providers: Vec<ProviderId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiItemContribution {
+    pub plugin: String,
+    /// The extension item kind the plugin draws; always `<plugin>/<name>`.
+    pub kind: String,
+}
+
+/// A tree of UI nodes. Each node is an object with a `type`; the app draws the
+/// types it knows and skips the rest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct UiTreeResult {
+    pub tree: Value,
+}
+
+method!(
+    /// Ask a plugin to draw one of its views.
+    UiRender, "ui.render", UiRenderParams => UiTreeResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiRenderParams {
+    pub plugin: String,
+    pub view: String,
+    /// The thread a thread tab is shown for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+}
+
+method!(
+    /// Tell a plugin the user activated a node of its view. The answer replaces
+    /// the view.
+    UiAction, "ui.action", UiActionParams => UiTreeResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiActionParams {
+    pub plugin: String,
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+    pub action: String,
+    /// What the node carried: a button's value, the text of an input.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
+method!(
+    /// Ask a plugin to draw a timeline item of one of its extension kinds.
+    UiRenderItem, "ui.render_item", UiRenderItemParams => UiTreeResult
+);
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+pub struct UiRenderItemParams {
+    pub plugin: String,
+    pub kind: String,
+    #[serde(default)]
+    pub payload: Value,
 }

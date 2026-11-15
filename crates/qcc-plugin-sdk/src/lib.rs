@@ -62,6 +62,8 @@ pub mod bindings {
 #[cfg(feature = "jsonrpc")]
 pub mod jsonrpc;
 pub mod lines;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
@@ -70,15 +72,16 @@ pub use bindings::qcc::plugin::{completions, deltas, kv, process, timers};
 use types::{
     Contribution, EnvironmentChanges, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, ModelInfo,
-    Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted, ThreadInput,
+    Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted, ThreadInput, UiAction,
+    UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Environment, Plugin, ProcessEvent, Provider, Reply, completions, deltas, kv, log, process,
-        timers,
+        Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas, kv, log,
+        process, timers,
     };
 }
 
@@ -204,6 +207,33 @@ pub enum ProcessEvent {
     },
 }
 
+/// The plugin's own views in the app, and how its timeline items are drawn.
+///
+/// Every answer is a tree of UI nodes as JSON; the `ui` feature has builders for it.
+/// The app draws nodes from a fixed set and nothing else, so a view is data, not code.
+pub trait Ui {
+    fn views(&self) -> Vec<UiViewInfo> {
+        Vec::new()
+    }
+
+    /// Extension item kinds this plugin draws: `<plugin-id>/<name>`.
+    fn item_kinds(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    fn render(&mut self, request: UiRender) -> Result<String, String>;
+
+    /// The user activated a node. The answer replaces the view; by default it is
+    /// the view rendered again.
+    fn action(&mut self, action: UiAction) -> Result<String, String> {
+        self.render(UiRender { view: action.view, thread: action.thread })
+    }
+
+    fn render_item(&mut self, item: UiItem) -> Result<String, String> {
+        Err(format!("this plugin does not draw {:?} items", item.kind))
+    }
+}
+
 /// The plugin itself. Every method has a default, so implement only what you contribute.
 pub trait Plugin: Default + 'static {
     fn providers(&mut self) -> Vec<&mut dyn Provider> {
@@ -212,6 +242,10 @@ pub trait Plugin: Default + 'static {
 
     fn environments(&mut self) -> Vec<&mut dyn Environment> {
         Vec::new()
+    }
+
+    fn ui(&mut self) -> Option<&mut dyn Ui> {
+        None
     }
 
     fn on_process(&mut self, event: ProcessEvent) {
@@ -277,6 +311,10 @@ pub mod __private {
             for environment in plugin.environments() {
                 contributions.push(Contribution::Environment(environment.info()));
             }
+            if let Some(ui) = plugin.ui() {
+                contributions.extend(ui.views().into_iter().map(Contribution::UiView));
+                contributions.extend(ui.item_kinds().into_iter().map(Contribution::UiItem));
+            }
             Ok(contributions)
         })
     }
@@ -323,6 +361,15 @@ pub mod __private {
                         environment.diff(query).map(|r| reply(r, Outcome::EnvironmentDiff))
                     }
                 }
+            }
+            Event::Ui(request) => {
+                let ui = plugin.ui().ok_or("this plugin contributes no UI")?;
+                match request {
+                    UiRequest::Render(request) => ui.render(request),
+                    UiRequest::Action(action) => ui.action(action),
+                    UiRequest::RenderItem(item) => ui.render_item(item),
+                }
+                .map(Outcome::UiTree)
             }
             Event::ProcessStdout(output) => {
                 plugin.on_process(ProcessEvent::Stdout {

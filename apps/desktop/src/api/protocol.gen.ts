@@ -430,6 +430,73 @@ export type TurnId = string;
 
 export type TurnStatus = "completed" | "failed" | "interrupted";
 
+export type UiActionParams = {
+	plugin: string,
+	view: string,
+	thread_id?: ThreadId | null,
+	action: string,
+	/**  What the node carried: a button's value, the text of an input. */
+	value?: string | null,
+};
+
+export type UiContributionsResult = {
+	views: UiViewContribution[],
+	items: UiItemContribution[],
+};
+
+export type UiItemContribution = {
+	plugin: string,
+	/**  The extension item kind the plugin draws; always `<plugin>/<name>`. */
+	kind: string,
+};
+
+/**  Where a plugin's view appears in the app. */
+export type UiPlacement = 
+/**  A screen of its own, next to the overview. */
+"app" | 
+/**  A tab of the thread view. */
+"threadTab";
+
+export type UiRenderItemParams = {
+	plugin: string,
+	kind: string,
+	payload?: Value,
+};
+
+export type UiRenderParams = {
+	plugin: string,
+	view: string,
+	/**  The thread a thread tab is shown for. */
+	thread_id?: ThreadId | null,
+};
+
+/**  Which threads a thread tab is offered for. */
+export type UiScope = "allThreads" | 
+/**  Only threads of a provider the same plugin contributes. */
+"ownThreads";
+
+/**
+ *  A tree of UI nodes. Each node is an object with a `type`; the app draws the
+ *  types it knows and skips the rest.
+ */
+export type UiTreeResult = {
+	tree: Value,
+};
+
+export type UiViewContribution = {
+	plugin: string,
+	/**  The providers the same plugin contributes: what `ownThreads` means. */
+	providers: ProviderId[],
+} & UiViewInfo;
+
+/**  A view a plugin draws from the fixed set of UI nodes. */
+export type UiViewInfo = {
+	id: string,
+	title: string,
+	placement: UiPlacement,
+	scope: UiScope,
+};
+
 /**  The one usage dialect: cumulative session total plus the last request. */
 export type UsageSnapshot = {
 	total: TokenUsage,
@@ -456,6 +523,10 @@ export type Methods = {
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
+	"ui.contributions": { params: Empty; result: UiContributionsResult },
+	"ui.render": { params: UiRenderParams; result: UiTreeResult },
+	"ui.action": { params: UiActionParams; result: UiTreeResult },
+	"ui.render_item": { params: UiRenderItemParams; result: UiTreeResult },
 };
 
 /** Notifications the daemon pushes, by method name. */

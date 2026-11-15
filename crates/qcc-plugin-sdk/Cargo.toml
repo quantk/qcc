@@ -9,6 +9,8 @@ rust-version.workspace = true
 [features]
 # JSON-RPC helpers for bridges whose agent speaks it.
 jsonrpc = ["dep:serde_json"]
+# Builders for the UI nodes a plugin draws its views from.
+ui = ["dep:serde_json"]
 
 [dependencies]
 wit-bindgen.workspace = true

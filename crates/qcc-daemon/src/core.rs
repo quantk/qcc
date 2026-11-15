@@ -10,7 +10,7 @@ use qcc_domain::{
 };
 use qcc_plugin_host::{
     Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
-    PluginRequest, ProviderRequest, SessionStart,
+    PluginRequest, ProviderRequest, SessionStart, UiRequest,
 };
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
@@ -22,7 +22,9 @@ use qcc_protocol::methods::{
     ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
     ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
     ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
-    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams,
+    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -91,6 +93,11 @@ async fn call_environment(
             limit.as_secs()
         ))),
     }
+}
+
+/// Whether an extension item kind belongs to a plugin: `<plugin-id>/<name>`.
+fn owns_kind(plugin: &str, kind: &str) -> bool {
+    kind.strip_prefix(plugin).is_some_and(|rest| rest.len() > 1 && rest.starts_with('/'))
 }
 
 fn environment_error(message: impl Into<String>) -> RpcError {
@@ -399,6 +406,30 @@ impl Core {
                 responder.reply(result);
             }
             PluginList::NAME => responder.reply(Ok(self.plugin_list())),
+            UiContributions::NAME => responder.reply(Ok(self.ui_contributions())),
+            UiRender::NAME => match params::<UiRender>(raw) {
+                Ok(UiRenderParams { plugin, view, thread_id }) => {
+                    let request = UiRequest::Render { view: view.clone(), thread: thread_id };
+                    self.ui_call(&plugin, Some(&view), None, request, responder);
+                }
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            UiAction::NAME => match params::<UiAction>(raw) {
+                Ok(UiActionParams { plugin, view, thread_id, action, value }) => {
+                    let request =
+                        UiRequest::Action { view: view.clone(), thread: thread_id, action, value };
+                    self.ui_call(&plugin, Some(&view), None, request, responder);
+                }
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            UiRenderItem::NAME => match params::<UiRenderItem>(raw) {
+                Ok(UiRenderItemParams { plugin, kind, payload }) => {
+                    let request =
+                        UiRequest::RenderItem { kind: kind.clone(), payload: payload.to_string() };
+                    self.ui_call(&plugin, None, Some(&kind), request, responder);
+                }
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             unknown => responder.reply::<Empty>(Err(RpcError::new(
                 codes::METHOD_NOT_FOUND,
                 format!("unknown method {unknown:?}"),
@@ -727,12 +758,92 @@ impl Core {
                         Contribution::Environment(environment) => {
                             info.environments.push(environment.clone());
                         }
+                        Contribution::UiView(_) | Contribution::UiItem(_) => {}
                     }
                 }
                 info
             })
             .collect();
         PluginListResult { plugins }
+    }
+
+    // ----- plugin UI ------------------------------------------------------------------
+
+    fn ui_contributions(&self) -> UiContributionsResult {
+        let mut result = UiContributionsResult { views: Vec::new(), items: Vec::new() };
+        for plugin in self.host.plugins() {
+            let providers: Vec<ProviderId> = plugin
+                .contributions()
+                .iter()
+                .filter_map(|contribution| match contribution {
+                    Contribution::Provider(provider) => Some(provider.id.clone()),
+                    _ => None,
+                })
+                .collect();
+            for contribution in plugin.contributions() {
+                match contribution {
+                    Contribution::UiView(view) => result.views.push(UiViewContribution {
+                        plugin: plugin.id().to_owned(),
+                        view: view.clone(),
+                        providers: providers.clone(),
+                    }),
+                    // A plugin draws only its own kinds: it cannot take over the
+                    // items of another plugin.
+                    Contribution::UiItem(kind) if owns_kind(plugin.id(), kind) => {
+                        result.items.push(UiItemContribution {
+                            plugin: plugin.id().to_owned(),
+                            kind: kind.clone(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+        result
+    }
+
+    /// Pass a drawing request to the plugin that contributes the view or item kind.
+    fn ui_call(
+        &mut self,
+        plugin_id: &str,
+        view: Option<&str>,
+        kind: Option<&str>,
+        request: UiRequest,
+        responder: Responder,
+    ) {
+        let plugin_error = |message: String| RpcError::new(codes::PLUGIN_ERROR, message);
+        let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == plugin_id)
+        else {
+            return responder
+                .reply::<Empty>(Err(plugin_error(format!("no plugin {plugin_id:?} is loaded"))));
+        };
+        let contributed = plugin.contributions().iter().any(|contribution| match contribution {
+            Contribution::UiView(info) => view == Some(info.id.as_str()),
+            Contribution::UiItem(own) => kind == Some(own.as_str()) && owns_kind(plugin_id, own),
+            _ => false,
+        });
+        if !contributed {
+            let what = view.or(kind).unwrap_or_default();
+            return responder.reply::<Empty>(Err(plugin_error(format!(
+                "plugin {plugin_id:?} does not contribute {what:?}"
+            ))));
+        }
+        let plugin = plugin.clone();
+        tokio::spawn(async move {
+            let answer =
+                tokio::time::timeout(QUERY_TIMEOUT, plugin.call(PluginRequest::Ui(request))).await;
+            let result = match answer {
+                Ok(Ok(Outcome::UiTree(tree))) => {
+                    serde_json::from_str::<Value>(&tree).map(|tree| UiTreeResult { tree }).map_err(
+                        |error| plugin_error(format!("the plugin drew invalid JSON: {error}")),
+                    )
+                }
+                Ok(Ok(other)) => Err(plugin_error(format!("the plugin answered with {other:?}"))),
+                Ok(Err(error)) => Err(plugin_error(error.to_string())),
+                Err(_) => Err(plugin_error("the plugin did not answer in time".into())),
+            };
+            responder.reply(result);
+        });
     }
 
     // ----- provider sessions ----------------------------------------------------------

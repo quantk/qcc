@@ -68,6 +68,34 @@ pub struct EnvironmentInfo {
     pub name: String,
 }
 
+/// Where a plugin's view appears in the app.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UiPlacement {
+    /// A screen of its own, next to the overview.
+    App,
+    /// A tab of the thread view.
+    ThreadTab,
+}
+
+/// Which threads a thread tab is offered for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum UiScope {
+    AllThreads,
+    /// Only threads of a provider the same plugin contributes.
+    OwnThreads,
+}
+
+/// A view a plugin draws from the fixed set of UI nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiViewInfo {
+    pub id: String,
+    pub title: String,
+    pub placement: UiPlacement,
+    pub scope: UiScope,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ModelInfo {
     pub id: String,

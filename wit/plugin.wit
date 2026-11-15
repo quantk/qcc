@@ -218,9 +218,37 @@ interface types {
     name: string,
   }
 
+  /// Where a view appears in the app.
+  enum ui-placement {
+    /// A screen of its own, next to the overview.
+    app,
+    /// A tab of the thread view.
+    thread-tab,
+  }
+
+  /// Which threads a thread tab is offered for.
+  enum ui-scope {
+    all-threads,
+    /// Only threads of a provider this plugin contributes.
+    own-threads,
+  }
+
+  record ui-view-info {
+    id: string,
+    title: string,
+    placement: ui-placement,
+    /// Ignored for app views.
+    scope: ui-scope,
+  }
+
   variant contribution {
     provider(provider-info),
     environment(environment-info),
+    /// A view the plugin draws from the fixed set of UI nodes.
+    ui-view(ui-view-info),
+    /// The plugin draws timeline items of this extension kind. The kind must be
+    /// the plugin's own: `<plugin-id>/<name>`.
+    ui-item(string),
   }
 
   // ----- events -----------------------------------------------------------------
@@ -343,6 +371,35 @@ interface types {
     truncated: bool,
   }
 
+  record ui-render {
+    view: string,
+    /// The thread a thread tab is shown for.
+    thread: option<thread-id>,
+  }
+
+  record ui-action {
+    view: string,
+    thread: option<thread-id>,
+    /// The action named by the node the user activated.
+    action: string,
+    /// What the node carried: a button's value, the text of an input.
+    value: option<string>,
+  }
+
+  record ui-item {
+    kind: string,
+    /// The item's payload, as JSON.
+    payload: string,
+  }
+
+  /// Every request is answered with `ui-tree`.
+  variant ui-request {
+    render(ui-render),
+    /// The user activated a node. The answer replaces the view.
+    action(ui-action),
+    render-item(ui-item),
+  }
+
   record process-output {
     process: u64,
     data: list<u8>,
@@ -357,6 +414,7 @@ interface types {
   variant event {
     provider(provider-call),
     environment(environment-call),
+    ui(ui-request),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -378,6 +436,11 @@ interface types {
     environment-ready(string),
     environment-changes(environment-changes),
     environment-diff(environment-diff),
+    /// A tree of UI nodes, as JSON. A node is an object with a `type` out of a
+    /// fixed set (`stack`, `row`, `heading`, `text`, `markdown`, `code`, `badge`,
+    /// `keyValues`, `table`, `button`, `input`, `divider`); the app draws what it
+    /// knows and skips the rest, so a plugin cannot put anything else on screen.
+    ui-tree(string),
     /// The answer is not known yet: it will be given through `completions.complete`
     /// with this token, which the plugin picks. For work that waits on a process.
     deferred(u64),

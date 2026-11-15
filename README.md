@@ -8,8 +8,8 @@ opencode, а qcc ведёт параллельные сессии, хранит 
 
 Готовы этапы 0–5 и основная часть этапа 6: домен и сборщик дельт, SQLite-журнал, хост
 WASM-плагинов с правами, SDK, демон `qccd`, CLI `qcc`, провайдеры реальных агентов, изоляция тредов
-в git worktree и desktop-приложение (пульт управления агентами). Впереди: UI плагинов в приложении
-и оркестрация (этап 7).
+в git worktree и desktop-приложение (пульт управления агентами) с декларативным UI плагинов.
+Впереди: веб-бандлы плагинов в iframe и оркестрация (этап 7).
 
 | Провайдер     | Агент                         | Проверено на версии |
 | ------------- | ----------------------------- | ------------------- |
@@ -179,6 +179,40 @@ QCC_UPDATE_GOLDEN=1 cargo test -p provider-claude-code --test conformance
 Плагин — компонент `wasm32-wasip2` плюс `plugin.toml`. Смотрите `plugins/provider-echo`: это
 полный пример на SDK, а `crates/qcc-plugin-testkit/tests/echo.rs` показывает, как прогонять мост
 через настоящий хост и сравнивать ленту с эталоном (`QCC_UPDATE_GOLDEN=1` перезаписывает эталоны).
+
+### UI плагина
+
+Плагин может добавить в приложение свой экран, вкладку треда и рисовать элементы ленты своего
+вида. Он не присылает разметку или код, а отвечает деревом узлов из фиксированного набора
+(`stack`, `row`, `heading`, `text`, `markdown`, `code`, `badge`, `keyValues`, `table`, `button`,
+`input`, `divider`); приложение рисует известные узлы и пропускает остальные.
+
+```rust
+use qcc_plugin_sdk::{prelude::*, ui};   // feature "ui"
+
+impl Ui for Notes {
+    fn views(&self) -> Vec<UiViewInfo> {
+        vec![UiViewInfo {
+            id: "notes".into(),
+            title: "Notes".into(),
+            placement: UiPlacement::ThreadTab,   // или App: отдельный экран
+            scope: UiScope::AllThreads,          // или OwnThreads: только треды своих провайдеров
+        }]
+    }
+
+    fn render(&mut self, request: UiRender) -> Result<String, String> {
+        Ok(ui::stack([ui::heading("Notes"), ui::button("Add", "add").primary()]).to_json())
+    }
+
+    // Нажатие кнопки или отправка поля ввода; ответ заменяет вид.
+    fn action(&mut self, action: UiAction) -> Result<String, String> { /* … */ }
+}
+```
+
+Элемент ленты своего вида (`ItemShape::Extension`, вид всегда `<id-плагина>/<имя>`) рисуется через
+`item_kinds` и `render_item`; чужие виды плагин перехватить не может. Рабочий пример — вкладка
+«Echo» и команда `/card` в `plugins/provider-echo`. В приложении вклады плагинов регистрируются
+в том же реестре, что и встроенные модули (`apps/desktop/src/modules/plugin-ui`).
 
 Установленный плагин лежит в `<data>/plugins/<id>/`. Стороннему плагину права выдаются файлом
 `<data>/grants/<id>.toml` в формате секции `[permissions]` манифеста; без него плагин загружается

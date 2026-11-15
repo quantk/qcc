@@ -25,7 +25,7 @@ pub use interaction::{InteractionOption, InteractionRequest, InteractionResoluti
 pub use item::{Item, ItemShape, ItemStatus};
 pub use provider::{
     ChangeKind, ChangedFile, EnvironmentChanges, EnvironmentInfo, ModelInfo, PermissionMode,
-    ProviderCapabilities, ProviderInfo,
+    ProviderCapabilities, ProviderInfo, UiPlacement, UiScope, UiViewInfo,
 };
 pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Thread, ThreadActivity, ThreadEnvironment,

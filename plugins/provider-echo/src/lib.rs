@@ -12,14 +12,23 @@
 //! | `/approve <command>` | asks for approval of a command item (not in `auto`/`full`)   |
 //! | `/exec <prog> <args>`| runs a process and streams its stdout                        |
 //! | `/kv`                | counts invocations in the plugin's key-value store           |
+//! | `/card <text>`       | an item of the plugin's own kind, drawn by the plugin        |
 //! | `/fail <message>`    | the turn fails                                               |
 //! | `/crash`             | the plugin traps                                             |
 //!
 //! A message steered into a running `/slow` turn is appended to what it streams.
+//!
+//! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
+//! `/card` items, both built from the fixed set of UI nodes.
 
 use std::collections::{HashMap, VecDeque};
 
 use qcc_plugin_sdk::prelude::*;
+use qcc_plugin_sdk::ui;
+
+/// The extension item `/card` makes. A kind is always `<plugin-id>/<name>`.
+const CARD_KIND: &str = "provider-echo/card";
+const PLAYGROUND_VIEW: &str = "playground";
 
 const SLOW_TICK_MS: u64 = 10;
 
@@ -145,6 +154,17 @@ impl Echo {
                 }));
                 out.push(text("Done."));
                 out.push(text_close());
+                out.push(completed());
+            }
+            "/card" => {
+                let key = ItemKey::Provider(format!("card-{}", session.request_id()));
+                let payload = serde_json::json!({ "title": "A card from echo", "body": rest });
+                let shape = ItemShape::Extension(ExtensionItem {
+                    kind: CARD_KIND.into(),
+                    payload: payload.to_string(),
+                });
+                out.push(Delta::ItemOpen(ItemOpen { key: key.clone(), shape: shape.clone() }));
+                out.push(Delta::ItemClose(ItemClose { key, shape, status: ItemStatus::Completed }));
                 out.push(completed());
             }
             "/ask" => {
@@ -369,9 +389,111 @@ impl Provider for Echo {
     }
 }
 
+fn stored(key: &str) -> Result<String, String> {
+    Ok(kv::get(key)?.map(|bytes| String::from_utf8_lossy(&bytes).into_owned()).unwrap_or_default())
+}
+
+impl Ui for Echo {
+    fn views(&self) -> Vec<UiViewInfo> {
+        vec![UiViewInfo {
+            id: PLAYGROUND_VIEW.into(),
+            title: "Echo".into(),
+            placement: UiPlacement::ThreadTab,
+            scope: UiScope::OwnThreads,
+        }]
+    }
+
+    fn item_kinds(&self) -> Vec<String> {
+        vec![CARD_KIND.into()]
+    }
+
+    fn render(&mut self, request: UiRender) -> Result<String, String> {
+        if request.view != PLAYGROUND_VIEW {
+            return Err(format!("unknown view {:?}", request.view));
+        }
+        let thread = request.thread.ok_or("this view belongs to a thread")?;
+        let presses = stored(&format!("ui/presses/{thread}"))?;
+        let note = stored(&format!("ui/note/{thread}"))?;
+        let live = self.sessions.contains_key(&thread);
+        let commands = [
+            ("/slow <text>", "streams one word per tick; can be interrupted"),
+            ("/tool <name>", "a tool call"),
+            ("/ask <question>", "asks a question"),
+            ("/approve <command>", "asks for approval"),
+            ("/exec echo <args>", "runs a process"),
+            ("/card <text>", "an item this plugin draws itself"),
+            ("/fail <message>", "the turn fails"),
+        ];
+        let tree = ui::stack([
+            ui::heading("Echo playground"),
+            ui::text("This tab is drawn by the echo plugin from the app's UI nodes.")
+                .tone(ui::Tone::Muted),
+            ui::key_values([
+                ("Session", if live { "attached" } else { "not attached" }.to_owned()),
+                ("Presses", if presses.is_empty() { "0".to_owned() } else { presses }),
+                ("Note", if note.is_empty() { "—".to_owned() } else { note }),
+            ]),
+            ui::row([
+                ui::button("Press", "press").primary(),
+                ui::button("Reset", "reset").danger(),
+                ui::badge(if live { "live" } else { "idle" }).tone(if live {
+                    ui::Tone::Success
+                } else {
+                    ui::Tone::Muted
+                }),
+            ]),
+            ui::input("A note for this thread", "Save note", "note"),
+            ui::divider(),
+            ui::heading("Prompts it understands"),
+            ui::table(
+                ["Prompt", "What it does"],
+                commands.map(|(prompt, effect)| vec![prompt.to_owned(), effect.to_owned()]),
+            ),
+        ]);
+        Ok(tree.to_json())
+    }
+
+    fn action(&mut self, action: UiAction) -> Result<String, String> {
+        let thread = action.thread.clone().ok_or("this view belongs to a thread")?;
+        let presses = format!("ui/presses/{thread}");
+        let note = format!("ui/note/{thread}");
+        match action.action.as_str() {
+            "press" => {
+                let count = stored(&presses)?.parse::<u64>().unwrap_or(0) + 1;
+                kv::put(&presses, count.to_string().as_bytes())?;
+            }
+            "reset" => {
+                kv::remove(&presses)?;
+                kv::remove(&note)?;
+            }
+            "note" => kv::put(&note, action.value.unwrap_or_default().trim().as_bytes())?,
+            other => return Err(format!("unknown action {other:?}")),
+        }
+        self.render(UiRender { view: action.view, thread: action.thread })
+    }
+
+    fn render_item(&mut self, item: UiItem) -> Result<String, String> {
+        if item.kind != CARD_KIND {
+            return Err(format!("unknown item kind {:?}", item.kind));
+        }
+        let payload: serde_json::Value =
+            serde_json::from_str(&item.payload).map_err(|error| error.to_string())?;
+        let field = |name: &str| payload[name].as_str().unwrap_or_default().to_owned();
+        Ok(ui::stack([
+            ui::row([ui::heading(field("title")), ui::badge("card").tone(ui::Tone::Success)]),
+            ui::text(field("body")),
+        ])
+        .to_json())
+    }
+}
+
 impl Plugin for Echo {
     fn providers(&mut self) -> Vec<&mut dyn Provider> {
         vec![self]
+    }
+
+    fn ui(&mut self) -> Option<&mut dyn Ui> {
+        Some(self)
     }
 
     fn on_timer(&mut self, timer: u64) {

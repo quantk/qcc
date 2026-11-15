@@ -435,12 +435,14 @@ fn a_message_sent_during_a_turn_is_queued_and_runs_after_it() {
     assert!(output.ok, "{}", output.stderr);
     let followed = output.json_lines();
     let kinds = types(&followed);
-    assert_eq!(kinds[0], "input/queued");
+    // Output of the running turn may slip in before the message is queued.
+    let queued = kinds.iter().position(|kind| *kind == "input/queued").expect("it was queued");
     assert_eq!(kinds.iter().filter(|kind| **kind == "turn/completed").count(), 2);
     let delivered = followed.iter().position(|e| e["type"] == "input/submitted").unwrap();
     let first_done = followed.iter().position(|e| e["type"] == "turn/completed").unwrap();
     assert!(first_done < delivered, "delivered only after the running turn settled");
-    assert_eq!(followed[delivered]["queue_id"], followed[0]["queue_id"]);
+    assert!(queued < first_done, "queued while the first turn was running");
+    assert_eq!(followed[delivered]["queue_id"], followed[queued]["queue_id"]);
     assert_eq!(*messages(&followed).last().unwrap(), "second message");
 
     let sent = daemon.qcc(&["thread", "send", &id, "third", "--json"]).json();
@@ -917,6 +919,94 @@ fn a_watching_client_sees_threads_appear_and_change() {
             .unwrap();
         let quiet = tokio::time::timeout(Duration::from_millis(400), notifications.recv()).await;
         assert!(quiet.is_err(), "an unsubscribed watcher got {quiet:?}");
+    });
+    daemon.stop();
+}
+
+/// A plugin's own UI: views it contributes, actions on them, and its timeline items.
+#[test]
+fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("/card hello there");
+    daemon.wait_for(&id, "turn/completed");
+    let item = daemon
+        .events(&id)
+        .into_iter()
+        .find(|event| event["type"] == "item/completed")
+        .expect("the card item")["item"]
+        .clone();
+    assert_eq!(item["type"], "extension");
+    assert_eq!(item["kind"], "provider-echo/card");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let client = Client::connect(&daemon.socket).await.unwrap();
+        let call = |method: &'static str, params: Value| {
+            let client = client.clone();
+            async move { client.call_raw(method, params).await }
+        };
+
+        let contributions = call("ui.contributions", json!({})).await.unwrap();
+        assert_eq!(
+            contributions,
+            json!({
+                "views": [{
+                    "plugin": "provider-echo",
+                    "id": "playground",
+                    "title": "Echo",
+                    "placement": "threadTab",
+                    "scope": "ownThreads",
+                    "providers": ["echo"],
+                }],
+                "items": [{ "plugin": "provider-echo", "kind": "provider-echo/card" }],
+            })
+        );
+
+        let view = json!({ "plugin": "provider-echo", "view": "playground", "thread_id": id });
+        let presses = |tree: &Value| {
+            tree["tree"]["children"][2]["items"][1]["value"].as_str().unwrap().to_owned()
+        };
+        let tree = call("ui.render", view.clone()).await.unwrap();
+        assert_eq!(tree["tree"]["type"], "stack");
+        assert_eq!(presses(&tree), "0");
+
+        // An action changes the plugin's state and answers with the view redrawn.
+        let mut press = view.clone();
+        press["action"] = "press".into();
+        call("ui.action", press.clone()).await.unwrap();
+        assert_eq!(presses(&call("ui.action", press).await.unwrap()), "2");
+        let mut note = view.clone();
+        note["action"] = "note".into();
+        note["value"] = "  remember this ".into();
+        let tree = call("ui.action", note).await.unwrap();
+        assert_eq!(tree["tree"]["children"][2]["items"][2]["value"], "remember this");
+        assert_eq!(presses(&call("ui.render", view).await.unwrap()), "2");
+
+        let drawn = call(
+            "ui.render_item",
+            json!({ "plugin": "provider-echo", "kind": item["kind"], "payload": item["payload"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(drawn["tree"]["children"][1], json!({ "type": "text", "text": "hello there" }));
+
+        // What a plugin does not contribute cannot be asked of it.
+        for (method, params) in [
+            ("ui.render", json!({ "plugin": "provider-echo", "view": "nope" })),
+            ("ui.render", json!({ "plugin": "nope", "view": "playground" })),
+            ("ui.render", json!({ "plugin": "env-git-worktree", "view": "playground" })),
+            (
+                "ui.render_item",
+                json!({ "plugin": "provider-echo", "kind": "other-plugin/card", "payload": {} }),
+            ),
+        ] {
+            let error = call(method, params.clone()).await.unwrap_err().to_string();
+            assert!(error.contains("-32008"), "{params}: {error}");
+        }
     });
     daemon.stop();
 }

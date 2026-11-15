@@ -4,11 +4,12 @@ use qcc_domain::{
     ChangeKind, ChangedFile, Delta, EnvironmentChanges, EnvironmentInfo, InteractionOption,
     InteractionRequest, InteractionResolution, ItemKey, ItemShape, ItemStatus, ModelInfo,
     OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, TextChannel, TokenUsage,
-    TurnStatus, UsageSnapshot,
+    TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
 };
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
+    UiRequest,
 };
 use crate::bindings::wit;
 
@@ -180,6 +181,19 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
         wit::Contribution::Environment(e) => {
             Contribution::Environment(EnvironmentInfo { id: e.id, name: e.name })
         }
+        wit::Contribution::UiView(view) => Contribution::UiView(UiViewInfo {
+            id: view.id,
+            title: view.title,
+            placement: match view.placement {
+                wit::UiPlacement::App => UiPlacement::App,
+                wit::UiPlacement::ThreadTab => UiPlacement::ThreadTab,
+            },
+            scope: match view.scope {
+                wit::UiScope::AllThreads => UiScope::AllThreads,
+                wit::UiScope::OwnThreads => UiScope::OwnThreads,
+            },
+        }),
+        wit::Contribution::UiItem(kind) => Contribution::UiItem(kind),
     }
 }
 
@@ -193,6 +207,7 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
             models.into_iter().map(|m| ModelInfo { id: m.id, name: m.name }).collect(),
         ),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
+        wit::Outcome::UiTree(tree) => Outcome::UiTree(tree),
         wit::Outcome::EnvironmentChanges(changes) => {
             Outcome::EnvironmentChanges(EnvironmentChanges {
                 branch: changes.branch,
@@ -272,6 +287,22 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
             },
+        }),
+        PluginRequest::Ui(request) => wit::Event::Ui(match request {
+            UiRequest::Render { view, thread } => {
+                wit::UiRequest::Render(wit::UiRender { view, thread: thread.map(|t| t.0) })
+            }
+            UiRequest::Action { view, thread, action, value } => {
+                wit::UiRequest::Action(wit::UiAction {
+                    view,
+                    thread: thread.map(|t| t.0),
+                    action,
+                    value,
+                })
+            }
+            UiRequest::RenderItem { kind, payload } => {
+                wit::UiRequest::RenderItem(wit::UiItem { kind, payload })
+            }
         }),
         PluginRequest::Environment { environment, request } => {
             wit::Event::Environment(wit::EnvironmentCall {

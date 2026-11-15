@@ -167,7 +167,7 @@ impl PluginHost {
         self.plugins.iter().flat_map(|plugin| {
             plugin.contributions().iter().filter_map(move |contribution| match contribution {
                 Contribution::Provider(info) => Some((plugin, info)),
-                Contribution::Environment(_) => None,
+                _ => None,
             })
         })
     }

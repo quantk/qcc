@@ -3,13 +3,16 @@
 
 use qcc_domain::{
     EnvironmentChanges, EnvironmentInfo, InteractionResolution, ModelInfo, PermissionMode,
-    ProviderId, ProviderInfo, ThreadId,
+    ProviderId, ProviderInfo, ThreadId, UiViewInfo,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Contribution {
     Provider(ProviderInfo),
     Environment(EnvironmentInfo),
+    UiView(UiViewInfo),
+    /// The plugin draws timeline items of this extension kind.
+    UiItem(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,18 +79,48 @@ pub enum EnvironmentRequest {
     },
 }
 
+/// A request to draw. Each is answered with [`Outcome::UiTree`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiRequest {
+    Render {
+        view: String,
+        thread: Option<ThreadId>,
+    },
+    Action {
+        view: String,
+        thread: Option<ThreadId>,
+        action: String,
+        value: Option<String>,
+    },
+    RenderItem {
+        kind: String,
+        /// The item's payload, as JSON.
+        payload: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginRequest {
     Provider { provider: ProviderId, request: ProviderRequest },
     Environment { environment: String, request: EnvironmentRequest },
+    Ui(UiRequest),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Outcome {
     Done,
-    SessionStarted { provider_session: Option<String> },
+    SessionStarted {
+        provider_session: Option<String>,
+    },
     Models(Vec<ModelInfo>),
-    EnvironmentReady { cwd: String },
+    EnvironmentReady {
+        cwd: String,
+    },
     EnvironmentChanges(EnvironmentChanges),
-    EnvironmentDiff { diff: String, truncated: bool },
+    EnvironmentDiff {
+        diff: String,
+        truncated: bool,
+    },
+    /// A tree of UI nodes, as the JSON the plugin wrote.
+    UiTree(String),
 }

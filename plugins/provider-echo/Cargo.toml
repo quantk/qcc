@@ -11,7 +11,8 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-qcc-plugin-sdk.workspace = true
+qcc-plugin-sdk = { workspace = true, features = ["ui"] }
+serde_json.workspace = true
 
 # Generated component glue needs `unsafe`, which the workspace lints forbid.
 [lints]

@@ -701,17 +701,45 @@ impl Core {
         })
     }
 
-    pub(super) fn thread_reset(&mut self, p: ThreadResetParams) -> Result<ThreadResult, RpcError> {
+    /// `thread.reset`: a live session is released first, so that its end is part of
+    /// the conversation it ends. Answered once the new conversation has begun.
+    pub(super) fn thread_reset(&mut self, p: ThreadResetParams, responder: Responder) {
         let ThreadResetParams { thread_id } = p;
-        let result = self.reconfigure(&thread_id, "the conversation", |engine, now| {
-            engine.record(EventPayload::ConversationReset, now)
-        })?;
+        if let Err(error) = self.check_open(&thread_id) {
+            return responder.reply::<Empty>(Err(error));
+        }
+        let held = self.in_transition(&thread_id);
+        let Ok(engine) = self.supervisor.engine(&thread_id) else {
+            return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
+        };
+        if engine.busy() || held || engine.has_queued_input() {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "a turn is running; stop it before starting the conversation afresh",
+            )));
+        }
+        if engine.session_live() {
+            self.sessions.entry(thread_id.clone()).or_default().stopping = true;
+            self.call_provider(&thread_id, Action::Reset, Some(responder), |thread| {
+                ProviderRequest::Stop { thread }
+            });
+        } else {
+            let result = self.record_reset(&thread_id);
+            responder.reply(result);
+        }
+    }
+
+    pub(super) fn record_reset(&mut self, thread_id: &ThreadId) -> Result<ThreadResult, RpcError> {
+        let engine = self.supervisor.engine(thread_id).map_err(|_| thread_not_found(thread_id))?;
+        let events = engine.record(EventPayload::ConversationReset, now_ms());
+        self.commit(events);
         // What the old session was to hear means nothing to the next one.
-        if let Some(session) = self.sessions.get_mut(&thread_id) {
+        if let Some(session) = self.sessions.get_mut(thread_id) {
             session.notes.clear();
             session.compact_after_start = false;
         }
-        Ok(result)
+        let thread = self.supervisor.thread(thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(thread_id))
     }
 
     pub(super) fn thread_compact(

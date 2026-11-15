@@ -71,6 +71,9 @@ pub(crate) enum Action {
     SwitchMcp,
     /// Compact the session's context, in a turn of the provider's own.
     Compact,
+    /// Release, then start the conversation afresh: the old session's end belongs
+    /// to the old conversation.
+    Reset,
     /// Release, as the first step of archiving the thread.
     Archive {
         force: bool,

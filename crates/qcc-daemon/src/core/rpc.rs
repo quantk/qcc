@@ -97,10 +97,10 @@ impl Core {
                 let result = params::<ThreadSetSkill>(raw).and_then(|p| self.thread_set_skill(p));
                 responder.reply(result);
             }
-            ThreadReset::NAME => {
-                let result = params::<ThreadReset>(raw).and_then(|p| self.thread_reset(p));
-                responder.reply(result);
-            }
+            ThreadReset::NAME => match params::<ThreadReset>(raw) {
+                Ok(p) => self.thread_reset(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             ThreadCompact::NAME => {
                 let result = params::<ThreadCompact>(raw).and_then(|p| self.thread_compact(p));
                 responder.reply(result);

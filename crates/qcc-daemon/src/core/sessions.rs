@@ -308,7 +308,7 @@ impl Core {
             Err(PluginError::Gone) => self.session_failed(&id, "provider plugin is gone".into()),
         }
         let now = now_ms();
-        if matches!(action, Action::Interrupt | Action::Release)
+        if matches!(action, Action::Interrupt | Action::Release | Action::Reset)
             && let Some(session) = self.sessions.get_mut(&id)
         {
             session.stopping = false;
@@ -326,7 +326,7 @@ impl Core {
                     self.commit(events);
                 }
             }
-            Action::Release | Action::Archive { .. } => {
+            Action::Release | Action::Archive { .. } | Action::Reset => {
                 if let Ok(engine) = self.supervisor.engine(&id) {
                     let mut events = engine.force_settle(now);
                     events.extend(engine.session_released(Some("released".into()), now));
@@ -343,6 +343,13 @@ impl Core {
         if let Action::Archive { force } = action {
             if let Some(responder) = responder {
                 self.remove_environment(id, force, responder);
+            }
+            return;
+        }
+        if let Action::Reset = action {
+            let result = self.record_reset(&id);
+            if let Some(responder) = responder {
+                responder.reply(result);
             }
             return;
         }

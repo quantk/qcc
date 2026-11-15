@@ -1516,6 +1516,9 @@ fn a_thread_starts_its_conversation_afresh_and_compacts_its_context() {
     assert!(daemon.qcc(&["thread", "send", &id, "second words"]).ok);
     let events = wait_turns(3);
     let reset = events.iter().position(|e| e["type"] == "thread/reset").unwrap();
+    // The old session ends in the old conversation.
+    let ended = events.iter().rposition(|e| e["type"] == "session/ended").unwrap();
+    assert!(ended < reset, "{events:#?}");
     let started = events[reset..].iter().find(|e| e["type"] == "session/started").unwrap();
     assert_eq!(started["resumed"], false, "{started}");
     let shown = daemon.qcc(&["thread", "show", &id]).stdout;

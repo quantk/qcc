@@ -1,6 +1,11 @@
 import { relativePath, tailPath } from "../util/format";
 import type { PermissionMode, PluginInfo, ProviderInfo, Thread } from "../api/protocol.gen";
 
+/** Example plugins are left out unless asked for. */
+export function visiblePlugins(plugins: readonly PluginInfo[], showExamples: boolean): readonly PluginInfo[] {
+  return showExamples ? plugins : plugins.filter((plugin) => !plugin.example);
+}
+
 export function providersOf(plugins: readonly PluginInfo[]): ProviderInfo[] {
   return plugins.flatMap((plugin) => plugin.providers);
 }

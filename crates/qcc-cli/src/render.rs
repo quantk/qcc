@@ -155,10 +155,11 @@ pub fn changes(changes: &EnvironmentChanges) -> String {
 
 pub fn plugin(plugin: &PluginInfo) -> String {
     let mut lines = vec![format!(
-        "{} {}{}",
+        "{} {}{}{}",
         plugin.id,
         plugin.version,
-        if plugin.bundled { "  (bundled)" } else { "" }
+        if plugin.bundled { "  (bundled)" } else { "" },
+        if plugin.example { "  (example)" } else { "" }
     )];
     for provider in &plugin.providers {
         lines.push(format!("  provider     {}  {}", provider.id, provider.name));

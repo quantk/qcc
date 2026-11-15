@@ -403,6 +403,8 @@ fn plugins_and_daemon_are_listed() {
     assert_eq!(orchestration["commands"][0]["id"], "handoff");
     let echo = &plugins["plugins"][5];
     assert_eq!(echo["bundled"], true);
+    assert_eq!(echo["example"], true);
+    assert!(plugins["plugins"][0].get("example").is_none());
     assert_eq!(echo["providers"][0]["id"], "echo");
     assert_eq!(echo["providers"][0]["capabilities"]["resume"], true);
     assert_eq!(echo["permissions"]["process"][0], "echo");

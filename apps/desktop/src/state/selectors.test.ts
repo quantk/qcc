@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { Thread } from "../api/protocol.gen";
-import { childrenOf, rootOf, threadTree } from "./selectors";
+import type { PluginInfo, Thread } from "../api/protocol.gen";
+import { childrenOf, rootOf, threadTree, visiblePlugins } from "./selectors";
 
 function thread(id: string, created_at: number, parent?: string): Thread {
   return {
@@ -37,5 +37,16 @@ describe("thread families", () => {
     expect(rootOf(find("a1x"), byId).id).toBe("a");
     expect(rootOf(find("orphan"), byId).id).toBe("orphan");
     expect(childrenOf(threads, "a").map((t) => t.id)).toEqual(["a1", "a2"]);
+  });
+});
+
+describe("example plugins", () => {
+  const plugin = (id: string, example: boolean) =>
+    ({ id, example, version: "1", bundled: true, providers: [], environments: [], commands: [], skills: [] }) as unknown as PluginInfo;
+
+  it("are left out unless asked for", () => {
+    const plugins = [plugin("real", false), plugin("echo", true)];
+    expect(visiblePlugins(plugins, false).map((p) => p.id)).toEqual(["real"]);
+    expect(visiblePlugins(plugins, true).map((p) => p.id)).toEqual(["real", "echo"]);
   });
 });

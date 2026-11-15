@@ -41,6 +41,10 @@ pub struct Manifest {
     /// Permissions the plugin requests.
     #[serde(default)]
     pub permissions: Permissions,
+    /// A plugin that shows how plugins are written or tests the daemon, rather than
+    /// one for everyday use. Clients leave it out unless asked to show it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub example: bool,
 }
 
 impl Manifest {

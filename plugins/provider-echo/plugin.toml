@@ -4,6 +4,8 @@ version = "0.1.0"
 api = "0.1"
 wasm = "plugin.wasm"
 web = "web"
+# The test provider and the example of the plugin API; the app hides it by default.
+example = true
 
 [permissions]
 deltas = true

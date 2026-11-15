@@ -13,17 +13,23 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 /** Go on with another agent or model, between turns. */
 export function AgentSwitch({ thread }: { thread: Thread }) {
   const plugins = useApp((state) => state.plugins);
+  const allPlugins = useApp((state) => state.allPlugins);
   // The slice must be stable: select the list, not a fallback made on every read.
   const list = useApp((state) => state.models[thread.provider]);
   const models = list?.models ?? [];
-  const providers = useMemo(() => providersOf(plugins), [plugins]);
+  // The thread's own agent stays on the list even when its plugin is hidden.
+  const providers = useMemo(() => {
+    const shown = providersOf(plugins);
+    const own = findProvider(allPlugins, thread.provider);
+    return own && !shown.some((candidate) => candidate.id === own.id) ? [own, ...shown] : shown;
+  }, [plugins, allPlugins, thread.provider]);
   const [open, setOpen] = useState(false);
   const [provider, setProvider] = useState(thread.provider);
   const [model, setModel] = useState<string | null>(thread.model ?? null);
   const [saving, setSaving] = useState(false);
   const active = thread.status === "active";
   const locked = active || thread.archived;
-  const current = findProvider(plugins, thread.provider)?.name ?? thread.provider;
+  const current = findProvider(allPlugins, thread.provider)?.name ?? thread.provider;
   const switching = provider !== thread.provider;
   const changed = switching || model !== (thread.model ?? null);
 

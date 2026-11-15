@@ -373,6 +373,10 @@ pub struct PluginInfo {
     pub version: String,
     /// Shipped with the daemon.
     pub bundled: bool,
+    /// An example or test plugin, not one for everyday use (`example` in its
+    /// manifest). Clients hide what it contributes unless asked to show it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub example: bool,
     /// Permissions in effect: requested by the manifest and granted by the user.
     pub permissions: PluginPermissions,
     pub providers: Vec<ProviderInfo>,

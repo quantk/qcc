@@ -937,6 +937,7 @@ impl Core {
                     name: plugin.manifest().name.clone(),
                     version: plugin.manifest().version.clone(),
                     bundled: plugins::is_bundled(plugin.id()),
+                    example: plugin.manifest().example,
                     permissions: PluginPermissions {
                         deltas: permissions.deltas,
                         kv: permissions.kv,

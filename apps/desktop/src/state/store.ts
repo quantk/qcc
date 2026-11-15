@@ -19,7 +19,18 @@ import type {
   ThreadId,
   ThreadSpawnParams,
 } from "../api/protocol.gen";
+import { visiblePlugins } from "./selectors";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
+
+const SHOW_EXAMPLES = "qcc.show-example-plugins";
+
+function readShowExamples(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(SHOW_EXAMPLES) === "1";
+  } catch {
+    return false;
+  }
+}
 
 /** What a provider said it offers. Asked once per provider and connection. */
 export type ModelList = { loading: boolean; models: readonly ModelInfo[]; error: string | null };
@@ -27,7 +38,12 @@ export type ModelList = { loading: boolean; models: readonly ModelInfo[]; error:
 export type AppState = {
   daemon: DaemonState;
   threads: Readonly<Record<ThreadId, Thread>>;
+  /** The plugins whose contributions the window offers: example plugins only when
+   * `showExamples` is on. */
   plugins: readonly PluginInfo[];
+  /** Every plugin the daemon loaded. */
+  allPlugins: readonly PluginInfo[];
+  showExamples: boolean;
   selected: ThreadId | null;
   /** The app view shown while no thread is selected. Absent: the first one. */
   view: string | null;
@@ -53,6 +69,8 @@ export class AppStore {
     daemon: { status: "connecting" },
     threads: {},
     plugins: [],
+    allPlugins: [],
+    showExamples: readShowExamples(),
     selected: null,
     view: null,
     timelines: {},
@@ -123,7 +141,10 @@ export class AppStore {
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
-      this.set({ plugins: plugins.plugins });
+      this.set({
+        allPlugins: plugins.plugins,
+        plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
+      });
       if (this.state.selected) await this.follow(this.state.selected);
     } catch (error) {
       this.fail(error);
@@ -236,6 +257,16 @@ export class AppStore {
     } catch (error) {
       put({ loading: false, models: [], error: error instanceof Error ? error.message : String(error) });
     }
+  };
+
+  /** Offer example plugins (the echo provider and its views) or leave them out. */
+  setShowExamples = (show: boolean) => {
+    try {
+      localStorage.setItem(SHOW_EXAMPLES, show ? "1" : "0");
+    } catch {
+      // Not remembered; it still applies to this window.
+    }
+    this.set({ showExamples: show, plugins: visiblePlugins(this.state.allPlugins, show) });
   };
 
   select = (threadId: ThreadId | null) => {

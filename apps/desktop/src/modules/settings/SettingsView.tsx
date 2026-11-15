@@ -1,6 +1,8 @@
 import { MinusIcon, PlusIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { store, useApp } from "../../state/store";
 import { MAX_ZOOM, MIN_ZOOM, formatZoom, zoomIn, zoomOut } from "../../state/zoom";
 import { setZoom, useZoom } from "./zoom";
 
@@ -18,6 +20,7 @@ function Setting(props: { title: string; hint: string; children: React.ReactNode
 
 export function SettingsView() {
   const zoom = useZoom();
+  const showExamples = useApp((state) => state.showExamples);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="border-b px-6 pt-3.5 pb-3">
@@ -37,6 +40,16 @@ export function SettingsView() {
           <Button variant="ghost" disabled={zoom === 1} onClick={() => setZoom(1)}>
             Reset
           </Button>
+        </Setting>
+        <Setting
+          title="Show example plugins"
+          hint="Echo is the test agent that repeats what it is sent, and the example of the plugin API (its Echo canvas screen and tabs). It costs nothing and is not a real agent."
+        >
+          <Switch
+            aria-label="Show example plugins"
+            checked={showExamples}
+            onCheckedChange={(checked) => store().setShowExamples(checked)}
+          />
         </Setting>
       </div>
     </div>

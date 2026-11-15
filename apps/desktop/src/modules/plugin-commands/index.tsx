@@ -54,7 +54,9 @@ export const pluginCommandsModule: UiModule = {
       store()
         .api.call("command.list", {})
         .then((result) => {
-          if (seen === plugins) ui.activate(commandsModule(result));
+          const shown = new Set(plugins.map((plugin) => plugin.id));
+          const commands = result.commands.filter((command) => shown.has(command.plugin));
+          if (seen === plugins) ui.activate(commandsModule({ commands }));
         })
         .catch(() => {
           seen = null;

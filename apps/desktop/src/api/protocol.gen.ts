@@ -211,6 +211,11 @@ export type PluginInfo = {
 	version: string,
 	/**  Shipped with the daemon. */
 	bundled: boolean,
+	/**
+	 *  An example or test plugin, not one for everyday use (`example` in its
+	 *  manifest). Clients hide what it contributes unless asked to show it.
+	 */
+	example?: boolean,
 	/**  Permissions in effect: requested by the manifest and granted by the user. */
 	permissions: PluginPermissions,
 	providers: ProviderInfo[],

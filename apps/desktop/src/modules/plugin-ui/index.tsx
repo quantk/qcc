@@ -57,7 +57,11 @@ export const pluginUiModule: UiModule = {
       store()
         .api.call("ui.contributions", {})
         .then((contributions) => {
-          if (seen === plugins) ui.activate(contributionsModule(contributions));
+          // Views of hidden plugins are left out; their items are still drawn, since
+          // threads made with them stay readable.
+          const shown = new Set(plugins.map((plugin) => plugin.id));
+          const views = contributions.views.filter((view) => shown.has(view.plugin));
+          if (seen === plugins) ui.activate(contributionsModule({ ...contributions, views }));
         })
         .catch(() => {
           seen = null;

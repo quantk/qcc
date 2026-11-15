@@ -905,108 +905,6 @@ kbd {
   color: var(--text-muted);
 }
 
-dialog.palette {
-  padding: 8px;
-  margin-top: 14vh;
-}
-
-.palette ul {
-  list-style: none;
-  margin: 8px 0 0;
-  padding: 0;
-  max-height: 320px;
-  overflow-y: auto;
-}
-
-.palette li button {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  background: none;
-  border: none;
-  text-align: left;
-  padding: 7px 10px;
-}
-
-.palette li[aria-selected="true"] button {
-  background: var(--panel);
-}
-
-
-dialog {
-  background: var(--bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  padding: 20px 22px;
-  width: min(560px, calc(100vw - 48px));
-}
-
-dialog::backdrop {
-  background: rgb(0 0 0 / 0.4);
-}
-
-dialog h2 {
-  font-size: 17px;
-  margin-bottom: 12px;
-}
-
-dialog p {
-  margin-bottom: 8px;
-  overflow-wrap: anywhere;
-}
-
-dialog form {
-  display: flex;
-  flex-direction: column;
-  gap: 11px;
-}
-
-dialog label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--text-muted);
-  font-size: 12.5px;
-  min-width: 0;
-}
-
-dialog label > * {
-  color: var(--text);
-  font-size: 14px;
-}
-
-dialog select {
-  padding: 6px 9px;
-  width: 100%;
-}
-
-dialog textarea {
-  resize: vertical;
-}
-
-.row {
-  display: flex;
-  gap: 8px;
-}
-
-.row.two > * {
-  flex: 1;
-}
-
-.row button {
-  flex: none;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 8px;
-}
-
 select.small {
   padding-right: 24px;
 }
@@ -1444,10 +1342,6 @@ select.small {
   color: var(--text-muted);
 }
 
-.dialog-error {
-  color: var(--red);
-}
-
 .parent-link {
   max-width: 220px;
   overflow: hidden;
@@ -1470,7 +1364,4 @@ select.small.commands {
   white-space: nowrap;
 }
 
-dialog .hint {
-  padding: 0;
-}
 } /* @layer base */

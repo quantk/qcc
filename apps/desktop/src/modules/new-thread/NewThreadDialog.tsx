@@ -1,9 +1,15 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import type { PermissionMode } from "../../api/protocol.gen";
 import { environmentsOf, modeLabel, providersOf } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
+import { Choice } from "../../ui/kit";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 const REMEMBERED = "qcc.new-thread";
 
@@ -22,7 +28,6 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
   const providers = useMemo(() => providersOf(plugins), [plugins]);
   const environments = useMemo(() => environmentsOf(plugins), [plugins]);
   const last = useMemo(remembered, []);
-  const dialog = useRef<HTMLDialogElement>(null);
 
   const [providerId, setProviderId] = useState(last.provider ?? "");
   const [cwd, setCwd] = useState(last.cwd ?? "");
@@ -38,14 +43,9 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
   const chosenMode = modes.includes(mode as PermissionMode) ? (mode as PermissionMode) : null;
   const chosenEnvironment = environments.some((candidate) => candidate.id === environment) ? environment : "";
 
+  // Focus starts where the first thing is missing: the directory, then the message.
   const directory = useRef<HTMLInputElement>(null);
   const message = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    dialog.current?.showModal();
-    // Start where the first thing is missing: the directory, then the message.
-    (last.cwd ? message : directory).current?.focus();
-  }, [last]);
 
   const browse = async () => {
     const picked = await open({ directory: true, defaultPath: cwd || undefined, title: "Working directory" });
@@ -71,90 +71,123 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
     onClose();
   };
 
+  const providerOptions = providers.map((candidate) => ({ value: candidate.id, label: candidate.name }));
+  const environmentOptions = [
+    { value: null, label: "Work in this directory" },
+    ...environments.map((candidate) => ({ value: candidate.id, label: `${candidate.name} — a copy of its own` })),
+  ];
+  const modeOptions = [{ value: null, label: "Agent default" }, ...modes.map((candidate) => ({ value: candidate, label: modeLabel[candidate] }))];
+
   return (
-    <dialog ref={dialog} className="new-thread" onClose={onClose}>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          void start();
-        }}
-      >
-        <h2>New thread</h2>
-        <label>
-          Agent
-          <select value={provider?.id ?? ""} onChange={(event) => setProviderId(event.target.value)}>
-            {providers.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Directory
-          <span className="row">
-            <input ref={directory} value={cwd} onChange={(event) => setCwd(event.target.value)} placeholder="/path/to/project" spellCheck={false} />
-            <button type="button" onClick={() => void browse()}>
-              Browse…
-            </button>
-          </span>
-        </label>
-        <label>
-          Workspace
-          <select value={chosenEnvironment} onChange={(event) => setEnvironment(event.target.value)}>
-            <option value="">Work in this directory</option>
-            {environments.map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {candidate.name} — a copy of its own
-              </option>
-            ))}
-          </select>
-        </label>
-        {chosenEnvironment && (
-          <label>
-            Start from
-            <input value={base} onChange={(event) => setBase(event.target.value)} placeholder="HEAD (a branch, tag or commit)" spellCheck={false} />
-          </label>
-        )}
-        <div className="row two">
-          <label>
-            Model
-            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder="Agent default" spellCheck={false} />
-          </label>
-          <label>
-            Permissions
-            <select value={chosenMode ?? ""} onChange={(event) => setMode(event.target.value)} disabled={modes.length === 0}>
-              <option value="">Agent default</option>
-              {modes.map((candidate) => (
-                <option key={candidate} value={candidate}>
-                  {modeLabel[candidate]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label>
-          First message
-          <textarea
-            rows={4}
-            ref={message}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-            placeholder="What should the agent do? Leave empty to start with a blank thread."
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void start();
-            }}
-          />
-        </label>
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className="primary" disabled={starting || !provider || !cwd.trim()} title="Ctrl+Enter">
-            {starting ? "Starting…" : "Start thread"}
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg" initialFocus={last.cwd ? message : directory}>
+        <form
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void start();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>New thread</DialogTitle>
+          </DialogHeader>
+          <FieldGroup className="gap-4">
+            <Field>
+              <FieldLabel>Agent</FieldLabel>
+              <Choice
+                aria-label="Agent"
+                className="w-full"
+                value={provider?.id ?? null}
+                options={providerOptions}
+                onChange={(value) => setProviderId(value ?? "")}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="new-thread-cwd">Directory</FieldLabel>
+              <div className="flex gap-2">
+                <Input
+                  id="new-thread-cwd"
+                  ref={directory}
+                  value={cwd}
+                  onChange={(event) => setCwd(event.target.value)}
+                  placeholder="/path/to/project"
+                  spellCheck={false}
+                />
+                <Button type="button" variant="outline" onClick={() => void browse()}>
+                  Browse…
+                </Button>
+              </div>
+            </Field>
+            <Field>
+              <FieldLabel>Workspace</FieldLabel>
+              <Choice
+                aria-label="Workspace"
+                className="w-full"
+                value={chosenEnvironment || null}
+                options={environmentOptions}
+                onChange={(value) => setEnvironment(value ?? "")}
+              />
+            </Field>
+            {chosenEnvironment && (
+              <Field>
+                <FieldLabel htmlFor="new-thread-base">Start from</FieldLabel>
+                <Input
+                  id="new-thread-base"
+                  value={base}
+                  onChange={(event) => setBase(event.target.value)}
+                  placeholder="HEAD (a branch, tag or commit)"
+                  spellCheck={false}
+                />
+              </Field>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              <Field>
+                <FieldLabel htmlFor="new-thread-model">Model</FieldLabel>
+                <Input
+                  id="new-thread-model"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value)}
+                  placeholder="Agent default"
+                  spellCheck={false}
+                />
+              </Field>
+              <Field>
+                <FieldLabel>Permissions</FieldLabel>
+                <Choice
+                  aria-label="Permissions"
+                  className="w-full"
+                  value={chosenMode}
+                  options={modeOptions}
+                  disabled={modes.length === 0}
+                  onChange={(value) => setMode(value ?? "")}
+                />
+              </Field>
+            </div>
+            <Field>
+              <FieldLabel htmlFor="new-thread-prompt">First message</FieldLabel>
+              <Textarea
+                id="new-thread-prompt"
+                rows={4}
+                ref={message}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="What should the agent do? Leave empty to start with a blank thread."
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void start();
+                }}
+              />
+            </Field>
+          </FieldGroup>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={starting || !provider || !cwd.trim()} title="Ctrl+Enter">
+              {starting ? "Starting…" : "Start thread"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

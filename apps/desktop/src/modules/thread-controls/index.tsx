@@ -1,41 +1,43 @@
 // The controls in a thread's header: its permission mode and putting it away.
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 import type { PermissionMode, Thread } from "../../api/protocol.gen";
 import { modeLabel } from "../../state/selectors";
 import { store } from "../../state/store";
+import { Choice } from "../../ui/kit";
 import type { ThreadContext, UiModule } from "../../ui/registry";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 
 function ModeSelect({ thread, provider }: ThreadContext) {
   const modes = provider?.capabilities.permission_modes ?? [];
   const active = thread.status === "active";
   return (
-    <select
-      className="small"
-      value={thread.permission_mode ?? ""}
+    <Choice
+      size="sm"
+      aria-label="Permission mode"
+      value={thread.permission_mode ?? null}
       disabled={active}
       title={active ? "Changes once the running turn ends" : "How much the agent may do unasked"}
-      onChange={(event) => void store().setMode(thread.id, (event.target.value || null) as PermissionMode | null)}
-    >
-      <option value="">Agent default</option>
-      {modes.map((mode) => (
-        <option key={mode} value={mode}>
-          {modeLabel[mode]}
-        </option>
-      ))}
-    </select>
+      options={[{ value: null, label: "Agent default" }, ...modes.map((mode) => ({ value: mode, label: modeLabel[mode] }))]}
+      onChange={(value) => void store().setMode(thread.id, value as PermissionMode | null)}
+    />
   );
 }
 
 function ArchiveButton({ thread }: { thread: Thread }) {
-  const dialog = useRef<HTMLDialogElement>(null);
   const [refused, setRefused] = useState<string | null>(null);
   const [working, setWorking] = useState(false);
-
-  useEffect(() => {
-    if (refused) dialog.current?.showModal();
-  }, [refused]);
 
   const archive = async (force: boolean) => {
     setWorking(true);
@@ -46,27 +48,31 @@ function ArchiveButton({ thread }: { thread: Thread }) {
 
   return (
     <>
-      <button
-        className="small"
+      <Button
+        variant="outline"
+        size="sm"
         disabled={working || thread.status === "active"}
         title={thread.status === "active" ? "Stop the running turn first" : "Release the session and put the thread away"}
         onClick={() => void archive(false)}
       >
         {working ? "Archiving…" : "Archive"}
-      </button>
-      {refused && (
-        <dialog ref={dialog} className="confirm" onClose={() => setRefused(null)}>
-          <h2>Archive and discard the changes?</h2>
-          <p>{refused}.</p>
-          <p>Archiving removes the thread's working directory. Work that is not committed there is lost.</p>
-          <div className="dialog-actions">
-            <button onClick={() => setRefused(null)}>Keep the thread</button>
-            <button className="danger" disabled={working} onClick={() => void archive(true)}>
+      </Button>
+      <AlertDialog open={refused !== null} onOpenChange={(open) => !open && setRefused(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive and discard the changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {refused}. Archiving removes the thread's working directory. Work that is not committed there is lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep the thread</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={working} onClick={() => void archive(true)}>
               Archive anyway
-            </button>
-          </div>
-        </dialog>
-      )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

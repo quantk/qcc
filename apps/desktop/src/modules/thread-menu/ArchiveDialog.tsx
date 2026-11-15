@@ -15,7 +15,7 @@ import {
 export function ArchiveDialog(props: { thread: Thread; refused: string; close: () => void }) {
   return (
     <AlertDialog open onOpenChange={(open) => !open && props.close()}>
-      <AlertDialogContent>
+      <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>Archive and discard the changes?</AlertDialogTitle>
           <AlertDialogDescription>

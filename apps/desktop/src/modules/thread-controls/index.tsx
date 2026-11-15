@@ -60,7 +60,7 @@ function ArchiveButton({ thread }: { thread: Thread }) {
         {working ? "Archiving…" : "Archive"}
       </Button>
       <AlertDialog open={refused !== null} onOpenChange={(open) => !open && setRefused(null)}>
-        <AlertDialogContent>
+        <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
           <AlertDialogHeader>
             <AlertDialogTitle>Archive and discard the changes?</AlertDialogTitle>
             <AlertDialogDescription>

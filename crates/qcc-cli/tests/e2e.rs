@@ -624,6 +624,78 @@ fn a_spawn_from_inside_an_agent_session_records_its_parent() {
 }
 
 #[test]
+fn an_agent_starts_threads_of_the_users_own_and_lists_them_by_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    // A strict thread, as an assistant might run.
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--permission-mode",
+        "ask",
+        "--hidden",
+        "--json",
+    ]);
+    let helper = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+
+    // From inside its session, a thread of the user's own: under no thread and not
+    // held to its mode, but recorded as its doing.
+    let spawned = daemon.qcc_env(
+        &[
+            "thread",
+            "spawn",
+            "--provider",
+            "echo",
+            "--root",
+            "--permission-mode",
+            "full",
+            "--prompt",
+            "/ask ready?",
+            "--json",
+        ],
+        &[("QCC_THREAD_ID", &helper)],
+    );
+    assert!(spawned.ok, "{}", spawned.stderr);
+    let thread = &spawned.json()["thread"];
+    let id = thread["id"].as_str().unwrap().to_owned();
+    assert!(thread.get("parent").is_none(), "{thread}");
+    assert_eq!(thread["started_by"], helper.as_str());
+    assert!(
+        daemon
+            .qcc(&["thread", "show", &id])
+            .stdout
+            .contains(&format!("started   by thread {helper}"))
+    );
+    daemon.wait_for(&id, "interaction/requested");
+
+    // The hidden thread is left out unless asked for; a state picks threads out.
+    let ids = |args: &[&str]| -> Vec<String> {
+        let mut all = vec!["thread", "list", "--json"];
+        all.extend_from_slice(args);
+        let listed = daemon.qcc(&all).json();
+        listed["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(ids(&[]), std::slice::from_ref(&id));
+    assert_eq!(ids(&["--hidden"]), [helper.clone(), id.clone()]);
+    assert_eq!(ids(&["--state", "waiting"]), std::slice::from_ref(&id));
+    assert_eq!(ids(&["--state", "idle", "--hidden"]), std::slice::from_ref(&helper));
+    let unknown = daemon.qcc(&["thread", "list", "--state", "sleepy"]);
+    assert!(!unknown.ok && unknown.stderr.contains("unknown state"), "{}", unknown.stderr);
+
+    // The last lines of a timeline, for a reader that should not take all of it.
+    let shown = daemon.qcc(&["thread", "show", &id, "--last", "1"]).stdout;
+    assert!(shown.contains("earlier lines left out"), "{shown}");
+    assert!(!shown.contains("> /ask ready?"), "{shown}");
+}
+
+#[test]
 fn plugins_and_daemon_are_listed() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

@@ -30,7 +30,8 @@ export function Sidebar() {
   const now = useNow(30_000);
   const { drag, start, wasDragged } = useThreadDrag();
 
-  const all = useMemo(() => Object.values(threads), [threads]);
+  // A plugin's own threads are reached through the plugin, not listed.
+  const all = useMemo(() => Object.values(threads).filter((thread) => !thread.hidden), [threads]);
   const archivedCount = all.filter((thread) => thread.archived).length;
   const groups = useMemo(
     () => threadGroups(all.filter((thread) => showArchived || !thread.archived), threads, projects),

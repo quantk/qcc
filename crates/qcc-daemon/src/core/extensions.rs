@@ -131,10 +131,20 @@ impl Core {
         match call {
             ThreadsCall::Spawn(spawn) => {
                 tracing::info!(plugin, provider = %spawn.provider, "a plugin spawns a thread");
+                let cwd = match spawn.cwd {
+                    Some(cwd) => cwd,
+                    // A directory of the plugin's own, apart from its key-value store.
+                    None => {
+                        let dir = self.config.plugin_data_dir(plugin).join("threads");
+                        std::fs::create_dir_all(&dir)
+                            .map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+                        dir.display().to_string()
+                    }
+                };
                 let result = self
                     .thread_spawn(ThreadSpawnParams {
                         provider: spawn.provider,
-                        cwd: spawn.cwd,
+                        cwd,
                         environment: spawn.environment,
                         base: spawn.base,
                         prompt: spawn.prompt,
@@ -145,6 +155,8 @@ impl Core {
                         permission_mode: spawn.permission_mode,
                         skills_enabled: spawn.skills_enabled,
                         skills_disabled: spawn.skills_disabled,
+                        started_by: None,
+                        hidden: spawn.hidden,
                     })
                     .map_err(|error| error.message)?;
                 summary(self, &result.thread.id)

@@ -29,6 +29,8 @@ pub struct NewThread {
     /// Skills offered on request it gets, and skills of every session it goes without.
     pub skills_enabled: Vec<String>,
     pub skills_disabled: Vec<String>,
+    pub started_by: Option<ThreadId>,
+    pub hidden: bool,
 }
 
 /// All threads of a daemon. Owns one [`ThreadEngine`] per thread.
@@ -59,6 +61,8 @@ impl Supervisor {
             model: new.model,
             effort: new.effort,
             parent: new.parent,
+            started_by: new.started_by,
+            hidden: new.hidden,
             project: new.project,
             permission_mode: new.permission_mode,
             title: None,

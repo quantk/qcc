@@ -180,7 +180,8 @@ pub enum ThreadsCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpawnThread {
     pub provider: ProviderId,
-    pub cwd: String,
+    /// Absent: a directory of the plugin's own.
+    pub cwd: Option<String>,
     pub prompt: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
@@ -190,6 +191,7 @@ pub struct SpawnThread {
     pub permission_mode: Option<PermissionMode>,
     pub skills_enabled: Vec<String>,
     pub skills_disabled: Vec<String>,
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

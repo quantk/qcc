@@ -160,7 +160,7 @@ impl Orchestration {
         let effort = if same { source.effort.clone() } else { None };
         let child = threads::spawn(&SpawnOptions {
             provider: provider.clone(),
-            cwd: source.cwd.clone(),
+            cwd: Some(source.cwd.clone()),
             prompt: Some(handoff_prompt(&source, &messages, arg(call, "note"))),
             model,
             effort,
@@ -170,6 +170,7 @@ impl Orchestration {
             permission_mode: None,
             skills_enabled: Vec::new(),
             skills_disabled: Vec::new(),
+            hidden: false,
         })?;
         Ok(CommandResult {
             message: format!(
@@ -188,7 +189,7 @@ impl Orchestration {
         let provider = arg(call, "by").unwrap_or(&source.provider).to_owned();
         let reviewer = threads::spawn(&SpawnOptions {
             provider: provider.clone(),
-            cwd: source.cwd.clone(),
+            cwd: Some(source.cwd.clone()),
             prompt: Some(review_prompt(&source, task, arg(call, "focus"))),
             model: None,
             effort: None,
@@ -198,6 +199,7 @@ impl Orchestration {
             permission_mode: None,
             skills_enabled: Vec::new(),
             skills_disabled: Vec::new(),
+            hidden: false,
         })?;
         kv::put(&format!("{REVIEW_PREFIX}{}", reviewer.id), source.id.as_bytes())?;
         threads::watch(&reviewer.id)?;
@@ -342,6 +344,7 @@ mod tests {
             cwd: "/work/tree".into(),
             parent: None,
             title: None,
+            hidden: false,
             model: None,
             effort: None,
             environment: Some("git-worktree".into()),

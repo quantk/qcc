@@ -84,6 +84,11 @@ impl Core {
             check_ceiling(parent, p.permission_mode)?;
         }
         self.check_skills(p.skills_enabled.iter().chain(&p.skills_disabled))?;
+        if let Some(by) = &p.started_by
+            && self.supervisor.thread(by).is_none()
+        {
+            return Err(thread_not_found(by));
+        }
         let cwd = std::path::Path::new(&p.cwd);
         if !cwd.is_absolute() || !cwd.is_dir() {
             return Err(RpcError::new(
@@ -150,6 +155,8 @@ impl Core {
                     permission_mode: p.permission_mode,
                     skills_enabled: p.skills_enabled,
                     skills_disabled: p.skills_disabled,
+                    started_by: p.started_by,
+                    hidden: p.hidden,
                 },
                 now,
             )

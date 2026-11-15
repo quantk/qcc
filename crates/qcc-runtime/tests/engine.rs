@@ -21,6 +21,8 @@ fn new_thread(id: &str) -> NewThread {
         permission_mode: None,
         skills_enabled: Vec::new(),
         skills_disabled: Vec::new(),
+        started_by: None,
+        hidden: false,
     }
 }
 

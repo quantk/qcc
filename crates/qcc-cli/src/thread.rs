@@ -58,6 +58,13 @@ pub(crate) enum ThreadCommand {
         /// Parent thread [default: $QCC_THREAD_ID, set inside agent sessions].
         #[arg(long, env = paths::THREAD_ID_ENV)]
         parent: Option<String>,
+        /// Start a thread of the user's own, under no other, even from inside an agent
+        /// session: the session's thread is recorded as the one that started it.
+        #[arg(long)]
+        root: bool,
+        /// Keep the thread out of lists and overviews; it is reached by its id.
+        #[arg(long)]
+        hidden: bool,
         /// Project id or name [default: the parent's, or the project whose folder
         /// holds --cwd].
         #[arg(long)]
@@ -197,6 +204,13 @@ pub(crate) enum ThreadCommand {
         /// Only the children of this thread.
         #[arg(long, value_name = "THREAD")]
         parent: Option<String>,
+        /// Only threads in this state: working, waiting (for the user), idle, failed
+        /// or archived.
+        #[arg(long, value_name = "STATE")]
+        state: Option<String>,
+        /// Include hidden threads, which plugins keep for their own use.
+        #[arg(long)]
+        hidden: bool,
     },
     /// List the files a thread changed in its environment.
     Changes { thread: String },
@@ -210,8 +224,13 @@ pub(crate) enum ThreadCommand {
         #[arg(long)]
         force: bool,
     },
-    /// Show a thread and its whole timeline.
-    Show { thread: String },
+    /// Show a thread and its timeline.
+    Show {
+        thread: String,
+        /// Only the last N lines of the timeline (with --json, its last N events).
+        #[arg(long, value_name = "N")]
+        last: Option<usize>,
+    },
     /// Print a thread's events.
     Events {
         thread: String,
@@ -242,6 +261,8 @@ pub(crate) async fn run(
             model,
             effort,
             parent,
+            root,
+            hidden,
             project,
             permission_mode,
             skills,
@@ -259,6 +280,9 @@ pub(crate) async fn run(
             // Without a prompt no turn starts, so there is nothing to follow.
             let follow = follow && prompt.is_some();
             let parent = parent.filter(|parent| !parent.is_empty()).map(ThreadId::new);
+            // On its own, a thread started from inside a session is that session's
+            // doing on the user's behalf, not its child.
+            let (parent, started_by) = if root { (None, parent) } else { (parent, None) };
             let provider = match (provider, &parent) {
                 (Some(provider), _) => ProviderId::new(provider),
                 // A child takes after its parent.
@@ -293,6 +317,8 @@ pub(crate) async fn run(
                     permission_mode,
                     skills_enabled: skills,
                     skills_disabled: without_skills,
+                    started_by,
+                    hidden,
                 })
                 .await?;
             if follow {
@@ -600,9 +626,13 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::List { archived, parent } => {
-            let mut result =
-                client.call::<ThreadList>(ThreadListParams { include_archived: archived }).await?;
+        ThreadCommand::List { archived, parent, state, hidden } => {
+            let state = state.as_deref().map(parse_state).transpose()?;
+            let params = ThreadListParams { include_archived: archived, state };
+            let mut result = client.call::<ThreadList>(params).await?;
+            if !hidden {
+                result.threads.retain(|thread| !thread.hidden);
+            }
             if let Some(parent) = &parent {
                 result
                     .threads
@@ -656,7 +686,7 @@ pub(crate) async fn run(
             return Ok(if bad { ExitCode::FAILURE } else { ExitCode::SUCCESS });
         }
 
-        ThreadCommand::Show { thread } => {
+        ThreadCommand::Show { thread, last } => {
             let thread_id = ThreadId::new(thread);
             let result =
                 client.call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() }).await?;
@@ -671,13 +701,17 @@ pub(crate) async fn run(
                     thread: &'a qcc_domain::Thread,
                     events: &'a [ThreadEvent],
                 }
-                print_json(&Shown { thread: &result.thread, events: &events })?;
+                let from = last.map_or(0, |last| events.len().saturating_sub(last));
+                print_json(&Shown { thread: &result.thread, events: &events[from..] })?;
             } else {
                 out(render::thread_details(&result.thread));
-                for event in &events {
-                    if let Some(text) = render::event(event) {
-                        out(text);
-                    }
+                let lines: Vec<String> = events.iter().filter_map(render::event).collect();
+                let from = last.map_or(0, |last| lines.len().saturating_sub(last));
+                if from > 0 {
+                    out(format!("({from} earlier lines left out)"));
+                }
+                for line in &lines[from..] {
+                    out(line);
                 }
             }
         }
@@ -745,4 +779,15 @@ async fn follow_turn(
         }
     }
     bail!("connection to qccd lost")
+}
+
+fn parse_state(text: &str) -> anyhow::Result<ThreadState> {
+    Ok(match text {
+        "working" => ThreadState::Working,
+        "waiting" => ThreadState::Waiting,
+        "idle" => ThreadState::Idle,
+        "failed" => ThreadState::Failed,
+        "archived" => ThreadState::Archived,
+        other => bail!("unknown state {other:?}; use working, waiting, idle, failed or archived"),
+    })
 }

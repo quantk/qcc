@@ -91,6 +91,13 @@ pub struct ThreadSpawnParams {
     /// Skills every session gets that the thread goes without.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills_disabled: Vec<String>,
+    /// The thread whose agent starts this one on the user's behalf. The new thread
+    /// stands on its own (no `parent`) and is not held to that thread's mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<ThreadId>,
+    /// Kept out of clients' lists and overviews (`Thread::hidden`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -295,6 +302,9 @@ method!(ThreadList, "thread.list", ThreadListParams => ThreadListResult);
 pub struct ThreadListParams {
     #[serde(default)]
     pub include_archived: bool,
+    /// Only the threads in this state. `archived` lists the archived ones alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ThreadState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

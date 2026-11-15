@@ -382,6 +382,8 @@ interface types {
     cwd: string,
     parent: option<thread-id>,
     title: option<string>,
+    /// Kept out of clients' lists (`spawn-options.hidden`).
+    hidden: bool,
     model: option<string>,
     /// How hard the model thinks, as the provider names it.
     effort: option<string>,
@@ -788,7 +790,8 @@ interface threads {
     /// A provider id, as `qcc plugin list` shows it.
     provider: string,
     /// An absolute directory; what the environment is made from, if one is named.
-    cwd: string,
+    /// Absent: a directory of the plugin's own, which the daemon makes.
+    cwd: option<string>,
     prompt: option<string>,
     model: option<string>,
     effort: option<string>,
@@ -801,6 +804,9 @@ interface threads {
     skills-enabled: list<string>,
     /// Skills every session gets that this thread goes without.
     skills-disabled: list<string>,
+    /// A thread for the plugin's own use, which clients leave out of their lists
+    /// and overviews.
+    hidden: bool,
   }
 
   enum role { user, agent }

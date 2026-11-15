@@ -1,6 +1,7 @@
 //! Dispatching JSON-RPC requests to the handlers.
 
 use base64::Engine as _;
+use qcc_domain::ThreadState;
 use qcc_plugin_host::UiRequest;
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
@@ -117,17 +118,25 @@ impl Core {
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadList::NAME => {
-                let result =
-                    params::<ThreadList>(raw).map(|ThreadListParams { include_archived }| {
+                let result = params::<ThreadList>(raw).map(
+                    |ThreadListParams { include_archived, state }| {
+                        let archived = include_archived || state == Some(ThreadState::Archived);
                         let mut threads: Vec<_> = self
                             .supervisor
                             .threads()
-                            .filter(|thread| include_archived || !thread.archived)
+                            .filter(|thread| archived || !thread.archived)
                             .cloned()
                             .collect();
+                        if let Some(state) = state {
+                            threads.retain(|thread| {
+                                let id = thread.id.clone();
+                                self.thread_state(&id) == Some(state)
+                            });
+                        }
                         threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
                         ThreadListResult { threads }
-                    });
+                    },
+                );
                 responder.reply(result);
             }
             ThreadWatch::NAME => match params::<ThreadWatch>(raw) {

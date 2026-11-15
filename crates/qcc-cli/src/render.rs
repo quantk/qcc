@@ -129,6 +129,12 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(parent) = &thread.parent {
         lines.push(format!("parent    {parent}"));
     }
+    if let Some(by) = &thread.started_by {
+        lines.push(format!("started   by thread {by}"));
+    }
+    if thread.hidden {
+        lines.push("hidden    kept out of lists".to_owned());
+    }
     if !thread.skills_enabled.is_empty() {
         lines.push(format!("skills    {} on", thread.skills_enabled.join(", ")));
     }

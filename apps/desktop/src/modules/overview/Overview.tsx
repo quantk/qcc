@@ -100,7 +100,10 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
 /** The control panel: every agent at once, sorted by what it wants from you. */
 export function Overview() {
   const threads = useApp((state) => state.threads);
-  const live = useMemo(() => Object.values(threads).filter((thread) => !thread.archived), [threads]);
+  const live = useMemo(
+    () => Object.values(threads).filter((thread) => !thread.archived && !thread.hidden),
+    [threads],
+  );
   const anyWorking = live.some((thread) => thread.status === "active");
   const now = useNow(anyWorking ? 1000 : 30_000);
 

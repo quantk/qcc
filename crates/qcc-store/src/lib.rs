@@ -334,6 +334,8 @@ mod tests {
             permission_mode: None,
             skills_enabled: Vec::new(),
             skills_disabled: Vec::new(),
+            started_by: None,
+            hidden: false,
         }
     }
 

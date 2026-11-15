@@ -289,6 +289,7 @@ pub(crate) fn spawn_options(options: wit_threads::SpawnOptions) -> SpawnThread {
         permission_mode: options.permission_mode.map(mode_from_wit),
         skills_enabled: options.skills_enabled,
         skills_disabled: options.skills_disabled,
+        hidden: options.hidden,
     }
 }
 
@@ -300,6 +301,7 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
         cwd: thread.cwd,
         parent: thread.parent.map(|parent| parent.0),
         title: thread.title,
+        hidden: thread.hidden,
         model: thread.model,
         effort: thread.effort,
         environment: thread.environment.map(|environment| environment.id),

@@ -576,6 +576,17 @@ export type Thread = {
 	 */
 	effort?: string | null,
 	parent?: ThreadId | null,
+	/**
+	 *  The thread whose agent started this one on the user's behalf, as a thread
+	 *  of the user's own rather than a child: it is not under it and not held to
+	 *  its permission mode.
+	 */
+	started_by?: ThreadId | null,
+	/**
+	 *  A thread a plugin keeps for its own use: clients leave it out of their
+	 *  lists and overviews, and reach it by its id.
+	 */
+	hidden?: boolean,
 	/**  The project the thread is grouped under. */
 	project?: ProjectId | null,
 	/**  Absent: the agent's own configuration decides what it may do unasked. */
@@ -739,6 +750,8 @@ export type ThreadIsolateParams = {
 
 export type ThreadListParams = {
 	include_archived?: boolean,
+	/**  Only the threads in this state. `archived` lists the archived ones alone. */
+	state?: ThreadState | null,
 };
 
 export type ThreadListResult = {
@@ -848,6 +861,13 @@ export type ThreadSpawnParams = {
 	skills_enabled?: string[],
 	/**  Skills every session gets that the thread goes without. */
 	skills_disabled?: string[],
+	/**
+	 *  The thread whose agent starts this one on the user's behalf. The new thread
+	 *  stands on its own (no `parent`) and is not held to that thread's mode.
+	 */
+	started_by?: ThreadId | null,
+	/**  Kept out of clients' lists and overviews (`Thread::hidden`). */
+	hidden?: boolean,
 };
 
 /**

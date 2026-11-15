@@ -11,7 +11,7 @@ use super::{Command, Core, Responder, Waiter, thread_not_found};
 
 impl Core {
     /// Where a thread is, for someone waiting on it.
-    fn thread_state(&mut self, id: &ThreadId) -> Option<ThreadState> {
+    pub(super) fn thread_state(&mut self, id: &ThreadId) -> Option<ThreadState> {
         let held = self.in_transition(id);
         let archiving = self.archiving.contains(id);
         let engine = self.supervisor.engine(id).ok()?;

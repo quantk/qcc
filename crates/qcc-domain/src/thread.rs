@@ -173,6 +173,15 @@ pub struct Thread {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
+    /// The thread whose agent started this one on the user's behalf, as a thread
+    /// of the user's own rather than a child: it is not under it and not held to
+    /// its permission mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_by: Option<ThreadId>,
+    /// A thread a plugin keeps for its own use: clients leave it out of their
+    /// lists and overviews, and reach it by its id.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
     /// The project the thread is grouped under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectId>,
@@ -375,6 +384,8 @@ mod tests {
             model: None,
             effort: None,
             parent: None,
+            started_by: None,
+            hidden: false,
             project: None,
             permission_mode: None,
             title: None,

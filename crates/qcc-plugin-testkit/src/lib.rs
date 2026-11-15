@@ -96,6 +96,8 @@ impl HarnessBuilder {
             model: None,
             effort: None,
             parent: None,
+            started_by: None,
+            hidden: false,
             project: None,
             permission_mode: None,
             title: None,

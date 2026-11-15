@@ -1,3 +1,4 @@
+import { RefreshCwIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
 import type { ChangeKind, EnvironmentChanges, Thread } from "../../api/protocol.gen";
@@ -5,6 +6,7 @@ import { type DiffFile, parseDiff } from "../../state/diff";
 import { store } from "../../state/store";
 import { plural } from "../../util/format";
 import { DiffView, fileAnchor } from "../../ui/kit";
+import { Button } from "@/components/ui/button";
 
 type Loaded = { changes: EnvironmentChanges; files: DiffFile[]; truncated: boolean };
 
@@ -83,9 +85,10 @@ export function ChangesView({ thread }: { thread: Thread }) {
           <span>{loading ? "Reading changes…" : ""}</span>
         )}
         <span className="spacer" />
-        <button className="small" disabled={loading} onClick={() => setRefresh(refresh + 1)}>
+        <Button variant="outline" size="sm" disabled={loading} onClick={() => setRefresh(refresh + 1)}>
+          <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           {loading ? "Refreshing…" : "Refresh"}
-        </button>
+        </Button>
       </div>
       {error && <div className="notice error">{error}</div>}
       {loaded && (

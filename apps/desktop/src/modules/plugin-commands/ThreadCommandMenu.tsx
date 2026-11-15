@@ -1,4 +1,13 @@
+import { ChevronDownIcon } from "lucide-react";
+
 import type { CommandContribution } from "../../api/protocol.gen";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 export const commandKey = (command: CommandContribution) => `plugin:${command.plugin}/${command.id}`;
 
@@ -11,21 +20,19 @@ export function ThreadCommandMenu({
   run: (command: CommandContribution) => void;
 }) {
   return (
-    <select
-      className="small commands"
-      value=""
-      title="Commands plugins offer for this thread"
-      onChange={(event) => {
-        const command = commands.find((candidate) => commandKey(candidate) === event.target.value);
-        if (command) run(command);
-      }}
-    >
-      <option value="">More…</option>
-      {commands.map((command) => (
-        <option key={commandKey(command)} value={commandKey(command)} title={command.description}>
-          {command.title}
-        </option>
-      ))}
-    </select>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={<Button variant="outline" size="sm" title="Commands plugins offer for this thread" />}
+      >
+        More <ChevronDownIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto min-w-48">
+        {commands.map((command) => (
+          <DropdownMenuItem key={commandKey(command)} title={command.description} onClick={() => run(command)}>
+            {command.title}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

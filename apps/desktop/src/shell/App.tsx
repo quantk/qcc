@@ -6,6 +6,7 @@ import { matchesShortcut, ui, useUi } from "../ui/registry";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 import { ThreadView } from "./ThreadView";
+import { Button } from "@/components/ui/button";
 
 const PALETTE_SHORTCUT = "Ctrl+K";
 
@@ -78,13 +79,17 @@ export function App() {
       {notice && !error && (
         <div className="toast notice" role="status">
           <span>{notice}</span>
-          <button onClick={store().dismissNotice}>Dismiss</button>
+          <Button variant="outline" size="sm" onClick={store().dismissNotice}>
+            Dismiss
+          </Button>
         </div>
       )}
       {error && (
         <div className="toast" role="alert">
           <span>{error}</span>
-          <button onClick={store().dismissError}>Dismiss</button>
+          <Button variant="outline" size="sm" onClick={store().dismissError}>
+            Dismiss
+          </Button>
         </div>
       )}
     </div>

@@ -1,19 +1,24 @@
+import { ArrowUpIcon } from "lucide-react";
+
 import type { Thread } from "../../api/protocol.gen";
 import { activityText, attentionLabel, attentionOf, findProvider } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt } from "../../ui/kit";
 import { elapsed, relativeTime } from "../../util/format";
 import { useNow } from "../../util/useNow";
+import { Button } from "@/components/ui/button";
 
 export function ParentLink({ parent }: { parent: Thread }) {
   return (
-    <button
-      className="small parent-link"
+    <Button
+      variant="outline"
+      size="sm"
+      className="parent-link"
       title={`Started by: ${parent.title ?? parent.id}`}
       onClick={() => store().select(parent.id)}
     >
-      ↑ {parent.title ?? "Parent thread"}
-    </button>
+      <ArrowUpIcon /> {parent.title ?? "Parent thread"}
+    </Button>
   );
 }
 
@@ -41,9 +46,9 @@ export function ChildrenView({ children }: { children: readonly Thread[] }) {
           <article key={child.id} className={`child-card ${attention}`}>
             <header>
               <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-              <button className="link" onClick={() => store().select(child.id)}>
+              <Button variant="link" className="h-auto p-0 font-semibold text-foreground" onClick={() => store().select(child.id)}>
                 {child.title ?? "New thread"}
-              </button>
+              </Button>
               <span className="child-facts">
                 {provider}
                 {child.environment ? " · worktree" : ""}

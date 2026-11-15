@@ -16,6 +16,9 @@ import { NEW_THREAD } from "../modules/new-thread";
 import { useUi } from "../ui/registry";
 import { baseName, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
+import { PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type Group = { project: string; rows: TreeRow[]; latest: number };
 
@@ -60,9 +63,9 @@ export function Sidebar() {
       <div className="sidebar-head">
         <span className="brand">qcc</span>
         {newThread && (
-          <button className="primary small" disabled={!connected} onClick={newThread.run} title={newThread.shortcut}>
-            {newThread.title}
-          </button>
+          <Button size="sm" disabled={!connected} onClick={newThread.run} title={newThread.shortcut}>
+            <PlusIcon /> {newThread.title}
+          </Button>
         )}
       </div>
       <nav className="view-list" aria-label="Screens">
@@ -112,7 +115,7 @@ export function Sidebar() {
       </nav>
       {archivedCount > 0 && (
         <label className="sidebar-foot">
-          <input type="checkbox" checked={showArchived} onChange={(event) => setShowArchived(event.target.checked)} />
+          <Checkbox checked={showArchived} onCheckedChange={(checked) => setShowArchived(checked)} />
           Show archived ({archivedCount})
         </label>
       )}

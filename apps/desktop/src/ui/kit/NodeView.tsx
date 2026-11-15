@@ -5,6 +5,8 @@
 import { type ReactNode, useState } from "react";
 
 import { Markdown } from "./Markdown";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export type NodeAction = (action: string, value?: string) => void;
 
@@ -29,8 +31,10 @@ function InputNode({ node, act, busy }: { node: Fields; act: NodeAction; busy: b
         setText("");
       }}
     >
-      <input value={text} placeholder={str(node.placeholder)} onChange={(event) => setText(event.target.value)} />
-      <button disabled={busy}>{str(node.submit) ?? "Submit"}</button>
+      <Input value={text} placeholder={str(node.placeholder)} onChange={(event) => setText(event.target.value)} />
+      <Button type="submit" disabled={busy}>
+        {str(node.submit) ?? "Submit"}
+      </Button>
     </form>
   );
 }
@@ -120,11 +124,11 @@ function draw(value: unknown, act: NodeAction, busy: boolean, depth: number, key
     case "button": {
       const action = str(node.action);
       if (!action) return null;
-      const style = node.style === "primary" || node.style === "danger" ? node.style : "";
+      const variant = node.style === "primary" ? "default" : node.style === "danger" ? "destructive" : "outline";
       return (
-        <button key={key} className={style} disabled={busy} onClick={() => act(action, str(node.value))}>
+        <Button key={key} variant={variant} disabled={busy} onClick={() => act(action, str(node.value))}>
           {str(node.label) ?? action}
-        </button>
+        </Button>
       );
     }
     case "input":

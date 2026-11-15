@@ -5,6 +5,7 @@ import { attentionLabel, attentionOf, childrenOf, findProvider } from "../state/
 import { useApp } from "../state/store";
 import { type ThreadContext, useUi } from "../ui/registry";
 import { tailPath } from "../util/format";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 /** The frame of one thread. What fills it — tabs and header controls — is contributed. */
 export function ThreadView({ threadId }: { threadId: ThreadId }) {
@@ -55,14 +56,16 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
           ))}
         </div>
       </header>
-      {tabs.length > 1 && (
-        <div className="tabs" role="tablist">
-          {tabs.map((candidate) => (
-            <button key={candidate.id} role="tab" aria-selected={candidate === tab} onClick={() => setChosen(candidate.id)}>
-              {candidate.title}
-            </button>
-          ))}
-        </div>
+      {tabs.length > 1 && tab && (
+        <Tabs value={tab.id} onValueChange={(value) => setChosen(String(value))} className="border-b px-4">
+          <TabsList variant="line" className="h-10">
+            {tabs.map((candidate) => (
+              <TabsTrigger key={candidate.id} value={candidate.id} className="flex-none px-2.5 after:bg-primary">
+                {candidate.title}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       )}
       {tab ? <tab.render {...context} /> : <div className="empty">Nothing to show for this thread.</div>}
     </div>

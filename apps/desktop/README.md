@@ -7,10 +7,27 @@ src-tauri/        the backend: one connection to qccd, requests and notification
 src/api/          the typed door to the daemon; protocol.gen.ts is generated from qcc-protocol
 src/state/        the store (mirror of the daemon) and pure folds: timeline, diff
 src/ui/registry   the extension points
-src/ui/kit/       shared building blocks: Markdown, DiffView, Disclosure, InteractionPrompt
+src/ui/kit/       shared building blocks: Markdown, DiffView, Disclosure, InteractionPrompt,
+                  CommandTrace and ToolTrace (the AI Elements Terminal and Tool patterns)
+src/components/ui shadcn components, added with the shadcn CLI and owned by us from then on
 src/shell/        the frame: sidebar, thread frame, command palette
 src/modules/      every feature, each a module that registers contributions
 ```
+
+## Styling
+
+The app's own styles live in `src/styles.css`, inside Tailwind's `base` layer.
+Components come from [shadcn/ui](https://ui.shadcn.com) on Base UI: `pnpm dlx shadcn@latest
+add <name>` copies one into `src/components/ui`, where it is ours to change. Patterns of
+[AI Elements](https://ui.shadcn.com/docs/ai-elements) (Tool, Terminal, Reasoning, …) are not
+installed; they are compositions of those components, written in `src/ui/kit` against
+timeline items rather than AI SDK messages.
+
+`src/theme.css` maps shadcn's tokens (`--background`, `--primary`, `--muted`, …) onto the
+palette, so a component follows the app's colors and its light and dark scheme. Because
+the app's rules sit in a layer, a utility class on a component always wins over them; the
+app's global `button` and `select` rules skip elements with a `data-slot`, which is how
+shadcn components mark themselves.
 
 Run it with `./dev desktop` from the repository root; check it with
 `nix develop .#desktop -c ./scripts/check-desktop.sh`.

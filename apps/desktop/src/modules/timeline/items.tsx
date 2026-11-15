@@ -1,6 +1,8 @@
+import { FileTextIcon, SearchIcon, WrenchIcon } from "lucide-react";
+
 import { parseDiff } from "../../state/diff";
 import { relativePath } from "../../util/format";
-import { DiffView, Disclosure, Markdown, StatusMark } from "../../ui/kit";
+import { CommandTrace, DiffView, Disclosure, Markdown, StatusMark, ToolTrace } from "../../ui/kit";
 import type { ItemRendererProps } from "../../ui/registry";
 
 export const CORE_ITEM_TYPES = [
@@ -51,24 +53,8 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
           <Markdown text={item.text} />
         </div>
       );
-    case "command": {
-      const failed = item.exit_code !== undefined && item.exit_code !== null && item.exit_code !== 0;
-      return (
-        <Disclosure
-          className="tool"
-          head={
-            <>
-              <span className="label">Run</span>
-              <code className="one-line">{item.command}</code>
-              {failed && <span className="tag failed">exit {item.exit_code}</span>}
-              <StatusMark status={item.status} />
-            </>
-          }
-        >
-          {item.output ? <pre className="output">{item.output}</pre> : null}
-        </Disclosure>
-      );
-    }
+    case "command":
+      return <CommandTrace command={item.command} output={item.output} exitCode={item.exit_code} status={item.status} />;
     case "fileChange": {
       const files = item.diff ? parseDiff(item.diff, item.path) : [];
       const additions = files.reduce((sum, file) => sum + file.additions, 0);
@@ -99,47 +85,29 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
     }
     case "fileRead":
       return (
-        <Disclosure
-          className="tool"
-          head={
-            <>
-              <span className="label">Read</span>
-              <code className="one-line" title={item.path}>
-                {relativePath(item.path, thread.cwd)}
-              </code>
-              <StatusMark status={item.status} />
-            </>
-          }
+        <ToolTrace
+          icon={<FileTextIcon />}
+          title={`Read ${relativePath(item.path, thread.cwd)}`}
+          hint={item.path}
+          status={item.status}
         />
       );
     case "search":
-      return (
-        <Disclosure
-          className="tool"
-          head={
-            <>
-              <span className="label">Search</span>
-              <code className="one-line">{item.query}</code>
-              <StatusMark status={item.status} />
-            </>
-          }
-        />
-      );
+      return <ToolTrace icon={<SearchIcon />} title={`Search ${item.query}`} hint={item.query} status={item.status} />;
     case "tool":
       return (
-        <Disclosure
-          className="tool"
-          head={
+        <ToolTrace
+          icon={<WrenchIcon />}
+          title={
             <>
-              <span className="label">{item.name}</span>
-              <code className="one-line">{summarize(item.input)}</code>
-              <StatusMark status={item.status} />
+              {item.name} <span className="font-mono text-xs opacity-70">{summarize(item.input)}</span>
             </>
           }
-        >
-          <pre className="output">{JSON.stringify(item.input, null, 2)}</pre>
-          {item.output ? <pre className="output">{item.output}</pre> : null}
-        </Disclosure>
+          hint={item.name}
+          status={item.status}
+          input={item.input}
+          output={item.output}
+        />
       );
     case "extension":
       return null;

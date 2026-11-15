@@ -3,5 +3,6 @@
 export { DiffView, fileAnchor } from "./DiffView";
 export { Disclosure, StatusMark } from "./Disclosure";
 export { Markdown } from "./Markdown";
+export { CommandTrace, ToolTrace } from "./ToolTrace";
 export { InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";

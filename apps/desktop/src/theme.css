@@ -1,0 +1,68 @@
+/*
+ * Tailwind and the shadcn design tokens.
+ *
+ * shadcn components read their colors from `--background`, `--primary`, `--muted` and the
+ * rest. Each is mapped onto the app's own palette in `styles.css`, so the components look
+ * like the rest of the app, and dark mode follows the palette's `prefers-color-scheme`
+ * switch without a `.dark` class.
+ */
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+:root {
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--raised);
+  --card-foreground: var(--text);
+  --popover: var(--raised);
+  --popover-foreground: var(--text);
+  --primary: var(--brand);
+  --primary-foreground: var(--on-brand);
+  --secondary: var(--panel);
+  --secondary-foreground: var(--text);
+  --muted: var(--panel);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--user-bg);
+  --accent-foreground: var(--text);
+  --destructive: var(--red);
+  --input: var(--border);
+  --ring: var(--brand);
+  --radius: 0.5rem;
+}
+
+@theme inline {
+  --font-sans: var(--sans);
+  --font-mono: var(--mono);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--green);
+  --color-success-muted: var(--green-bg);
+  --color-danger-muted: var(--red-bg);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+}

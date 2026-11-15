@@ -322,6 +322,8 @@ export type PluginInfo = {
 	commands: CommandInfo[],
 	/**  Names of the skills it offers to agents. */
 	skills: string[],
+	/**  Settings of its own; their values are in `Settings::plugins`. */
+	settings?: SettingField[],
 };
 
 export type PluginListResult = {
@@ -462,6 +464,31 @@ export type SendMode =
  */
 "steer";
 
+/**  A setting of a plugin's own. Every value is text. */
+export type SettingField = {
+	/**  Letters, digits, `-` and `_`; unique within the plugin. */
+	id: string,
+	label: string,
+	description?: string | null,
+	kind: SettingKind,
+	/**  What the plugin is told while the user has not set it. */
+	default?: string | null,
+};
+
+/**  What a plugin's setting holds, which also says how a client asks for it. */
+export type SettingKind = { type: "text" } | 
+/**  `true` or `false`. */
+{ type: "flag" } | { type: "choice"; options: string[] } | 
+/**  The id of an agent provider. */
+{ type: "provider" } | 
+/**  A model of the provider the setting `provider` holds. */
+{ type: "model"; provider: string } | 
+/**
+ *  An effort level of the model the setting `model` holds, for the provider
+ *  the setting `provider` holds.
+ */
+{ type: "effort"; provider: string; model: string } | { type: "permission-mode" };
+
 /**  What the user set for the daemon. Kept in `<data>/settings.json`. */
 export type Settings = {
 	/**  The agent a new thread gets when none is named. */
@@ -480,6 +507,11 @@ export type Settings = {
 	mcp_servers?: { [key in string]: McpServerSettings },
 	/**  What the user set for skills plugins offer, by skill name. */
 	skills?: { [key in string]: SkillSettings },
+	/**
+	 *  The values of plugins' own settings (`PluginInfo::settings`): by plugin id,
+	 *  then by setting id. A setting not here has its default.
+	 */
+	plugins?: { [key in string]: { [key in string]: string } },
 };
 
 export type SettingsResult = {

@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use qcc_domain::{
     CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
     InteractionResolution, McpTransport, ModelInfo, PermissionMode, Project, ProjectId, ProviderId,
-    ProviderInfo, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
+    ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -630,6 +630,9 @@ pub struct PluginInfo {
     pub commands: Vec<CommandInfo>,
     /// Names of the skills it offers to agents.
     pub skills: Vec<String>,
+    /// Settings of its own; their values are in `Settings::plugins`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<SettingField>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -715,6 +718,10 @@ pub struct Settings {
     /// What the user set for skills plugins offer, by skill name.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub skills: BTreeMap<String, SkillSettings>,
+    /// The values of plugins' own settings (`PluginInfo::settings`): by plugin id,
+    /// then by setting id. A setting not here has its default.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub plugins: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

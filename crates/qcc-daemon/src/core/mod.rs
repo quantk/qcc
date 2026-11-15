@@ -321,7 +321,7 @@ impl Core {
             }
         }
 
-        Ok(Self {
+        let core = Self {
             config: config.clone(),
             commands,
             store,
@@ -343,7 +343,13 @@ impl Core {
             programs,
             cli_dir,
             fatal: None,
-        })
+        };
+        let plugins: Vec<String> =
+            core.host.plugins().iter().map(|plugin| plugin.id().to_owned()).collect();
+        for plugin in plugins {
+            core.post_plugin_settings(&plugin);
+        }
+        Ok(core)
     }
 
     pub(crate) async fn run(mut self, mut queue: UnboundedReceiver<Command>) -> anyhow::Result<()> {

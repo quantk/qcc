@@ -18,6 +18,7 @@
 //! | `/mcp`               | lists the MCP servers the session was given                  |
 //! | `/agent`             | says the model and effort the session was started with       |
 //! | `/notes`             | says what qcc told it along with the message                 |
+//! | `/settings`          | lists the plugin's own settings as the daemon told them      |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -49,6 +50,8 @@ const SLOW_TICK_MS: u64 = 10;
 #[derive(Default)]
 struct Echo {
     sessions: HashMap<String, Session>,
+    /// Its own settings, as the daemon last told them.
+    settings: Vec<(String, String)>,
 }
 
 /// How a server the session was given is doing while it is on.
@@ -317,6 +320,19 @@ impl Echo {
                 out.push(completed());
             }
             "/crash" => panic!("echo provider was asked to crash"),
+            "/settings" => {
+                let reply = if self.settings.is_empty() {
+                    "no settings".to_owned()
+                } else {
+                    let lines: Vec<String> =
+                        self.settings.iter().map(|(id, value)| format!("{id}={value}")).collect();
+                    lines.join("\n")
+                };
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/notes" => {
                 let reply = if notes.is_empty() { "no notes".into() } else { notes.join("\n") };
                 out.push(text(reply.clone()));
@@ -671,6 +687,35 @@ impl Ui for Echo {
 impl Plugin for Echo {
     fn providers(&mut self) -> Vec<&mut dyn Provider> {
         vec![self]
+    }
+
+    /// Example settings, one of each kind a client draws differently.
+    fn settings(&self) -> Vec<SettingField> {
+        let field = |id: &str, label: &str, kind, default: Option<&str>| SettingField {
+            id: id.into(),
+            label: label.into(),
+            description: None,
+            kind,
+            default: default.map(str::to_owned),
+        };
+        vec![
+            field("greeting", "Greeting", SettingKind::Text, Some("hello")),
+            field("loud", "Loud", SettingKind::Flag, Some("false")),
+            field(
+                "voice",
+                "Voice",
+                SettingKind::Choice(vec!["calm".into(), "cheery".into()]),
+                None,
+            ),
+            field("agent", "Agent", SettingKind::Provider, None),
+            field("model", "Model", SettingKind::Model("agent".into()), None),
+            field("effort", "Effort", SettingKind::Effort(("agent".into(), "model".into())), None),
+            field("mode", "Permissions", SettingKind::PermissionMode, None),
+        ]
+    }
+
+    fn on_settings(&mut self, values: Vec<(String, String)>) {
+        self.settings = values;
     }
 
     fn skills(&self) -> Vec<SkillInfo> {

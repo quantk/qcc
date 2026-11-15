@@ -316,6 +316,38 @@ interface types {
     on-request: bool,
   }
 
+  /// What a setting holds, which also says how the app asks for it.
+  variant setting-kind {
+    /// Any text.
+    text,
+    /// `true` or `false`.
+    flag,
+    /// One of these values.
+    choice(list<string>),
+    /// The id of an agent provider.
+    provider,
+    /// A model of the provider the named setting (a `provider` one) holds.
+    model(string),
+    /// An effort level of the model the second named setting holds, for the
+    /// provider the first one holds.
+    effort(tuple<string, string>),
+    /// A permission mode: `ask`, `accept-edits`, `auto` or `full`.
+    permission-mode,
+  }
+
+  /// A setting of the plugin's own, which the user sets in the app's settings or
+  /// with `qcc plugin set`. Every value is text; the plugin hears of them through
+  /// the `settings` event.
+  record setting-field {
+    /// Letters, digits, `-` and `_`; unique within the plugin.
+    id: string,
+    label: string,
+    description: option<string>,
+    kind: setting-kind,
+    /// What the plugin is told while the user has not set it.
+    default: option<string>,
+  }
+
   variant contribution {
     provider(provider-info),
     environment(environment-info),
@@ -326,6 +358,7 @@ interface types {
     ui-item(string),
     command(command-info),
     skill(skill-info),
+    setting(setting-field),
   }
 
   // ----- threads ----------------------------------------------------------------
@@ -653,6 +686,10 @@ interface types {
     process-exit(process-exit),
     /// A timer started with `timers.start` fired.
     timer(u64),
+    /// The plugin's settings, by id: what the user set, and the default of each
+    /// one not set. Delivered once the daemon is up and whenever the user changes
+    /// one.
+    settings(list<tuple<string, string>>),
   }
 
   record model-info {

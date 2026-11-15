@@ -217,6 +217,66 @@ pub struct SkillInfo {
     pub on_request: bool,
 }
 
+/// What a plugin's setting holds, which also says how a client asks for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum SettingKind {
+    Text,
+    /// `true` or `false`.
+    Flag,
+    Choice {
+        options: Vec<String>,
+    },
+    /// The id of an agent provider.
+    Provider,
+    /// A model of the provider the setting `provider` holds.
+    Model {
+        provider: String,
+    },
+    /// An effort level of the model the setting `model` holds, for the provider
+    /// the setting `provider` holds.
+    Effort {
+        provider: String,
+        model: String,
+    },
+    PermissionMode,
+}
+
+/// A setting of a plugin's own. Every value is text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SettingField {
+    /// Letters, digits, `-` and `_`; unique within the plugin.
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub kind: SettingKind,
+    /// What the plugin is told while the user has not set it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+}
+
+impl SettingField {
+    /// Why `value` cannot be this setting's, or `None` if it can. `providers` are
+    /// the ids of the agent providers there are.
+    pub fn problem(&self, value: &str, providers: &[&str]) -> Option<String> {
+        let id = &self.id;
+        match &self.kind {
+            SettingKind::Flag if value != "true" && value != "false" => {
+                Some(format!("{id} is true or false, not {value:?}"))
+            }
+            SettingKind::Choice { options } if !options.iter().any(|option| option == value) => {
+                Some(format!("{id} is one of {}, not {value:?}", options.join(", ")))
+            }
+            SettingKind::Provider if !providers.contains(&value) => {
+                Some(format!("{id}: no plugin provides {value:?}"))
+            }
+            SettingKind::PermissionMode => value.parse::<PermissionMode>().err(),
+            _ => None,
+        }
+    }
+}
+
 /// A skill as an agent session gets it: a file it can read.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct SkillRef {

@@ -7,8 +7,10 @@ import type {
   PluginInfo,
   ProgramStatus,
   ProviderInfo,
+  SettingField,
   Settings,
 } from "../../api/protocol.gen";
+import { defaultLabel, effectiveSetting, pluginSetting, withPluginSetting } from "../../state/pluginSettings";
 import { modeLabel, providersOf, visiblePlugins } from "../../state/selectors";
 import { envOf, envRows, providerSettings, withProgram, withProvider } from "../../state/settings";
 import { store, useApp } from "../../state/store";
@@ -55,17 +57,19 @@ export function SettingsView() {
   const settings = draft ?? loaded?.settings ?? {};
   const dirty =
     draft !== null &&
-    JSON.stringify({ ...draft, mcp_servers: undefined }) !==
-      JSON.stringify({ ...(loaded?.settings ?? {}), mcp_servers: undefined });
+    JSON.stringify({ ...draft, mcp_servers: undefined, skills: undefined }) !==
+      JSON.stringify({ ...(loaded?.settings ?? {}), mcp_servers: undefined, skills: undefined });
   const plugins = useMemo(() => visiblePlugins(allPlugins, showExamples), [allPlugins, showExamples]);
   const providers = useMemo(() => providersOf(plugins), [plugins]);
 
   const save = async () => {
     if (!draft) return;
     setSaving(true);
-    // MCP servers have a screen of their own and are saved from there at once.
-    const latest = store().getState().settings?.settings.mcp_servers;
-    if (await store().saveSettings({ ...draft, mcp_servers: latest })) setDraft(null);
+    // MCP servers and skills have screens of their own and are saved from there at once.
+    const latest = store().getState().settings?.settings;
+    if (await store().saveSettings({ ...draft, mcp_servers: latest?.mcp_servers, skills: latest?.skills })) {
+      setDraft(null);
+    }
     setSaving(false);
   };
 
@@ -120,7 +124,7 @@ export function SettingsView() {
         </Section>
         <Section title="Plugins" hint="What is loaded, what each one adds and what it is allowed to do.">
           {allPlugins.map((plugin) => (
-            <PluginCard key={plugin.id} plugin={plugin} />
+            <PluginCard key={plugin.id} plugin={plugin} settings={settings} providers={providers} change={setDraft} />
           ))}
         </Section>
       </div>
@@ -292,7 +296,13 @@ function ProgramRow(props: { program: ProgramStatus; value: string; change: (pat
   );
 }
 
-function PluginCard({ plugin }: { plugin: PluginInfo }) {
+function PluginCard(props: {
+  plugin: PluginInfo;
+  settings: Settings;
+  providers: readonly ProviderInfo[];
+  change: (settings: Settings) => void;
+}) {
+  const { plugin } = props;
   const { permissions } = plugin;
   const allowed = [
     permissions.deltas && "timeline",
@@ -321,6 +331,122 @@ function PluginCard({ plugin }: { plugin: PluginInfo }) {
       </header>
       {adds.length > 0 && <p className="text-muted-foreground">Adds: {adds.join(" · ")}</p>}
       <p className="text-muted-foreground">May: {allowed.length > 0 ? allowed.join(" · ") : "nothing beyond logging"}</p>
+      {(plugin.settings ?? []).length > 0 && (
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {(plugin.settings ?? []).map((field) => (
+            <PluginSettingField
+              key={field.id}
+              plugin={plugin}
+              field={field}
+              settings={props.settings}
+              providers={props.providers}
+              change={(value) => props.change(withPluginSetting(props.settings, plugin.id, field.id, value))}
+            />
+          ))}
+        </div>
+      )}
     </article>
+  );
+}
+
+/** One of a plugin's own settings, asked for the way its kind says. */
+function PluginSettingField(props: {
+  plugin: PluginInfo;
+  field: SettingField;
+  settings: Settings;
+  providers: readonly ProviderInfo[];
+  change: (value: string | null) => void;
+}) {
+  const { plugin, field, settings, change } = props;
+  const value = pluginSetting(settings, plugin.id, field.id);
+  const id = `plugin-${plugin.id}-${field.id}`;
+  const other = (name: string) => effectiveSetting(settings, plugin, name);
+  const { kind } = field;
+  let control: React.ReactNode;
+  switch (kind.type) {
+    case "text":
+      control = (
+        <Input
+          id={id}
+          value={value ?? ""}
+          placeholder={field.default ?? ""}
+          spellCheck={false}
+          onChange={(event) => change(event.target.value)}
+        />
+      );
+      break;
+    case "flag":
+      control = (
+        <Switch
+          id={id}
+          aria-label={field.label}
+          checked={(value ?? field.default) === "true"}
+          onCheckedChange={(checked) => change(checked ? "true" : "false")}
+        />
+      );
+      break;
+    case "choice":
+      control = (
+        <Choice
+          id={id}
+          aria-label={field.label}
+          className="w-full"
+          value={value}
+          options={[{ value: null, label: defaultLabel(field) }, ...kind.options.map((option) => ({ value: option, label: option }))]}
+          onChange={change}
+        />
+      );
+      break;
+    case "provider":
+      control = (
+        <Choice
+          id={id}
+          aria-label={field.label}
+          className="w-full"
+          value={value}
+          options={[
+            { value: null, label: defaultLabel(field) },
+            ...props.providers.map((provider) => ({ value: provider.id, label: provider.name })),
+          ]}
+          onChange={change}
+        />
+      );
+      break;
+    case "model":
+      control = <ModelPicker id={id} provider={other(kind.provider) ?? undefined} value={value} onChange={change} />;
+      break;
+    case "effort":
+      control = (
+        <EffortPicker
+          id={id}
+          provider={other(kind.provider) ?? undefined}
+          model={other(kind.model)}
+          value={value}
+          onChange={change}
+        />
+      );
+      break;
+    case "permission-mode":
+      control = (
+        <Choice
+          id={id}
+          aria-label={field.label}
+          className="w-full"
+          value={value}
+          options={[
+            { value: null, label: defaultLabel(field) },
+            ...Object.entries(modeLabel).map(([mode, label]) => ({ value: mode, label })),
+          ]}
+          onChange={change}
+        />
+      );
+      break;
+  }
+  return (
+    <Field>
+      <FieldLabel htmlFor={id}>{field.label}</FieldLabel>
+      {control}
+      {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+    </Field>
   );
 }

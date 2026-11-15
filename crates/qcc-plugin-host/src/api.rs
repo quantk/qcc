@@ -3,8 +3,8 @@
 
 use qcc_domain::{
     CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionResolution,
-    McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread,
-    ThreadId, ThreadState, TranscriptEntry, UiViewInfo, UserInput,
+    McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo, SettingField, SkillInfo,
+    SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry, UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +16,7 @@ pub enum Contribution {
     UiItem(String),
     Command(CommandInfo),
     Skill(SkillInfo),
+    Setting(SettingField),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +149,9 @@ pub enum PluginRequest {
     /// A watched thread settled. Nobody waits for the answer; see
     /// [`crate::PluginHandle::post`].
     ThreadSettled(Box<SettledThread>),
+    /// The plugin's settings, by id, defaults filled in. Posted like
+    /// [`PluginRequest::ThreadSettled`].
+    Settings(Vec<(String, String)>),
 }
 
 /// A thread as plugins see it: the projection and where it is.

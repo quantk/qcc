@@ -44,6 +44,7 @@ impl Core {
                     environments: Vec::new(),
                     commands: Vec::new(),
                     skills: Vec::new(),
+                    settings: Vec::new(),
                 };
                 for contribution in plugin.contributions() {
                     match contribution {
@@ -56,6 +57,7 @@ impl Core {
                         Contribution::Skill(skill) if permissions.skills => {
                             info.skills.push(skill.name.clone());
                         }
+                        Contribution::Setting(field) => info.settings.push(field.clone()),
                         Contribution::Skill(_)
                         | Contribution::UiView(_)
                         | Contribution::UiItem(_) => {}

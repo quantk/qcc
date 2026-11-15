@@ -1,10 +1,11 @@
 //! Projects and daemon settings.
 
-use qcc_domain::{Project, ProjectId, ThreadId};
+use qcc_domain::{Project, ProjectId, SettingField, ThreadId};
+use qcc_plugin_host::{Contribution, PluginHandle, PluginRequest};
 use qcc_protocol::jsonrpc::{Request, RpcError, codes};
 use qcc_protocol::methods::{
     Empty, PROJECTS_UPDATED, ProgramStatus, ProjectCreateParams, ProjectDeleteParams,
-    ProjectResult, ProjectUpdateParams, ProjectsUpdatedNotification, SettingsResult,
+    ProjectResult, ProjectUpdateParams, ProjectsUpdatedNotification, Settings, SettingsResult,
     SettingsSetParams,
 };
 
@@ -18,6 +19,8 @@ impl Core {
     ) -> Result<SettingsResult, RpcError> {
         let SettingsSetParams { settings: next } = p;
         settings::check(&next).map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
+        self.check_plugin_settings(&next)?;
+        let before = self.settings.plugins.clone();
         settings::save(&self.config.settings(), &next).map_err(|error| {
             RpcError::new(codes::INTERNAL_ERROR, format!("cannot save the settings: {error}"))
         })?;
@@ -25,7 +28,65 @@ impl Core {
         self.settings = next;
         // Another program may offer other models.
         self.models.clear();
+        let changed: Vec<String> = self
+            .host
+            .plugins()
+            .iter()
+            .map(|plugin| plugin.id().to_owned())
+            .filter(|id| before.get(id) != self.settings.plugins.get(id))
+            .collect();
+        for plugin in changed {
+            self.post_plugin_settings(&plugin);
+        }
         Ok(self.settings_result())
+    }
+
+    /// The settings of a plugin that is loaded must be its own and fit them. Those
+    /// of a plugin not loaded now are kept as they are, for when it is back.
+    fn check_plugin_settings(&self, settings: &Settings) -> Result<(), RpcError> {
+        let providers: Vec<String> =
+            self.host.providers().map(|(_, info)| info.id.to_string()).collect();
+        let providers: Vec<&str> = providers.iter().map(String::as_str).collect();
+        for (id, values) in &settings.plugins {
+            let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == id) else {
+                continue;
+            };
+            let fields = setting_fields(plugin);
+            for (name, value) in values {
+                let field = fields.iter().find(|field| &field.id == name).ok_or_else(|| {
+                    RpcError::new(
+                        codes::INVALID_PARAMS,
+                        format!("plugin {id} has no setting {name:?}"),
+                    )
+                })?;
+                if let Some(problem) = field.problem(value, &providers) {
+                    return Err(RpcError::new(codes::INVALID_PARAMS, format!("{id}: {problem}")));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Tell a plugin its settings, defaults filled in. Nothing for a plugin without.
+    pub(super) fn post_plugin_settings(&self, id: &str) {
+        let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == id) else {
+            return;
+        };
+        let fields = setting_fields(plugin);
+        if fields.is_empty() {
+            return;
+        }
+        let set = self.settings.plugins.get(id);
+        let values = fields
+            .iter()
+            .filter_map(|field| {
+                let value = set.and_then(|set| set.get(&field.id)).or(field.default.as_ref())?;
+                Some((field.id.clone(), value.clone()))
+            })
+            .collect();
+        if plugin.post(PluginRequest::Settings(values)).is_err() {
+            tracing::warn!(plugin = id, "cannot tell the plugin its settings: it is gone");
+        }
     }
 
     pub(super) fn settings_result(&self) -> SettingsResult {
@@ -163,4 +224,16 @@ impl Core {
             watcher.out.send(line).is_ok()
         });
     }
+}
+
+/// The settings a plugin declared.
+fn setting_fields(plugin: &PluginHandle) -> Vec<SettingField> {
+    plugin
+        .contributions()
+        .iter()
+        .filter_map(|contribution| match contribution {
+            Contribution::Setting(field) => Some(field.clone()),
+            _ => None,
+        })
+        .collect()
 }

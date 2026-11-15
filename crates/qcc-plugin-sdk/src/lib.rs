@@ -76,8 +76,8 @@ use types::{
     CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges, EnvironmentDeliver,
     EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove,
     EnvironmentRequest, Event, InteractionAnswer, McpSwitch, ModelInfo, Outcome, ProviderInfo,
-    ProviderRequest, SessionStart, SessionStarted, SettledThread, SkillInfo, SkillRef, ThreadInput,
-    UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo,
+    SkillRef, ThreadInput, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -363,6 +363,18 @@ pub trait Plugin: Default + 'static {
         Vec::new()
     }
 
+    /// Settings of the plugin's own, which the user sets in the app or with
+    /// `qcc plugin set`. Their values arrive in [`Plugin::on_settings`].
+    fn settings(&self) -> Vec<SettingField> {
+        Vec::new()
+    }
+
+    /// The plugin's settings by id, defaults filled in: once the daemon is up, and
+    /// again whenever the user changes one.
+    fn on_settings(&mut self, values: Vec<(String, String)>) {
+        let _ = values;
+    }
+
     /// A thread passed to [`threads::watch`] settled.
     fn on_thread_settled(&mut self, settled: SettledThread) {
         let _ = settled;
@@ -439,6 +451,7 @@ pub mod __private {
                 contributions.extend(commands.commands().into_iter().map(Contribution::Command));
             }
             contributions.extend(plugin.skills().into_iter().map(Contribution::Skill));
+            contributions.extend(plugin.settings().into_iter().map(Contribution::Setting));
             Ok(contributions)
         })
     }
@@ -532,6 +545,10 @@ pub mod __private {
             }
             Event::Timer(timer) => {
                 plugin.on_timer(timer);
+                Ok(Outcome::Done)
+            }
+            Event::Settings(values) => {
+                plugin.on_settings(values);
                 Ok(Outcome::Done)
             }
         })

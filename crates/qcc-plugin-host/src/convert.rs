@@ -1,6 +1,5 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
-use qcc_domain::Compaction;
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
@@ -9,6 +8,7 @@ use qcc_domain::{
     ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
     UiViewInfo, UsageSnapshot, UserInput,
 };
+use qcc_domain::{Compaction, SettingField, SettingKind};
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
@@ -237,6 +237,23 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             description: s.description,
             body: s.body,
             on_request: s.on_request,
+        }),
+        wit::Contribution::Setting(field) => Contribution::Setting(SettingField {
+            id: field.id,
+            label: field.label,
+            description: field.description,
+            kind: match field.kind {
+                wit::SettingKind::Text => SettingKind::Text,
+                wit::SettingKind::Flag => SettingKind::Flag,
+                wit::SettingKind::Choice(options) => SettingKind::Choice { options },
+                wit::SettingKind::Provider => SettingKind::Provider,
+                wit::SettingKind::Model(provider) => SettingKind::Model { provider },
+                wit::SettingKind::Effort((provider, model)) => {
+                    SettingKind::Effort { provider, model }
+                }
+                wit::SettingKind::PermissionMode => SettingKind::PermissionMode,
+            },
+            default: field.default,
         }),
     }
 }
@@ -473,6 +490,7 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
         PluginRequest::Command { command, thread, args } => {
             wit::Event::Command(wit::CommandCall { command, thread: thread.map(|t| t.0), args })
         }
+        PluginRequest::Settings(values) => wit::Event::Settings(values),
         PluginRequest::ThreadSettled(settled) => {
             let SettledThread { summary, last_message } = *settled;
             wit::Event::ThreadSettled(wit::SettledThread {

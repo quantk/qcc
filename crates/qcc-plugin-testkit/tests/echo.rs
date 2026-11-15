@@ -29,6 +29,7 @@ fn declares_its_provider_and_its_ui() {
         Contribution::UiView(canvas),
         Contribution::UiItem(kind),
         Contribution::Skill(skill),
+        settings @ ..,
     ] = harness.handle().contributions()
     else {
         panic!("unexpected contributions: {:?}", harness.handle().contributions());
@@ -37,6 +38,10 @@ fn declares_its_provider_and_its_ui() {
     assert_eq!(canvas.web.as_deref(), Some("index.html"));
     assert_eq!(kind, "provider-echo/card");
     assert!(skill.on_request, "{skill:?}");
+    assert!(
+        settings.iter().all(|contribution| matches!(contribution, Contribution::Setting(_))),
+        "{settings:?}"
+    );
     assert_eq!(info.id.as_str(), "echo");
     assert_eq!(
         info.capabilities,

@@ -28,7 +28,8 @@ pub use project::{Project, project_of};
 pub use provider::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, EnvironmentChanges,
     EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport, ModelInfo, PermissionMode,
-    ProviderCapabilities, ProviderInfo, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
+    ProviderCapabilities, ProviderInfo, SettingField, SettingKind, SkillInfo, SkillRef,
+    UiPlacement, UiScope, UiViewInfo,
 };
 pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,

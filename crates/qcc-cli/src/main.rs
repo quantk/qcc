@@ -20,7 +20,8 @@ use clap::{Args, Parser, Subcommand};
 use qcc_client::Client;
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Empty, InteractionResolve,
-    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams,
+    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, SettingsGet,
+    SettingsSet, SettingsSetParams,
 };
 use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
@@ -129,6 +130,10 @@ struct Answer {
 enum PluginCommand {
     /// List loaded plugins and what they contribute.
     List,
+    /// A plugin's own settings and their values.
+    Settings { plugin: String },
+    /// Set one of a plugin's own settings; without a value, go back to its default.
+    Set { plugin: String, setting: String, value: Option<String> },
 }
 
 #[derive(Subcommand)]
@@ -246,6 +251,54 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 if let Some(thread) = &result.thread_id {
                     out(format!("thread {thread}"));
                 }
+            }
+        }
+
+        Command::Plugin(PluginCommand::Settings { plugin }) => {
+            let plugins = client.call::<PluginList>(Empty {}).await?;
+            let Some(info) = plugins.plugins.into_iter().find(|info| info.id == plugin) else {
+                bail!("no plugin {plugin:?} is loaded; `qcc plugin list` lists them");
+            };
+            let settings = client.call::<SettingsGet>(Empty {}).await?.settings;
+            let set = settings.plugins.get(&plugin);
+            if json {
+                print_json(&serde_json::json!({ "fields": info.settings, "values": set }))?;
+                return Ok(ExitCode::SUCCESS);
+            }
+            if info.settings.is_empty() {
+                out(format!("plugin {plugin} has no settings"));
+            }
+            for field in &info.settings {
+                let value = match set.and_then(|set| set.get(&field.id)) {
+                    Some(value) => value.clone(),
+                    None => match &field.default {
+                        Some(default) => format!("{default}  (default)"),
+                        None => "(not set)".to_owned(),
+                    },
+                };
+                out(format!("{:<20} {value}", field.id));
+                let about = field.description.as_deref().unwrap_or(&field.label);
+                out(format!("{:<20} {about} [{}]", "", render::setting_kind(&field.kind)));
+            }
+        }
+
+        Command::Plugin(PluginCommand::Set { plugin, setting, value }) => {
+            let mut settings = client.call::<SettingsGet>(Empty {}).await?.settings;
+            let values = settings.plugins.entry(plugin.clone()).or_default();
+            match value {
+                Some(value) => {
+                    values.insert(setting, value);
+                }
+                None => {
+                    values.remove(&setting);
+                }
+            }
+            if values.is_empty() {
+                settings.plugins.remove(&plugin);
+            }
+            let result = client.call::<SettingsSet>(SettingsSetParams { settings }).await?;
+            if json {
+                print_json(&result.settings.plugins.get(&plugin))?;
             }
         }
 

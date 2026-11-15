@@ -3,8 +3,8 @@
 use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
     ChangeKind, EnvironmentChanges, EnvironmentState, EventPayload, InteractionRequest, Item,
-    ItemShape, ItemStatus, McpState, Thread, ThreadEvent, ThreadId, ThreadState, ThreadStatus,
-    TurnStatus,
+    ItemShape, ItemStatus, McpState, SettingKind, Thread, ThreadEvent, ThreadId, ThreadState,
+    ThreadStatus, TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -432,4 +432,17 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         | EventPayload::InteractionResolved { .. }
         | EventPayload::ProviderUnhandled { .. } => return None,
     })
+}
+
+/// What a plugin setting holds, in a few words.
+pub fn setting_kind(kind: &SettingKind) -> String {
+    match kind {
+        SettingKind::Text => "text".into(),
+        SettingKind::Flag => "true or false".into(),
+        SettingKind::Choice { options } => options.join(" | "),
+        SettingKind::Provider => "an agent provider".into(),
+        SettingKind::Model { provider } => format!("a model of the agent in {provider}"),
+        SettingKind::Effort { model, .. } => format!("an effort level of the model in {model}"),
+        SettingKind::PermissionMode => "ask | accept-edits | auto | full".into(),
+    }
 }

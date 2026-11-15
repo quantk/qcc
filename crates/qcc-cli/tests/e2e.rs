@@ -1907,6 +1907,45 @@ fn skills_are_switched_for_all_threads_and_for_one() {
 }
 
 #[test]
+fn a_plugin_is_told_its_own_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let ask = |daemon: &Daemon| {
+        let id = daemon.spawn("/settings");
+        let told = daemon.qcc(&["thread", "wait", &id, "--json"]).json();
+        told["threads"][0]["last_message"].as_str().unwrap().to_owned()
+    };
+    // Unset, a setting is its default; one without a default is not told.
+    assert_eq!(ask(&daemon), "greeting=hello\nloud=false");
+    let shown = daemon.qcc(&["plugin", "settings", "provider-echo"]).stdout;
+    assert!(shown.contains("greeting             hello  (default)"), "{shown}");
+    assert!(shown.contains("calm | cheery"), "{shown}");
+
+    for (setting, value) in [("greeting", "hi there"), ("voice", "calm"), ("agent", "echo")] {
+        let set = daemon.qcc(&["plugin", "set", "provider-echo", setting, value]);
+        assert!(set.ok, "{}", set.stderr);
+    }
+    assert_eq!(ask(&daemon), "greeting=hi there\nloud=false\nvoice=calm\nagent=echo");
+
+    // What does not fit the setting is refused, and nothing changes.
+    for (setting, value, why) in [
+        ("voice", "shouty", "one of calm, cheery"),
+        ("loud", "yes", "true or false"),
+        ("agent", "nobody", "no plugin provides"),
+        ("mode", "loose", "unknown permission mode"),
+        ("nope", "x", "has no setting"),
+    ] {
+        let refused = daemon.qcc(&["plugin", "set", "provider-echo", setting, value]);
+        assert!(!refused.ok && refused.stderr.contains(why), "{setting}: {}", refused.stderr);
+    }
+    // Back to the default, and the values survive a restart.
+    assert!(daemon.qcc(&["plugin", "set", "provider-echo", "greeting"]).ok);
+    daemon.stop();
+    let daemon = Daemon::start(dir.path());
+    assert_eq!(ask(&daemon), "greeting=hello\nloud=false\nvoice=calm\nagent=echo");
+}
+
+#[test]
 fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

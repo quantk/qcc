@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { store } from "../../state/store";
-import { Disclosure, NodeView, StatusMark } from "../../ui/kit";
+import { DataTrace, NodeView } from "../../ui/kit";
 import type { ItemRendererProps } from "../../ui/registry";
 
 // A settled item never changes, so what its plugin drew for it is kept.
@@ -44,17 +44,12 @@ export function pluginItemRenderer(plugin: string) {
     }
     // Until the plugin answers, or if it cannot, the item is shown as its data.
     return (
-      <Disclosure
-        className="tool"
-        head={
-          <>
-            <span className="label">{kind}</span>
-            {failed ? <span className="tag failed">not drawn</span> : <StatusMark status={item.status} />}
-          </>
-        }
-      >
-        <pre className="output">{JSON.stringify(payload, null, 2)}</pre>
-      </Disclosure>
+      <DataTrace
+        title={kind}
+        status={item.status}
+        value={payload}
+        description={failed ? <span className="text-destructive">not drawn</span> : undefined}
+      />
     );
   };
 }

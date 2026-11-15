@@ -582,6 +582,15 @@ textarea {
   padding-left: 1.5em;
 }
 
+/* Tailwind's preflight takes the markers away; agent text needs them. */
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
 .markdown a {
   color: var(--blue);
 }
@@ -636,57 +645,11 @@ textarea {
   flex: none;
 }
 
-.disclosure {
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--raised);
-  min-width: 0;
-}
-
-.disclosure.reasoning {
-  border-style: dashed;
-  background: none;
-}
-
-.disclosure-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  background: none;
-  border: none;
-  padding: 5px 10px;
-  text-align: left;
-  min-width: 0;
-}
-
-.disclosure-head:disabled {
-  opacity: 1;
-}
-
-.disclosure-head code {
-  flex: 1;
-}
-
 .chevron {
   color: var(--text-muted);
   width: 10px;
   flex: none;
   font-size: 11px;
-}
-
-.disclosure-body {
-  border-top: 1px solid var(--border);
-  padding: 8px 10px;
-  min-width: 0;
-}
-
-.disclosure.reasoning .disclosure-body {
-  color: var(--text-muted);
-}
-
-.disclosure-body > .diff {
-  margin: -8px -10px;
 }
 
 .output {
@@ -701,11 +664,6 @@ textarea {
   border-top: 1px solid var(--border);
   margin-top: 8px;
   padding-top: 8px;
-}
-
-.plan {
-  border-left: 3px solid var(--brand);
-  padding: 2px 0 2px 12px;
 }
 
 .notice {
@@ -953,11 +911,6 @@ textarea {
   overflow: hidden;
   scroll-margin-top: 8px;
   min-width: 0;
-}
-
-.disclosure-body .diff-file {
-  border: none;
-  border-radius: 0;
 }
 
 .diff-file-head {

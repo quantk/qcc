@@ -8,7 +8,7 @@ src/api/          the typed door to the daemon; protocol.gen.ts is generated fro
 src/state/        the store (mirror of the daemon) and pure folds: timeline, diff
 src/ui/registry   the extension points
 src/ui/kit/       shared building blocks: Markdown, DiffView, Disclosure, InteractionPrompt,
-                  CommandTrace and ToolTrace (the AI Elements Terminal and Tool patterns)
+                  ItemTrace and its kin (the AI Elements Terminal, Tool and Reasoning patterns)
 src/components/ui shadcn components, added with the shadcn CLI and owned by us from then on
 src/shell/        the frame: sidebar, thread frame, command palette
 src/modules/      every feature, each a module that registers contributions

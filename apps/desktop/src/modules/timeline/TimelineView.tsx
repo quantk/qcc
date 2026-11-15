@@ -2,24 +2,12 @@ import { memo, useLayoutEffect, useRef } from "react";
 
 import type { Item, Thread } from "../../api/protocol.gen";
 import type { Entry, Timeline } from "../../state/timeline";
-import { Disclosure, InteractionPrompt, StatusMark } from "../../ui/kit";
+import { DataTrace, InteractionPrompt } from "../../ui/kit";
 import { itemKey, useUi } from "../../ui/registry";
 
 /** An item nobody registered a renderer for: shown as the data it is. */
 function UnknownItem({ item }: { item: Item }) {
-  return (
-    <Disclosure
-      className="tool"
-      head={
-        <>
-          <span className="label">{item.type === "extension" ? item.kind : item.type}</span>
-          <StatusMark status={item.status} />
-        </>
-      }
-    >
-      <pre className="output">{JSON.stringify(item, null, 2)}</pre>
-    </Disclosure>
-  );
+  return <DataTrace title={item.type === "extension" ? item.kind : item.type} status={item.status} value={item} />;
 }
 
 function ItemView({ item, thread }: { item: Item; thread: Thread }) {

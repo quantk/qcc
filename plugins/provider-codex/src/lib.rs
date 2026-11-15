@@ -5,9 +5,10 @@
 //! process and the bridge.
 
 pub mod bridge;
+pub mod models;
 
 use qcc_plugin_sdk::prelude::*;
-use qcc_plugin_sdk::stdio::Sessions;
+use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
 use bridge::Bridge;
 
@@ -16,6 +17,7 @@ const PROGRAM: &str = "codex";
 #[derive(Default)]
 struct Codex {
     sessions: Sessions<Bridge>,
+    probes: Probes,
 }
 
 impl Provider for Codex {
@@ -89,6 +91,18 @@ impl Provider for Codex {
             .resolve(&answer.request_id, &answer.resolution)?;
         self.sessions.apply(&answer.thread, output)
     }
+
+    fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        let options = process::SpawnOptions {
+            program: PROGRAM.into(),
+            args: vec!["app-server".into()],
+            env: Vec::new(),
+            cwd: None,
+        };
+        let token =
+            self.probes.start(&options, &models::requests(), Box::new(models::ModelsProbe))?;
+        Ok(Reply::Later(token))
+    }
 }
 
 impl Plugin for Codex {
@@ -97,7 +111,13 @@ impl Plugin for Codex {
     }
 
     fn on_process(&mut self, event: ProcessEvent) {
-        self.sessions.on_process(event);
+        if let Some(event) = self.probes.on_process(event) {
+            self.sessions.on_process(event);
+        }
+    }
+
+    fn on_timer(&mut self, timer: u64) {
+        self.probes.on_timer(timer);
     }
 }
 

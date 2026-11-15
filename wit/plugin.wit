@@ -380,6 +380,8 @@ interface types {
     /// Release the session. After returning, the plugin holds nothing for the thread.
     stop(thread-id),
     resolve-interaction(interaction-answer),
+    /// The models the agent offers. Usually answered `deferred`: asking the agent
+    /// means running it.
     list-models,
   }
 
@@ -527,8 +529,12 @@ interface types {
   }
 
   record model-info {
+    /// What the agent is started with (`--model`, a config value).
     id: string,
     name: string,
+    description: option<string>,
+    /// The model the agent uses when none is chosen.
+    is-default: bool,
   }
 
   variant outcome {

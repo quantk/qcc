@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use qcc_domain::{
     CommandInfo, EnvironmentChanges, EnvironmentInfo, InteractionId, InteractionResolution,
-    PermissionMode, ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId, ThreadState,
-    UiViewInfo,
+    ModelInfo, PermissionMode, ProviderId, ProviderInfo, Thread, ThreadEvent, ThreadId,
+    ThreadState, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -373,6 +373,27 @@ pub struct PluginPermissions {
     pub skills: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
+}
+
+// ----- providers --------------------------------------------------------------------
+
+method!(
+    /// The models a provider's agent offers. The first call asks the agent (which can
+    /// take a few seconds); the answer is kept until `refresh` asks again.
+    ProviderModels, "provider.models", ProviderModelsParams => ProviderModelsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderModelsParams {
+    pub provider: ProviderId,
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderModelsResult {
+    /// In the agent's order. Empty when the agent cannot tell.
+    pub models: Vec<ModelInfo>,
 }
 
 // ----- plugin commands --------------------------------------------------------------

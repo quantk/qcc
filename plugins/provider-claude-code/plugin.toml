@@ -6,4 +6,6 @@ wasm = "plugin.wasm"
 
 [permissions]
 deltas = true
+# Probes that ask the CLI for its models are cut off after a while.
+timers = true
 process = ["claude"]

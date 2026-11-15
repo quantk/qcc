@@ -409,6 +409,13 @@ fn plugins_and_daemon_are_listed() {
     // Bundled plugins are installed like any other.
     assert!(dir.path().join("plugins/provider-echo/plugin.wasm").is_file());
 
+    let models = daemon.qcc(&["provider", "models", "echo", "--json"]).json();
+    assert_eq!(models["models"][0]["id"], "echo-1");
+    assert_eq!(models["models"][0]["is_default"], true);
+    let unknown = daemon.qcc(&["provider", "models", "nobody"]);
+    assert!(!unknown.ok);
+    assert!(unknown.stderr.contains("no plugin provides"), "{}", unknown.stderr);
+
     let status = daemon.qcc(&["daemon", "status", "--json"]).json();
     assert_eq!(status["data_dir"], dir.path().to_str().unwrap());
 

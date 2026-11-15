@@ -6,4 +6,6 @@ wasm = "plugin.wasm"
 
 [permissions]
 deltas = true
+# Probes that ask the agents for their models are cut off after a while.
+timers = true
 process = ["opencode"]

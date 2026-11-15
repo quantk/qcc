@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import type { PermissionMode } from "../../api/protocol.gen";
 import { environmentsOf, modeLabel, providersOf } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
-import { Choice } from "../../ui/kit";
+import { Choice, ModelPicker } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -33,7 +33,8 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
   const [cwd, setCwd] = useState(last.cwd ?? "");
   const [environment, setEnvironment] = useState(last.environment ?? "");
   const [base, setBase] = useState("");
-  const [model, setModel] = useState(last.model ?? "");
+  // A model means something only to the agent it was chosen for.
+  const [model, setModel] = useState<string | null>(last.model || null);
   const [mode, setMode] = useState(last.mode ?? "");
   const [prompt, setPrompt] = useState("");
   const [starting, setStarting] = useState(false);
@@ -60,13 +61,19 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
       cwd: cwd.trim(),
       environment: chosenEnvironment || null,
       base: chosenEnvironment && base.trim() ? base.trim() : null,
-      model: model.trim() || null,
+      model,
       permission_mode: chosenMode,
       prompt: prompt.trim() || null,
     });
     setStarting(false);
     if (!thread) return;
-    const next: Remembered = { provider: provider.id, cwd: cwd.trim(), environment: chosenEnvironment, mode, model };
+    const next: Remembered = {
+      provider: provider.id,
+      cwd: cwd.trim(),
+      environment: chosenEnvironment,
+      mode,
+      model: model ?? undefined,
+    };
     localStorage.setItem(REMEMBERED, JSON.stringify(next));
     onClose();
   };
@@ -99,7 +106,10 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
                 className="w-full"
                 value={provider?.id ?? null}
                 options={providerOptions}
-                onChange={(value) => setProviderId(value ?? "")}
+                onChange={(value) => {
+                  if ((value ?? "") !== provider?.id) setModel(null);
+                  setProviderId(value ?? "");
+                }}
               />
             </Field>
             <Field>
@@ -143,13 +153,7 @@ export function NewThreadDialog({ close: onClose }: { close: () => void }) {
             <div className="grid grid-cols-2 gap-3">
               <Field>
                 <FieldLabel htmlFor="new-thread-model">Model</FieldLabel>
-                <Input
-                  id="new-thread-model"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder="Agent default"
-                  spellCheck={false}
-                />
+                <ModelPicker id="new-thread-model" provider={provider?.id} value={model} onChange={setModel} />
               </Field>
               <Field>
                 <FieldLabel>Permissions</FieldLabel>

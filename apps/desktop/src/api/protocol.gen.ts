@@ -169,6 +169,15 @@ export type ItemStatus = "pending" | "completed" | "failed" |
 /**  Settled by the core because its turn or session went away. */
 "interrupted";
 
+export type ModelInfo = {
+	/**  What the agent is started with. */
+	id: string,
+	name: string,
+	description?: string | null,
+	/**  The model the agent uses when none is chosen. */
+	is_default?: boolean,
+};
+
 export type OptionKind = "allow" | "deny" | "other";
 
 /**  An approval or a question the agent is waiting on. */
@@ -238,6 +247,16 @@ export type ProviderInfo = {
 	id: ProviderId,
 	name: string,
 	capabilities: ProviderCapabilities,
+};
+
+export type ProviderModelsParams = {
+	provider: ProviderId,
+	refresh?: boolean,
+};
+
+export type ProviderModelsResult = {
+	/**  In the agent's order. Empty when the agent cannot tell. */
+	models: ModelInfo[],
 };
 
 export type RpcError = {
@@ -622,6 +641,7 @@ export type Methods = {
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
+	"provider.models": { params: ProviderModelsParams; result: ProviderModelsResult },
 	"command.list": { params: Empty; result: CommandListResult },
 	"command.run": { params: CommandRunParams; result: CommandRunResult },
 	"ui.contributions": { params: Empty; result: UiContributionsResult },

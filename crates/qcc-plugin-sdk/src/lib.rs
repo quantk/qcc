@@ -146,8 +146,11 @@ pub trait Provider {
         Err(format!("no interaction {:?} is pending", answer.request_id))
     }
 
-    fn models(&mut self) -> Result<Vec<ModelInfo>, String> {
-        Ok(Vec::new())
+    /// The models the agent offers. Asking the agent usually means running it, so
+    /// the answer may come later: return [`Reply::Later`] and answer with
+    /// [`Outcome::Models`] through [`completions::complete`] (see [`stdio::Probes`]).
+    fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        Ok(Reply::Now(Vec::new()))
     }
 }
 
@@ -388,7 +391,9 @@ pub mod __private {
                     ProviderRequest::ResolveInteraction(answer) => {
                         provider.resolve_interaction(answer).map(done)
                     }
-                    ProviderRequest::ListModels => provider.models().map(Outcome::Models),
+                    ProviderRequest::ListModels => {
+                        provider.models().map(|r| reply(r, Outcome::Models))
+                    }
                 }
             }
             Event::Environment(call) => {

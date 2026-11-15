@@ -419,8 +419,14 @@ impl Provider for Echo {
         deltas::emit(&answer.thread, &out)
     }
 
-    fn models(&mut self) -> Result<Vec<ModelInfo>, String> {
-        Ok(vec![ModelInfo { id: "echo-1".into(), name: "Echo 1".into() }])
+    fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        let model = |id: &str, name: &str, is_default| ModelInfo {
+            id: id.into(),
+            name: name.into(),
+            description: None,
+            is_default,
+        };
+        Ok(Reply::Now(vec![model("echo-1", "Echo 1", true), model("echo-2", "Echo 2", false)]))
     }
 }
 

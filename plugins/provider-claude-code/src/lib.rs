@@ -5,9 +5,10 @@
 //! process and the bridge.
 
 pub mod bridge;
+pub mod models;
 
 use qcc_plugin_sdk::prelude::*;
-use qcc_plugin_sdk::stdio::Sessions;
+use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
 use bridge::Bridge;
 
@@ -16,6 +17,7 @@ const PROGRAM: &str = "claude";
 #[derive(Default)]
 struct ClaudeCode {
     sessions: Sessions<Bridge>,
+    probes: Probes,
 }
 
 impl Provider for ClaudeCode {
@@ -122,11 +124,16 @@ impl Provider for ClaudeCode {
         self.sessions.apply(&answer.thread, output)
     }
 
-    fn models(&mut self) -> Result<Vec<ModelInfo>, String> {
-        // Aliases the CLI resolves to the current model of each family.
-        Ok(["opus", "sonnet", "haiku"]
-            .map(|id| ModelInfo { id: id.into(), name: id.into() })
-            .into())
+    fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        let options = process::SpawnOptions {
+            program: PROGRAM.into(),
+            args: models::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
+            env: Vec::new(),
+            cwd: None,
+        };
+        let token =
+            self.probes.start(&options, &[models::request()], Box::new(models::ModelsProbe))?;
+        Ok(Reply::Later(token))
     }
 }
 
@@ -136,7 +143,13 @@ impl Plugin for ClaudeCode {
     }
 
     fn on_process(&mut self, event: ProcessEvent) {
-        self.sessions.on_process(event);
+        if let Some(event) = self.probes.on_process(event) {
+            self.sessions.on_process(event);
+        }
+    }
+
+    fn on_timer(&mut self, timer: u64) {
+        self.probes.on_timer(timer);
     }
 }
 

@@ -3,13 +3,14 @@
 //! The dialect stays in the plugin: a [`LineBridge`] turns lines into an [`Output`]
 //! and does no I/O. [`Sessions`] does the rest the same way for every such provider:
 //! it maps processes to threads, reassembles lines, writes to the agent, emits deltas
-//! and reports the process going away.
+//! and reports the process going away. [`Probes`] runs an agent for a single
+//! question, such as which models it offers.
 
 use std::collections::HashMap;
 
 use crate::lines::{LineBuffer, Tail};
-use crate::types::Delta;
-use crate::{ProcessEvent, deltas, log, process};
+use crate::types::{Delta, Outcome};
+use crate::{ProcessEvent, completions, deltas, log, process, timers};
 
 /// How much of an agent's stderr is kept to explain why it died.
 const STDERR_TAIL_BYTES: usize = 4096;
@@ -192,6 +193,134 @@ impl<B: LineBridge> Sessions<B> {
                 }
                 deltas::emit(thread, &ending.deltas)
             }
+        }
+    }
+}
+
+/// How long a probe may run before it is killed and its request answered with an
+/// error. Asking an agent what it offers takes a second or two; one that hangs
+/// (waiting on a login, say) must not keep its caller waiting.
+pub const PROBE_TIMEOUT_MS: u64 = 20_000;
+
+/// Reads the answer to one question out of a short-lived agent process.
+pub trait ProbeParser {
+    /// One complete line from stdout. `Some` ends the probe with that answer.
+    fn on_line(&mut self, line: &str) -> Option<Result<Outcome, String>>;
+
+    /// The process ended before [`ProbeParser::on_line`] answered.
+    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Result<Outcome, String>;
+}
+
+struct Probe {
+    stdout: LineBuffer,
+    stderr: Tail,
+    timer: Option<u64>,
+    parser: Box<dyn ProbeParser>,
+}
+
+/// Processes run to answer a deferred request rather than to hold a session: the
+/// agent is asked one thing, its answer goes to [`completions::complete`] and the
+/// process is killed. The request's token is the process id.
+#[derive(Default)]
+pub struct Probes {
+    running: HashMap<u64, Probe>,
+}
+
+impl Probes {
+    /// Run a probe and return the token to answer the request `deferred` with.
+    /// `stdin` is written right away, one line each; with nothing to write, stdin is
+    /// closed, for programs that would otherwise wait on it.
+    ///
+    /// The timeout needs the `timers` permission. Without it the probe runs until
+    /// it answers or exits.
+    ///
+    /// # Errors
+    ///
+    /// When the program cannot be started or written to.
+    pub fn start(
+        &mut self,
+        options: &process::SpawnOptions,
+        stdin: &[String],
+        parser: Box<dyn ProbeParser>,
+    ) -> Result<u64, String> {
+        let process = process::spawn(options)?;
+        let written = if stdin.is_empty() {
+            process::close_stdin(process)
+        } else {
+            stdin
+                .iter()
+                .try_for_each(|line| process::write_stdin(process, format!("{line}\n").as_bytes()))
+        };
+        if let Err(error) = written {
+            let _ = process::kill(process);
+            return Err(error);
+        }
+        let timer = timers::start(PROBE_TIMEOUT_MS).ok();
+        let probe = Probe {
+            stdout: LineBuffer::default(),
+            stderr: Tail::new(STDERR_TAIL_BYTES),
+            timer,
+            parser,
+        };
+        self.running.insert(process, probe);
+        Ok(process)
+    }
+
+    /// Hand over a process event. Returns it back when it is not a probe's.
+    pub fn on_process(&mut self, event: ProcessEvent) -> Option<ProcessEvent> {
+        let process = match &event {
+            ProcessEvent::Stdout { process, .. }
+            | ProcessEvent::Stderr { process, .. }
+            | ProcessEvent::Exit { process, .. } => *process,
+        };
+        let Some(probe) = self.running.get_mut(&process) else { return Some(event) };
+        match event {
+            ProcessEvent::Stdout { data, .. } => {
+                for line in probe.stdout.push(&data) {
+                    if let Some(answer) = probe.parser.on_line(&line) {
+                        self.finish(process, answer);
+                        break;
+                    }
+                }
+            }
+            ProcessEvent::Stderr { data, .. } => probe.stderr.push(&data),
+            ProcessEvent::Exit { code, .. } => {
+                let answer =
+                    match probe.stdout.finish().and_then(|line| probe.parser.on_line(&line)) {
+                        Some(answer) => answer,
+                        None => {
+                            let stderr = probe.stderr.last_line().map(str::to_owned);
+                            probe.parser.exited(code, stderr.as_deref())
+                        }
+                    };
+                self.finish(process, answer);
+            }
+        }
+        None
+    }
+
+    /// Hand over a fired timer. Returns whether it was a probe's.
+    pub fn on_timer(&mut self, timer: u64) -> bool {
+        let Some(process) =
+            self.running.iter().find(|(_, probe)| probe.timer == Some(timer)).map(|(id, _)| *id)
+        else {
+            return false;
+        };
+        let seconds = PROBE_TIMEOUT_MS / 1000;
+        self.finish(process, Err(format!("the agent did not answer within {seconds} s")));
+        true
+    }
+
+    fn finish(&mut self, process: u64, answer: Result<Outcome, String>) {
+        let Some(probe) = self.running.remove(&process) else { return };
+        if let Some(timer) = probe.timer {
+            timers::cancel(timer);
+        }
+        // Killing a process that already exited is harmless.
+        let _ = process::kill(process);
+        if let Err(error) = completions::complete(process, answer.as_ref().map_err(String::as_str))
+        {
+            log::warn(format!("could not answer probe {process}: {error}"));
         }
     }
 }

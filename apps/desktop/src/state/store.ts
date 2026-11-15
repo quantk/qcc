@@ -9,8 +9,10 @@ import type {
   CommandRunResult,
   InteractionId,
   InteractionResolution,
+  ModelInfo,
   PermissionMode,
   PluginInfo,
+  ProviderId,
   SendMode,
   Thread,
   ThreadEvent,
@@ -18,6 +20,9 @@ import type {
   ThreadSpawnParams,
 } from "../api/protocol.gen";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
+
+/** What a provider said it offers. Asked once per provider and connection. */
+export type ModelList = { loading: boolean; models: readonly ModelInfo[]; error: string | null };
 
 export type AppState = {
   daemon: DaemonState;
@@ -33,6 +38,7 @@ export type AppState = {
   error: string | null;
   /** Something the user should hear about that is not a failure. */
   notice: string | null;
+  models: Readonly<Record<ProviderId, ModelList>>;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -53,6 +59,7 @@ export class AppStore {
     loading: false,
     error: null,
     notice: null,
+    models: {},
   };
   private listeners = new Set<() => void>();
   private notifying = false;
@@ -98,9 +105,11 @@ export class AppStore {
     this.set({ daemon });
     if (daemon.status === "connected" && was !== "connected") void this.connected();
     if (daemon.status !== "connected") {
-      // Subscriptions die with the connection.
+      // Subscriptions die with the connection, and a daemon that comes back may
+      // have other plugins.
       this.watch = null;
       this.live = null;
+      this.set({ models: {} });
     }
   }
 
@@ -214,6 +223,20 @@ export class AppStore {
       return { error: error instanceof Error ? error.message : String(error) };
     }
   }
+
+  /** Ask the provider which models it offers, unless that is known or underway. */
+  loadModels = async (provider: ProviderId, refresh = false) => {
+    const known = this.state.models[provider];
+    if (known?.loading || (known && !refresh && !known.error)) return;
+    const put = (list: ModelList) => this.set({ models: { ...this.state.models, [provider]: list } });
+    put({ loading: true, models: known?.models ?? [], error: null });
+    try {
+      const { models } = await this.api.call("provider.models", { provider, refresh });
+      put({ loading: false, models, error: null });
+    } catch (error) {
+      put({ loading: false, models: [], error: error instanceof Error ? error.message : String(error) });
+    }
+  };
 
   select = (threadId: ThreadId | null) => {
     if (threadId === this.state.selected) return;

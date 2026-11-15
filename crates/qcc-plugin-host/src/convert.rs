@@ -292,7 +292,15 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
             Outcome::SessionStarted { provider_session: s.provider_session }
         }
         wit::Outcome::Models(models) => Outcome::Models(
-            models.into_iter().map(|m| ModelInfo { id: m.id, name: m.name }).collect(),
+            models
+                .into_iter()
+                .map(|m| ModelInfo {
+                    id: m.id,
+                    name: m.name,
+                    description: m.description,
+                    is_default: m.is_default,
+                })
+                .collect(),
         ),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
         wit::Outcome::UiTree(tree) => Outcome::UiTree(tree),

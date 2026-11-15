@@ -5,9 +5,10 @@
 //! The dialect lives in [`bridge`], which is pure.
 
 pub mod bridge;
+pub mod models;
 
 use qcc_plugin_sdk::prelude::*;
-use qcc_plugin_sdk::stdio::{LineBridge, Output, Sessions};
+use qcc_plugin_sdk::stdio::{LineBridge, Output, Probes, Sessions};
 
 use bridge::Bridge;
 
@@ -17,11 +18,18 @@ struct Agent {
     name: &'static str,
     program: &'static str,
     args: &'static [&'static str],
+    /// The arguments that make it print its models, one id per line.
+    models_args: Option<&'static [&'static str]>,
 }
 
 /// Adding an ACP agent is one line here plus its executable in `plugin.toml`.
-const AGENTS: &[Agent] =
-    &[Agent { id: "opencode", name: "opencode", program: "opencode", args: &["acp"] }];
+const AGENTS: &[Agent] = &[Agent {
+    id: "opencode",
+    name: "opencode",
+    program: "opencode",
+    args: &["acp"],
+    models_args: Some(&["models"]),
+}];
 
 #[derive(Default)]
 struct Acp {
@@ -31,6 +39,7 @@ struct Acp {
 struct AcpProvider {
     agent: &'static Agent,
     sessions: Sessions<Running>,
+    probes: Probes,
 }
 
 /// A bridge and the agent it talks to, which names it when the process dies.
@@ -115,6 +124,18 @@ impl Provider for AcpProvider {
         let output = running.bridge.resolve(&answer.request_id, &answer.resolution)?;
         self.sessions.apply(&answer.thread, output)
     }
+
+    fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
+        let Some(args) = self.agent.models_args else { return Ok(Reply::Now(Vec::new())) };
+        let options = process::SpawnOptions {
+            program: self.agent.program.into(),
+            args: args.iter().map(|arg| (*arg).to_owned()).collect(),
+            env: Vec::new(),
+            cwd: None,
+        };
+        let probe = Box::new(models::ModelsProbe::new(self.agent.name));
+        Ok(Reply::Later(self.probes.start(&options, &[], probe)?))
+    }
 }
 
 impl Plugin for Acp {
@@ -122,13 +143,23 @@ impl Plugin for Acp {
         if self.providers.is_empty() {
             self.providers = AGENTS
                 .iter()
-                .map(|agent| AcpProvider { agent, sessions: Sessions::default() })
+                .map(|agent| AcpProvider {
+                    agent,
+                    sessions: Sessions::default(),
+                    probes: Probes::default(),
+                })
                 .collect();
         }
         self.providers.iter_mut().map(|provider| provider as &mut dyn Provider).collect()
     }
 
-    fn on_process(&mut self, event: ProcessEvent) {
+    fn on_process(&mut self, mut event: ProcessEvent) {
+        for provider in &mut self.providers {
+            match provider.probes.on_process(event) {
+                Some(unclaimed) => event = unclaimed,
+                None => return,
+            }
+        }
         let process = match &event {
             ProcessEvent::Stdout { process, .. }
             | ProcessEvent::Stderr { process, .. }
@@ -136,6 +167,14 @@ impl Plugin for Acp {
         };
         if let Some(provider) = self.providers.iter_mut().find(|p| p.sessions.owns(process)) {
             provider.sessions.on_process(event);
+        }
+    }
+
+    fn on_timer(&mut self, timer: u64) {
+        for provider in &mut self.providers {
+            if provider.probes.on_timer(timer) {
+                return;
+            }
         }
     }
 }

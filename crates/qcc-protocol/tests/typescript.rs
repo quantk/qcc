@@ -52,6 +52,7 @@ fn generate() -> String {
         .method::<ThreadUnsubscribe>()
         .method::<InteractionResolve>()
         .method::<PluginList>()
+        .method::<ProviderModels>()
         .method::<CommandList>()
         .method::<CommandRun>()
         .method::<UiContributions>()

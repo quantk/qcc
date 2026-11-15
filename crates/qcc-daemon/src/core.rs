@@ -7,8 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use base64::Engine as _;
 use qcc_domain::{
-    Delta, EnvironmentState, EventPayload, PermissionMode, ProviderId, SkillRef, ThreadEnvironment,
-    ThreadEvent, ThreadId, ThreadState, ThreadStatus,
+    Delta, EnvironmentState, EventPayload, ModelInfo, PermissionMode, ProviderId, SkillRef,
+    ThreadEnvironment, ThreadEvent, ThreadId, ThreadState, ThreadStatus,
 };
 use qcc_plugin_host::{
     Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
@@ -20,16 +20,17 @@ use qcc_protocol::methods::{
     CommandContribution, CommandList, CommandListResult, CommandRun, CommandRunParams,
     CommandRunResult, DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PluginInfo, PluginList, PluginListResult, PluginPermissions,
-    SendMode, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
-    ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
-    ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
-    ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
-    ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
-    ThreadUpdatedNotification, ThreadWait, ThreadWaitParams, ThreadWaitResult, ThreadWatch,
-    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
-    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution, WaitedThread,
+    ProviderModels, ProviderModelsParams, ProviderModelsResult, SendMode, StopMode, THREAD_EVENT,
+    THREAD_UPDATED, ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesResult,
+    ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
+    ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadListResult,
+    ThreadResult, ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetMode,
+    ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait,
+    ThreadWaitParams, ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult,
+    UiItemContribution, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult,
+    UiViewContribution, WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -82,6 +83,8 @@ pub(crate) enum Action {
 const PREPARE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const REMOVE_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const QUERY_TIMEOUT: Duration = Duration::from_secs(60);
+/// A provider lists its models by running its agent; past this it is not coming.
+const MODELS_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How far below a thread the user started agents may spawn agents: a guard
 /// against an orchestrator that keeps delegating.
@@ -166,6 +169,12 @@ pub(crate) enum Command {
         deadline: Instant,
         reply: std::sync::mpsc::Sender<Result<ThreadsAnswer, String>>,
     },
+    /// A provider answered `list-models`.
+    ModelsListed {
+        provider: ProviderId,
+        result: Result<Vec<ModelInfo>, String>,
+        responder: Responder,
+    },
     /// A `thread.wait` ran out of time.
     WaitTimedOut {
         waiter: u64,
@@ -227,6 +236,8 @@ pub(crate) struct Core {
     watches: Vec<Watch>,
     /// Skills plugins offer, written out where agents can read them.
     skills: Vec<SkillRef>,
+    /// What each provider said it offers, until asked to look again.
+    models: HashMap<ProviderId, Vec<ModelInfo>>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
     cli_dir: Option<PathBuf>,
     /// Set when the journal cannot be written. The daemon stops rather than let
@@ -302,6 +313,7 @@ impl Core {
             next_waiter: 0,
             watches: Vec::new(),
             skills,
+            models: HashMap::new(),
             cli_dir,
             fatal: None,
         })
@@ -372,6 +384,9 @@ impl Core {
                     self.threads_call(&plugin, call)
                 };
                 let _ = reply.send(answer);
+            }
+            Command::ModelsListed { provider, result, responder } => {
+                self.models_listed(provider, result, responder);
             }
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {
@@ -484,6 +499,10 @@ impl Core {
                 responder.reply(result);
             }
             PluginList::NAME => responder.reply(Ok(self.plugin_list())),
+            ProviderModels::NAME => match params::<ProviderModels>(raw) {
+                Ok(p) => self.provider_models(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             CommandList::NAME => responder.reply(Ok(self.command_list())),
             CommandRun::NAME => match params::<CommandRun>(raw) {
                 Ok(p) => self.command_run(p, responder),
@@ -917,6 +936,54 @@ impl Core {
     }
 
     /// What every agent process sees: where it is and how to reach the daemon.
+    fn provider_models(&mut self, p: ProviderModelsParams, responder: Responder) {
+        let ProviderModelsParams { provider, refresh } = p;
+        if !refresh && let Some(models) = self.models.get(&provider) {
+            return responder.reply(Ok(ProviderModelsResult { models: models.clone() }));
+        }
+        let Some((plugin, _)) = self.host.provider(&provider) else {
+            return responder.reply::<Empty>(Err(RpcError::new(
+                codes::PROVIDER_NOT_FOUND,
+                format!("no plugin provides {:?}", provider.as_str()),
+            )));
+        };
+        let plugin = plugin.clone();
+        let commands = self.commands.clone();
+        tokio::spawn(async move {
+            let request = PluginRequest::Provider {
+                provider: provider.clone(),
+                request: ProviderRequest::ListModels,
+            };
+            let result = match tokio::time::timeout(MODELS_TIMEOUT, plugin.call(request)).await {
+                Ok(Ok(Outcome::Models(models))) => Ok(models),
+                Ok(Ok(other)) => Err(format!("the provider answered with {other:?}")),
+                Ok(Err(error)) => Err(error.to_string()),
+                Err(_) => Err(format!(
+                    "the provider did not list its models within {} s",
+                    MODELS_TIMEOUT.as_secs()
+                )),
+            };
+            let _ = commands.send(Command::ModelsListed { provider, result, responder });
+        });
+    }
+
+    fn models_listed(
+        &mut self,
+        provider: ProviderId,
+        result: Result<Vec<ModelInfo>, String>,
+        responder: Responder,
+    ) {
+        match result {
+            Ok(models) => {
+                self.models.insert(provider, models.clone());
+                responder.reply(Ok(ProviderModelsResult { models }));
+            }
+            Err(message) => {
+                responder.reply::<Empty>(Err(RpcError::new(codes::PLUGIN_ERROR, message)));
+            }
+        }
+    }
+
     fn session_env(&self, id: &ThreadId) -> Vec<(String, String)> {
         let mut env = vec![
             (paths::THREAD_ID_ENV.into(), id.to_string()),

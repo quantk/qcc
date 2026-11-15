@@ -14,10 +14,10 @@ use anyhow::{Context, bail};
 use clap::{Args, Parser, Subcommand};
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Delivery, Empty, InteractionResolve,
-    InteractionResolveParams, PluginList, SendMode, StopMode, ThreadArchive, ThreadArchiveParams,
-    ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams,
-    ThreadSend, ThreadSendParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
+    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, SendMode, StopMode,
+    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams,
+    ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetMode, ThreadSetModeParams,
+    ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -57,6 +57,9 @@ enum Command {
     /// Inspect plugins.
     #[command(subcommand)]
     Plugin(PluginCommand),
+    /// Inspect agent providers.
+    #[command(subcommand)]
+    Provider(ProviderCommand),
     /// List the commands plugins contribute.
     #[command(subcommand, name = "command")]
     PluginCommands(CommandCommand),
@@ -212,6 +215,17 @@ struct Answer {
 enum PluginCommand {
     /// List loaded plugins and what they contribute.
     List,
+}
+
+#[derive(Subcommand)]
+enum ProviderCommand {
+    /// The models a provider's agent offers, for `thread spawn --model`.
+    Models {
+        provider: String,
+        /// Ask the agent again instead of using what the daemon remembers.
+        #[arg(long)]
+        refresh: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -570,6 +584,20 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             } else {
                 for plugin in &result.plugins {
                     out(render::plugin(plugin));
+                }
+            }
+        }
+
+        Command::Provider(ProviderCommand::Models { provider, refresh }) => {
+            let params = ProviderModelsParams { provider: ProviderId::new(provider), refresh };
+            let result = client.call::<ProviderModels>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for model in &result.models {
+                    let default = if model.is_default { "  (default)" } else { "" };
+                    let name = if model.name == model.id { "" } else { model.name.as_str() };
+                    out(format!("{:<32} {name}{default}", model.id).trim_end());
                 }
             }
         }

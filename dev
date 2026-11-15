@@ -6,6 +6,8 @@
 #   ./dev demo        start a daemon, run a few echo threads through it, stop it
 #   ./dev qcc ARGS    run the CLI against the dev daemon, e.g. ./dev qcc thread list
 #   ./dev desktop     build and open the desktop app against the dev daemon
+#   ./dev app         build a release of the app to use day to day, install it in
+#                     ~/.local/lib/qcc and open it (data in ~/.local/share/qcc)
 #   ./dev check       fmt, clippy and all tests
 #   ./dev test [ARGS] cargo test --workspace [ARGS]
 #   ./dev clean       remove ./.dev (the dev daemon's journal and plugins)
@@ -16,7 +18,8 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 # The desktop app needs the GUI libraries of its own shell.
-if [[ "${1:-}" == desktop && -z "${QCC_DESKTOP_SHELL:-}" ]] && command -v nix >/dev/null; then
+if [[ "${1:-}" == desktop || "${1:-}" == app ]] && [[ -z "${QCC_DESKTOP_SHELL:-}" ]] \
+  && command -v nix >/dev/null; then
   exec nix develop .#desktop --command env QCC_DESKTOP_SHELL=1 "$0" "$@"
 fi
 
@@ -24,46 +27,60 @@ if [[ -z "${IN_NIX_SHELL:-}" ]] && command -v nix >/dev/null; then
   exec nix develop --command "$0" "$@"
 fi
 
-# The dev daemon keeps everything in the repository, away from ~/.local/share/qcc.
-export QCC_DATA_DIR="$PWD/.dev"
-export QCC_SOCKET="$QCC_DATA_DIR/qccd.sock"
 # This script may itself run inside an agent session; do not adopt its thread.
 unset QCC_THREAD_ID
+
+# The installed app: binaries copied out of target/, so that rebuilding the
+# working tree never touches the one in use. It keeps its data where an installed
+# qcc does by default (~/.local/share/qcc): the dev daemon below is restarted by
+# every build in this repository, which must not interrupt the agents at work.
+APP_DIR="${QCC_APP_DIR:-$HOME/.local/lib/qcc}"
+if [[ "${1:-}" == app ]]; then
+  unset QCC_DATA_DIR QCC_SOCKET
+  qcc_bin="$APP_DIR/qcc"
+  daemon_bin="$APP_DIR/qccd"
+else
+  # The dev daemon keeps everything in the repository, away from ~/.local/share/qcc.
+  export QCC_DATA_DIR="$PWD/.dev"
+  export QCC_SOCKET="$QCC_DATA_DIR/qccd.sock"
+  qcc_bin=./target/debug/qcc
+  daemon_bin=./target/debug/qccd
+fi
 
 # Build, then make sure a dev daemon left running is the one just built.
 build() {
   cargo build --quiet -p qcc-daemon -p qcc-cli
   restart_stale_daemon
 }
-qcc() { ./target/debug/qcc "$@"; }
+qcc() { "$qcc_bin" "$@"; }
 
 wait_for_daemon() {
   for _ in $(seq 100); do
     qcc daemon status >/dev/null 2>&1 && return 0
     sleep 0.1
   done
-  echo "qccd did not start; see $QCC_DATA_DIR/qccd.log" >&2
+  echo "qccd did not start; see ${QCC_DATA_DIR:-~/.local/share/qcc}/qccd.log" >&2
   return 1
 }
 
 # A daemon started from an older build keeps running its old code after a rebuild
-# (cargo replaces the file, the process keeps the old one), and the app talks to
-# whatever answers on the socket. Stop it so the new build takes over; if agents
-# are at work in it, say so and ask first.
+# (cargo or an install replaces the file, the process keeps the old one), and the
+# app talks to whatever answers on the socket. Stop it so the new build takes
+# over; if agents are at work in it, say so and ask first.
 restart_stale_daemon() {
   local status pid
   status=$(qcc daemon status --json 2>/dev/null) || return 0
   pid=$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' <<<"$status")
   [[ -n "$pid" && -e "/proc/$pid/exe" ]] || return 0
   # Same inode: the running daemon is the file just built.
-  if [[ "$(stat -L -c %i "/proc/$pid/exe")" == "$(stat -c %i ./target/debug/qccd)" ]]; then
+  if [[ "$(stat -L -c %i "/proc/$pid/exe")" == "$(stat -c %i "$daemon_bin")" ]]; then
     return 0
   fi
 
   local active
   active=$(qcc thread list 2>/dev/null | awk '$2 == "active"') || active=""
   if [[ -n "$active" ]]; then
-    echo "The dev daemon (pid $pid) is from an older build, and agents are working in it:" >&2
+    echo "The daemon (pid $pid) is from an older build, and agents are working in it:" >&2
     sed 's/^/  /' <<<"$active" >&2
     echo "Restarting it interrupts their turns; they can be resumed with a new message." >&2
     if [[ ! -t 0 ]]; then
@@ -78,7 +95,7 @@ restart_stale_daemon() {
     fi
   fi
 
-  echo "restarting the dev daemon (pid $pid): it is from an older build" >&2
+  echo "restarting the daemon (pid $pid): it is from an older build" >&2
   kill "$pid"
   for _ in $(seq 100); do
     kill -0 "$pid" 2>/dev/null || break
@@ -90,7 +107,7 @@ restart_stale_daemon() {
   fi
   # `./dev run` and `./dev desktop` start the new one themselves; the rest need it now.
   case "$command" in
-    run | desktop) ;;
+    run | desktop | app) ;;
     *)
       # Its own session: it outlives this terminal, like one the app starts.
       setsid ./target/debug/qccd 2>>"$QCC_DATA_DIR/qccd.log" </dev/null >/dev/null &
@@ -142,6 +159,66 @@ case "$command" in
     pnpm install --frozen-lockfile
     exec cargo tauri dev "$@"
     ;;
+  app)
+    # A release build with the frontend inside: no dev server, nothing reloads
+    # while the sources change. Run this again to update.
+    cargo build --quiet --release -p qcc-daemon -p qcc-cli
+    (
+      cd apps/desktop
+      pnpm install --frozen-lockfile
+      cargo tauri build --no-bundle
+    )
+    mkdir -p "$APP_DIR"
+    updated=()
+    for binary in qccd qcc qcc-desktop; do
+      # Only what changed is replaced: a new file is a new inode, which would
+      # make the running daemon look outdated.
+      if ! cmp -s "target/release/$binary" "$APP_DIR/$binary"; then
+        cp "target/release/$binary" "$APP_DIR/.$binary.new"
+        mv -f "$APP_DIR/.$binary.new" "$APP_DIR/$binary"
+        updated+=("$binary")
+      fi
+    done
+    if ((${#updated[@]})); then
+      echo "installed in $APP_DIR: ${updated[*]}" >&2
+    else
+      echo "$APP_DIR is up to date" >&2
+    fi
+    restart_stale_daemon
+    # A window of an older install is closed; one of this install is left open.
+    for pid in $(pgrep -x qcc-desktop || true); do
+      exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+      [[ "$exe" == "$APP_DIR/qcc-desktop"* ]] || continue
+      if [[ "$exe" == "$APP_DIR/qcc-desktop" ]]; then
+        echo "the app is already open and up to date (pid $pid)" >&2
+        exit 0
+      fi
+      echo "closing the app from the older install (pid $pid)" >&2
+      kill "$pid"
+    done
+    if [[ "${WEBKIT_DISABLE_DMABUF_RENDERER:-}" == 0 ]]; then
+      unset WEBKIT_DISABLE_DMABUF_RENDERER
+    fi
+    # What the desktop shell sets up for GTK and WebKit, kept for a start from a
+    # launcher, outside this shell.
+    {
+      echo '#!/usr/bin/env bash'
+      echo '# Written by ./dev app: opens the installed qcc app.'
+      printf 'export XDG_DATA_DIRS=%q\n' "${XDG_DATA_DIRS:-}"
+      if [[ -n "${WEBKIT_DISABLE_DMABUF_RENDERER:-}" ]]; then
+        printf 'export WEBKIT_DISABLE_DMABUF_RENDERER=%q\n' "$WEBKIT_DISABLE_DMABUF_RENDERER"
+      fi
+      echo 'unset QCC_DATA_DIR QCC_SOCKET QCC_THREAD_ID'
+      printf 'exec %q "$@"\n' "$APP_DIR/qcc-desktop"
+    } >"$APP_DIR/.qcc-app.new"
+    chmod +x "$APP_DIR/.qcc-app.new"
+    mv -f "$APP_DIR/.qcc-app.new" "$APP_DIR/qcc-app"
+    data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/qcc"
+    mkdir -p "$data_dir"
+    # Its own session: it outlives this terminal. It starts the qccd next to it.
+    setsid "$APP_DIR/qcc-app" >>"$data_dir/app.log" 2>&1 </dev/null &
+    echo "opened the app; start it again with $APP_DIR/qcc-app, its CLI is $APP_DIR/qcc" >&2
+    ;;
   check)
     exec ./scripts/check.sh
     ;;
@@ -156,7 +233,7 @@ case "$command" in
     rm -rf "$QCC_DATA_DIR"
     ;;
   *)
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

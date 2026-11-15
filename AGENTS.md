@@ -67,6 +67,7 @@ WASM-плагинами.
 ./dev qcc thread list       # CLI против dev-демона
 ./dev demo                  # несколько echo-тредов через временный демон
 ./dev desktop               # приложение против dev-демона
+./dev app                   # release-сборка для ежедневной работы в ~/.local/lib/qcc (данные в ~/.local/share/qcc)
 nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vitest, vite build
 ```
 
@@ -138,6 +139,9 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 
 - **Не убивайте чужие процессы.** У пользователя может работать свой `./dev desktop` / `qccd` с
   данными в `./.dev`. Не останавливайте его и не трогайте `./.dev` (`./dev clean` удаляет его).
+  Его рабочее приложение из `./dev app` живёт в `~/.local/lib/qcc` с данными в
+  `~/.local/share/qcc`: не запускайте `./dev app` без `QCC_APP_DIR`/`XDG_DATA_HOME`/
+  `XDG_RUNTIME_DIR` во временном каталоге — команда переоткрывает его окно и перезапускает демон.
 - **Никогда `pkill -f`**: шаблон совпадает с командой самого шелла и убивает его. Используйте
   `pkill -x qccd`, `pkill -x qcc-desktop` или PID.
 - **Вы сами можете быть внутри треда qcc.** Тогда в окружении есть `QCC_THREAD_ID`, `QCC_SOCKET`,

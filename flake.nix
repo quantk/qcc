@@ -69,7 +69,11 @@
             packages = core ++ desktop;
             shellHook = ''
               export XDG_DATA_DIRS="${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}:${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}:$XDG_DATA_DIRS"
-              export WEBKIT_DISABLE_DMABUF_RENDERER=1
+              # The DMA-BUF renderer leaves the window blank with some drivers (NVIDIA
+              # in particular), so it is off unless asked for; it is also what makes
+              # scrolling smooth. `WEBKIT_DISABLE_DMABUF_RENDERER=0 ./dev desktop`
+              # tries it.
+              export WEBKIT_DISABLE_DMABUF_RENDERER=''${WEBKIT_DISABLE_DMABUF_RENDERER-1}
             '';
           };
         }

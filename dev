@@ -134,6 +134,11 @@ case "$command" in
     # The app starts the qccd that sits next to its own binary.
     build
     cd apps/desktop
+    # `0` asks for the DMA-BUF renderer (see flake.nix); WebKit takes any value
+    # of the variable as "disabled", so it has to go.
+    if [[ "${WEBKIT_DISABLE_DMABUF_RENDERER:-}" == 0 ]]; then
+      unset WEBKIT_DISABLE_DMABUF_RENDERER
+    fi
     pnpm install --frozen-lockfile
     exec cargo tauri dev "$@"
     ;;

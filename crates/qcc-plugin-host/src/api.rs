@@ -70,6 +70,10 @@ pub enum ProviderRequest {
         resolution: InteractionResolution,
     },
     ListModels,
+    /// Only for providers that declared `compact`, while no turn runs.
+    Compact {
+        thread: ThreadId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

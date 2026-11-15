@@ -389,6 +389,14 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
             true => "(every MCP server on)".to_owned(),
             false => format!("(MCP servers off: {})", disabled.join(", ")),
         },
+        EventPayload::ConversationReset => "── a new conversation ──".to_owned(),
+        EventPayload::ContextCompacted { compaction } => {
+            let why = if compaction.automatic { "the agent compacted its context" } else { "context compacted" };
+            match (compaction.tokens_before, compaction.tokens_after) {
+                (Some(before), Some(after)) => format!("({why}: {before} → {after} tokens)"),
+                _ => format!("({why})"),
+            }
+        }
         EventPayload::SkillsChanged { enabled, disabled } => {
             let mut parts = Vec::new();
             if !enabled.is_empty() {

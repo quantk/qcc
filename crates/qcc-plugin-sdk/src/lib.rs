@@ -155,6 +155,14 @@ pub trait Provider {
         Err("this provider cannot turn MCP servers of a running session on and off".into())
     }
 
+    /// Compact the session's context. Called only if the provider declared the
+    /// `compact` capability, and only while no turn runs. Open a turn, report
+    /// `context-compacted` and settle the turn, as the agent does the work.
+    fn compact(&mut self, thread: String) -> Result<(), String> {
+        let _ = thread;
+        Err("this provider cannot compact a session's context".into())
+    }
+
     /// The models the agent offers. Asking the agent usually means running it, so
     /// the answer may come later: return [`Reply::Later`] and answer with
     /// [`Outcome::Models`] through [`completions::complete`] (see [`stdio::Probes`]).
@@ -460,6 +468,7 @@ pub mod __private {
                     ProviderRequest::SetMcpServer(switch) => {
                         provider.set_mcp_server(switch).map(done)
                     }
+                    ProviderRequest::Compact(thread) => provider.compact(thread).map(done),
                 }
             }
             Event::Environment(call) => {

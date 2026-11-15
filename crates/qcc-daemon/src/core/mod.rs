@@ -69,6 +69,8 @@ pub(crate) enum Action {
     Release,
     /// Turn an MCP server of the running session on or off.
     SwitchMcp,
+    /// Compact the session's context, in a turn of the provider's own.
+    Compact,
     /// Release, as the first step of archiving the thread.
     Archive {
         force: bool,
@@ -214,6 +216,9 @@ struct Session {
     /// What qcc has to tell the agent with its next message: news since the
     /// session started. A new session is told everything anyway and drops them.
     notes: Vec<String>,
+    /// The user asked to compact the context of a thread that had no session: ask
+    /// once the one being started is up.
+    compact_after_start: bool,
 }
 
 struct Subscriber {

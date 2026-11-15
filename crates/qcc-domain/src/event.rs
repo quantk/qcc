@@ -186,6 +186,16 @@ pub enum EventPayload {
     #[serde(rename = "usage/updated")]
     UsageUpdated { usage: UsageSnapshot },
 
+    /// The agent summed up the conversation so far to make room in its context.
+    #[serde(rename = "session/compacted")]
+    ContextCompacted { compaction: crate::delta::Compaction },
+
+    /// The user started the conversation afresh in the same thread. The next session
+    /// does not resume the previous one; what came before stays in the journal as
+    /// an earlier conversation, and transcripts start after it.
+    #[serde(rename = "thread/reset")]
+    ConversationReset,
+
     /// The MCP servers of the session and how each is doing: the whole list, which
     /// replaces the one before. Empty when a new session starts.
     #[serde(rename = "mcp/servers")]

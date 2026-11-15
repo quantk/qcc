@@ -58,6 +58,15 @@ export type CommandRunResult = {
 	thread_id?: ThreadId | null,
 };
 
+/**  The agent summed up its conversation so far to make room in its context. */
+export type Compaction = {
+	/**  The agent did it on its own, its context being full. */
+	automatic?: boolean,
+	/**  About how many tokens the context held before and after. */
+	tokens_before?: number | null,
+	tokens_after?: number | null,
+};
+
 export type DaemonStatusResult = {
 	version: string,
 	protocol: number,
@@ -154,6 +163,14 @@ queue_id?: string | null } |
 { type: "item/started"; turn_id: TurnId; item: Item } | { type: "item/text/delta"; item_id: ItemId; text: string } | 
 /**  Carries the full terminal item. */
 { type: "item/completed"; turn_id: TurnId; item: Item } | { type: "usage/updated"; usage: UsageSnapshot } | 
+/**  The agent summed up the conversation so far to make room in its context. */
+{ type: "session/compacted"; compaction: Compaction } | 
+/**
+ *  The user started the conversation afresh in the same thread. The next session
+ *  does not resume the previous one; what came before stays in the journal as
+ *  an earlier conversation, and transcripts start after it.
+ */
+{ type: "thread/reset" } | 
 /**
  *  The MCP servers of the session and how each is doing: the whole list, which
  *  replaces the one before. Empty when a new session starts.
@@ -393,6 +410,8 @@ export type ProviderCapabilities = {
 	 *  thread's change waits for its next session.
 	 */
 	mcp_toggle?: boolean,
+	/**  The session's context can be compacted when the user asks. */
+	compact?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -570,6 +589,8 @@ export type Thread = {
 	 *  Neither list is passed on to the threads it starts.
 	 */
 	skills_disabled?: string[],
+	/**  How many times the conversation was started afresh (`thread/reset`). */
+	conversations?: number,
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**
@@ -600,6 +621,10 @@ export type ThreadArchiveParams = {
 
 export type ThreadChangesResult = {
 	changes: EnvironmentChanges,
+};
+
+export type ThreadCompactParams = {
+	thread_id: ThreadId,
 };
 
 export type ThreadDeliverParams = {
@@ -692,6 +717,10 @@ export type ThreadListResult = {
 export type ThreadRenameParams = {
 	thread_id: ThreadId,
 	title: string,
+};
+
+export type ThreadResetParams = {
+	thread_id: ThreadId,
 };
 
 export type ThreadResult = {
@@ -975,6 +1004,8 @@ export type Methods = {
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
 	"thread.set_skill": { params: ThreadSetSkillParams; result: ThreadResult },
+	"thread.reset": { params: ThreadResetParams; result: ThreadResult },
+	"thread.compact": { params: ThreadCompactParams; result: ThreadResult },
 	"skill.list": { params: Empty; result: SkillListResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },

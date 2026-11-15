@@ -174,6 +174,13 @@ impl ThreadEngine {
         Some((input.text, self.emit(vec![dropped], now)))
     }
 
+    /// The provider was asked to compact the session's context, which it does in a
+    /// turn of its own: until that turn has come and gone, input waits.
+    pub fn compact_requested(&mut self) {
+        self.assembler.note_input();
+        self.awaiting_turn = !self.turn_open();
+    }
+
     /// The provider refused the submitted input: no turn will open for it.
     pub fn input_rejected(&mut self) {
         self.awaiting_turn = false;

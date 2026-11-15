@@ -28,8 +28,16 @@ enum Call {
     /// `thread/start` or `thread/resume`.
     Thread,
     TurnStart,
+    /// `thread/compact/start`: the turn it runs is reported like any other.
+    Compact,
     Steer,
     Interrupt,
+}
+
+/// What waits for the agent to take it: a prompt, or a request to compact.
+enum Waiting {
+    Prompt(String),
+    Compact,
 }
 
 struct Approval {
@@ -47,7 +55,9 @@ pub struct Bridge {
     thread: Option<String>,
     ready: bool,
     /// Prompts not sent yet: the agent is not ready or a turn is running.
-    waiting: VecDeque<String>,
+    waiting: VecDeque<Waiting>,
+    /// The running turn is a compaction we asked for, not one Codex chose to do.
+    compacting: bool,
     /// A turn exists on the agent's side, from `turn/start` to `turn/completed`.
     in_flight: bool,
     turn_open: bool,
@@ -156,6 +166,7 @@ impl Bridge {
             thread: None,
             ready: false,
             waiting: VecDeque::new(),
+            compacting: false,
             in_flight: false,
             turn_open: false,
             turn_id: None,
@@ -203,7 +214,16 @@ impl Bridge {
 
     /// The user sent a message. It goes out as soon as the agent can take it.
     pub fn prompt(&mut self, text: &str) -> Output {
-        self.waiting.push_back(text.to_owned());
+        self.waiting.push_back(Waiting::Prompt(text.to_owned()));
+        let mut output = Output::default();
+        self.send_next_prompt(&mut output);
+        output
+    }
+
+    /// Compact the thread's context, as soon as the agent can take it. Codex runs
+    /// it as a turn with a `contextCompaction` item.
+    pub fn compact(&mut self) -> Output {
+        self.waiting.push_back(Waiting::Compact);
         let mut output = Output::default();
         self.send_next_prompt(&mut output);
         output
@@ -213,17 +233,28 @@ impl Bridge {
         if !self.ready || self.in_flight {
             return;
         }
-        let (Some(text), Some(thread)) = (self.waiting.pop_front(), &self.thread) else {
+        let (Some(next), Some(thread)) = (self.waiting.pop_front(), &self.thread) else {
             return;
         };
-        output.writes.push(self.peer.request(
-            "turn/start",
-            json!({
-                "threadId": thread,
-                "input": [{"type": "text", "text": text, "text_elements": []}],
-            }),
-            Call::TurnStart,
-        ));
+        let request = match next {
+            Waiting::Prompt(text) => self.peer.request(
+                "turn/start",
+                json!({
+                    "threadId": thread,
+                    "input": [{"type": "text", "text": text, "text_elements": []}],
+                }),
+                Call::TurnStart,
+            ),
+            Waiting::Compact => {
+                self.compacting = true;
+                self.peer.request(
+                    "thread/compact/start",
+                    json!({"threadId": thread}),
+                    Call::Compact,
+                )
+            }
+        };
+        output.writes.push(request);
         self.in_flight = true;
         self.turn_open = true;
         output.deltas.push(Delta::TurnOpen);
@@ -406,7 +437,9 @@ impl Bridge {
                     error.message
                 )));
             }
-            (Call::TurnStart, Err(error)) => {
+            // The turn it starts is announced with `turn/started`.
+            (Call::Compact, Ok(_)) => {}
+            (Call::TurnStart | Call::Compact, Err(error)) => {
                 // The agent never took the prompt: no turn exists on its side.
                 self.in_flight = false;
                 self.interrupt_pending = false;
@@ -476,6 +509,7 @@ impl Bridge {
     }
 
     fn settle(&mut self, status: TurnStatus, error: Option<String>, deltas: &mut Vec<Delta>) {
+        self.compacting = false;
         self.approvals.clear();
         self.steers_pending.clear();
         self.turn_id = None;
@@ -542,7 +576,13 @@ impl Bridge {
             "item/completed" => {
                 let item = &params["item"];
                 let key = ItemKey::Provider(str_field(item, "id").to_owned());
-                if let Some((channel, text)) = text_item(item) {
+                if str_field(item, "type") == "contextCompaction" {
+                    deltas.push(Delta::ContextCompacted(Compaction {
+                        automatic: !self.compacting,
+                        tokens_before: None,
+                        tokens_after: None,
+                    }));
+                } else if let Some((channel, text)) = text_item(item) {
                     // Reasoning is often withheld: the item comes, but empty.
                     if !text.is_empty() {
                         deltas.push(Delta::ItemTextClose(TextClose {
@@ -712,6 +752,44 @@ mod tests {
         bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
         bridge
+    }
+
+    #[test]
+    fn compacting_waits_for_the_thread_and_runs_as_a_turn() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        assert_eq!(bridge.compact(), Output::default(), "held until the thread is resumed");
+        bridge.on_line(r#"{"id":1,"result":{}}"#);
+        let ready = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"old"}}}"#);
+        assert_eq!(methods(&ready), ["thread/compact/start"]);
+        assert!(ready.deltas.contains(&Delta::TurnOpen));
+        bridge.on_line(r#"{"id":3,"result":{}}"#);
+        bridge.on_line(&notify("turn/started", json!({"turn": {"id": "t"}})));
+        let item = json!({"type": "contextCompaction", "id": "c"});
+        let compacted =
+            bridge.on_line(&notify("item/completed", json!({"turnId": "t", "item": item})));
+        assert_eq!(
+            compacted.deltas,
+            [Delta::ContextCompacted(Compaction {
+                automatic: false,
+                tokens_before: None,
+                tokens_after: None
+            })]
+        );
+        let done = bridge.on_line(&notify(
+            "turn/completed",
+            json!({"turn": {"id": "t", "status": "completed"}}),
+        ));
+        assert!(matches!(done.deltas[..], [Delta::TurnBoundary(_)]), "{:?}", done.deltas);
+
+        // A compaction Codex chose to do in a turn of the user's is its own.
+        let mut bridge = started();
+        bridge.on_line(r#"{"id":3,"result":{"turn":{"id":"u"}}}"#);
+        let item = json!({"type": "contextCompaction", "id": "c2"});
+        let auto = bridge.on_line(&notify("item/completed", json!({"turnId": "u", "item": item})));
+        let [Delta::ContextCompacted(compaction)] = &auto.deltas[..] else {
+            panic!("expected a compaction: {:?}", auto.deltas);
+        };
+        assert!(compaction.automatic);
     }
 
     #[test]

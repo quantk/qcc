@@ -224,6 +224,9 @@ pub struct Thread {
     /// Neither list is passed on to the threads it starts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills_disabled: Vec<String>,
+    /// How many times the conversation was started afresh (`thread/reset`).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub conversations: u32,
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -340,6 +343,11 @@ impl Thread {
                 self.skills_enabled.clone_from(enabled);
                 self.skills_disabled.clone_from(disabled);
             }
+            EventPayload::ConversationReset => {
+                self.provider_session = None;
+                self.handover = false;
+                self.conversations += 1;
+            }
             EventPayload::ThreadArchived => self.archived = true,
             _ => {}
         }
@@ -381,6 +389,7 @@ mod tests {
             mcp_disabled: Vec::new(),
             skills_enabled: Vec::new(),
             skills_disabled: Vec::new(),
+            conversations: 0,
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

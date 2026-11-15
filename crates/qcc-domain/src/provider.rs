@@ -71,6 +71,9 @@ pub struct ProviderCapabilities {
     /// thread's change waits for its next session.
     #[serde(default)]
     pub mcp_toggle: bool,
+    /// The session's context can be compacted when the user asks.
+    #[serde(default)]
+    pub compact: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

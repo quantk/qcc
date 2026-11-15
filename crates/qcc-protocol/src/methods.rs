@@ -206,6 +206,32 @@ pub struct ThreadSetMcpParams {
 }
 
 method!(
+    /// Start the conversation afresh in the same thread: the next message starts a
+    /// new session instead of resuming the one before. What came before stays in
+    /// the journal as an earlier conversation; transcripts start after it. Refused
+    /// while a turn runs.
+    ThreadReset, "thread.reset", ThreadResetParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadResetParams {
+    pub thread_id: ThreadId,
+}
+
+method!(
+    /// Ask the agent to compact its context: to sum up the conversation so far and
+    /// go on from the summary. Only for a provider that declared `compact`, and
+    /// refused while a turn runs. The agent does it in a turn of its own, which
+    /// ends with `session/compacted`; a thread without a session resumes one first.
+    ThreadCompact, "thread.compact", ThreadCompactParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadCompactParams {
+    pub thread_id: ThreadId,
+}
+
+method!(
     /// Turn a skill on or off in one thread. Off takes effect when the thread's next
     /// session starts: the agent may have read it already. On is told to a running
     /// session with the next message, so it need not start again.

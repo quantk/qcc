@@ -188,8 +188,9 @@ impl Store {
         Ok(events)
     }
 
-    /// The conversation of a thread: messages handed to the agent and the agent's
-    /// settled replies, oldest first. With `last_agent_only`, just the latest reply.
+    /// The conversation of a thread since it was last started afresh: messages handed
+    /// to the agent and the agent's settled replies, oldest first. With
+    /// `last_agent_only`, just the latest reply.
     pub fn transcript(&self, id: &ThreadId, last_agent_only: bool) -> Result<Vec<TranscriptEntry>> {
         const REPLY: &str = "json_extract(payload, '$.type') = 'item/completed' \
                              AND json_extract(payload, '$.item.type') = 'agentMessage'";
@@ -199,9 +200,13 @@ impl Store {
                  ORDER BY seq DESC LIMIT 1"
             )
         } else {
+            // The conversation since the user last started it afresh.
             format!(
                 "SELECT payload FROM events WHERE thread_id = ?1 AND \
-                 (json_extract(payload, '$.type') = 'input/submitted' OR ({REPLY})) ORDER BY seq"
+                 (json_extract(payload, '$.type') = 'input/submitted' OR ({REPLY})) AND \
+                 seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE thread_id = ?1 AND \
+                        json_extract(payload, '$.type') = 'thread/reset') \
+                 ORDER BY seq"
             )
         };
         let conn = self.lock();

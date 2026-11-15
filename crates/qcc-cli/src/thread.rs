@@ -8,9 +8,10 @@ use anyhow::bail;
 use clap::Subcommand;
 use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, SendMode, SettingsGet, SkillList, StopMode, ThreadArchive,
-    ThreadArchiveParams, ThreadChanges, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet,
-    ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
-    ThreadRename, ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
+    ThreadArchiveParams, ThreadChanges, ThreadCompact, ThreadCompactParams, ThreadDeliver,
+    ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams, ThreadIsolate,
+    ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams,
+    ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
     ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams,
     ThreadSetParent, ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams,
     ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
@@ -121,6 +122,17 @@ pub(crate) enum ThreadCommand {
     },
     /// Name a thread.
     Rename { thread: String, title: String },
+    /// Start the conversation afresh in the same thread: the next message starts a
+    /// new session. What came before stays in the timeline as an earlier conversation.
+    Reset { thread: String },
+    /// Ask the agent to compact its context: to sum up the conversation so far and
+    /// go on from the summary. Only for agents that can (`qcc plugin list`).
+    Compact {
+        thread: String,
+        /// Stream the thread's events until the compaction settles.
+        #[arg(long)]
+        follow: bool,
+    },
     /// Bring what a thread did in its worktree back to the directory it was made
     /// from: as uncommitted changes, or with --merge as a merge of its branch.
     Deliver {
@@ -439,6 +451,33 @@ pub(crate) async fn run(
                 carry_changes: carry,
             };
             let result = client.call::<ThreadIsolate>(params).await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        ThreadCommand::Reset { thread } => {
+            let params = ThreadResetParams { thread_id: ThreadId::new(thread) };
+            let result = client.call::<ThreadReset>(params).await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        ThreadCommand::Compact { thread, follow } => {
+            let thread_id = ThreadId::new(thread);
+            // Read the cursor first so the stream starts before the compaction's turn.
+            let cursor = client
+                .call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() })
+                .await?
+                .thread
+                .last_seq;
+            let params = ThreadCompactParams { thread_id: thread_id.clone() };
+            let result = client.call::<ThreadCompact>(params).await?;
+            if follow {
+                let stream = client.events(thread_id, cursor, true).await?;
+                return follow_turn(stream, json, None).await;
+            }
             if json {
                 print_json(&result)?;
             }

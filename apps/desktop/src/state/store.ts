@@ -441,6 +441,20 @@ export class AppStore {
     return result?.text ?? null;
   }
 
+  /** Start the thread's conversation afresh. Resolves to whether the daemon took it. */
+  async resetConversation(threadId: ThreadId): Promise<boolean> {
+    const result = await this.attempt(() => this.api.call("thread.reset", { thread_id: threadId }));
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
+  /** Ask the agent to compact its context. Resolves to whether the daemon took it. */
+  async compact(threadId: ThreadId): Promise<boolean> {
+    const result = await this.attempt(() => this.api.call("thread.compact", { thread_id: threadId }));
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
   stop(threadId: ThreadId) {
     return this.attempt(() => this.api.call("thread.stop", { thread_id: threadId, mode: "interrupt" }));
   }

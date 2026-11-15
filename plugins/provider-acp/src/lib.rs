@@ -77,6 +77,8 @@ impl Provider for AcpProvider {
                 ],
                 // ACP has no way to turn a server off; qcc's are left out instead.
                 mcp_toggle: false,
+                // ACP has no way to ask for it.
+                compact: false,
             },
         }
     }

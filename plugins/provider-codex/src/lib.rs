@@ -38,6 +38,7 @@ impl Provider for Codex {
                 // Codex reads its MCP servers when a thread starts: qcc's servers a
                 // thread keeps off are left out of the new session.
                 mcp_toggle: false,
+                compact: true,
             },
         }
     }
@@ -83,6 +84,11 @@ impl Provider for Codex {
         let output =
             self.sessions.bridge(&input.thread)?.steer(&with_notes(&input.notes, &input.text));
         self.sessions.apply(&input.thread, output)
+    }
+
+    fn compact(&mut self, thread: String) -> Result<(), String> {
+        let output = self.sessions.bridge(&thread)?.compact();
+        self.sessions.apply(&thread, output)
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {

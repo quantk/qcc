@@ -2,6 +2,7 @@
 // always give the same entries, whether they arrive live or from the journal.
 
 import type {
+  Compaction,
   InteractionId,
   InteractionRequest,
   InteractionResolution,
@@ -32,7 +33,9 @@ export type Entry =
       request: InteractionRequest;
       resolution?: InteractionResolution;
     }
-  | { kind: "notice"; key: string; ts: number; level: "info" | "warning" | "error"; text: string };
+  | { kind: "notice"; key: string; ts: number; level: "info" | "warning" | "error"; text: string }
+  /** The user started the conversation afresh; what is above it is an earlier one. */
+  | { kind: "conversation"; key: string; ts: number };
 
 export type Timeline = {
   /** Sequence number of the last event folded in. */
@@ -136,6 +139,13 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     case "usage/updated":
       usage = event.usage;
       break;
+    case "session/compacted":
+      notice("info", compactionText(event.compaction));
+      break;
+    case "thread/reset":
+      push({ kind: "conversation", key, ts });
+      usage = undefined;
+      break;
     case "interaction/requested":
       push({ kind: "interaction", key, ts, id: event.interaction_id, request: event.request });
       break;
@@ -217,4 +227,24 @@ export function queuedMessages(timeline: Timeline | undefined): QueuedMessage[] 
     if (entry.kind === "user" && entry.queued && entry.queueId) queued.push({ queueId: entry.queueId, text: entry.text });
   }
   return queued;
+}
+
+function compactionText(compaction: Compaction): string {
+  const what = compaction.automatic ? "The agent compacted its context" : "Context compacted";
+  const { tokens_before: before, tokens_after: after } = compaction;
+  if (before == null || after == null) return what;
+  return `${what}: ${before.toLocaleString("en")} → ${after.toLocaleString("en")} tokens`;
+}
+
+/** Where the latest conversation starts: the index after its divider, or 0. */
+export function conversationStart(entries: readonly Entry[]): number {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    if (entries[index]!.kind === "conversation") return index + 1;
+  }
+  return 0;
+}
+
+/** How many conversations came before the latest one. */
+export function earlierConversations(entries: readonly Entry[]): number {
+  return entries.filter((entry) => entry.kind === "conversation").length;
 }

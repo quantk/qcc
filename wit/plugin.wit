@@ -175,6 +175,15 @@ interface types {
     error: option<string>,
   }
 
+  /// The agent summed up its conversation so far to make room in its context.
+  record compaction {
+    /// The agent did it on its own, its context being full; not asked to.
+    automatic: bool,
+    /// About how many tokens the context held before and after.
+    tokens-before: option<u64>,
+    tokens-after: option<u64>,
+  }
+
   variant delta {
     /// The provider took a prompt. Items never open a turn; only this does.
     turn-open,
@@ -196,6 +205,8 @@ interface types {
     /// How one MCP server of the session is doing now, the agent's own servers
     /// included. A fresh session (`session-reset`) starts with none known.
     mcp-status(mcp-status),
+    /// The agent compacted its context, asked to (`compact`) or on its own.
+    context-compacted(compaction),
     provider-error(string),
     provider-warning(string),
     /// Provider traffic the bridge did not recognise, kept for diagnostics.
@@ -229,6 +240,8 @@ interface types {
     /// The provider turns MCP servers of a running session on and off
     /// (`set-mcp-server`). Without it, a thread's change waits for its next session.
     mcp-toggle: bool,
+    /// The provider compacts the session's context when asked (`compact`).
+    compact: bool,
   }
 
   record provider-info {
@@ -470,6 +483,11 @@ interface types {
     /// Turn an MCP server of the running session on or off. Sent only to a provider
     /// that declared `mcp-toggle`.
     set-mcp-server(mcp-switch),
+    /// Compact the session's context: the agent sums up the conversation so far.
+    /// Sent only to a provider that declared `compact`, and only while no turn runs.
+    /// The work is a turn: open it (`turn-open`), report `context-compacted`, and
+    /// settle it.
+    compact(thread-id),
   }
 
   record provider-call {

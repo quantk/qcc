@@ -205,6 +205,8 @@ impl Timeline {
             | EventPayload::McpServersChanged { .. }
             | EventPayload::McpDisabledChanged { .. }
             | EventPayload::SkillsChanged { .. }
+            | EventPayload::ContextCompacted { .. }
+            | EventPayload::ConversationReset
             | EventPayload::ProviderError { .. }
             | EventPayload::ProviderWarning { .. }
             | EventPayload::ProviderUnhandled { .. } => Ok(()),

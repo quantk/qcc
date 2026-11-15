@@ -36,6 +36,7 @@ impl Provider for ClaudeCode {
                     PermissionMode::Full,
                 ],
                 mcp_toggle: true,
+                compact: true,
             },
         }
     }
@@ -124,6 +125,11 @@ impl Provider for ClaudeCode {
         let output =
             self.sessions.bridge(&input.thread)?.prompt(&with_notes(&input.notes, &input.text));
         self.sessions.apply(&input.thread, output)
+    }
+
+    fn compact(&mut self, thread: String) -> Result<(), String> {
+        let output = self.sessions.bridge(&thread)?.compact();
+        self.sessions.apply(&thread, output)
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {

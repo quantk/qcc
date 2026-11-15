@@ -7,12 +7,13 @@ use qcc_protocol::methods::{
     CommandList, CommandRun, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
     PluginList, ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate,
     ProviderModels, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadChanges,
-    ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
-    ThreadListParams, ThreadListResult, ThreadRename, ThreadResult, ThreadSend, ThreadSetAgent,
-    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn,
-    ThreadStop, ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
-    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
-    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams,
+    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams,
+    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename, ThreadReset,
+    ThreadResult, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
+    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
+    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -93,6 +94,14 @@ impl Core {
             }
             ThreadSetSkill::NAME => {
                 let result = params::<ThreadSetSkill>(raw).and_then(|p| self.thread_set_skill(p));
+                responder.reply(result);
+            }
+            ThreadReset::NAME => {
+                let result = params::<ThreadReset>(raw).and_then(|p| self.thread_reset(p));
+                responder.reply(result);
+            }
+            ThreadCompact::NAME => {
+                let result = params::<ThreadCompact>(raw).and_then(|p| self.thread_compact(p));
                 responder.reply(result);
             }
             SkillList::NAME => {

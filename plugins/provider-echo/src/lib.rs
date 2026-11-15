@@ -27,7 +27,8 @@
 //! command or URL contains `fail`, or off when the thread keeps it off. It turns
 //! servers on and off in a running session (`mcp-toggle`).
 //!
-//! It offers a skill on request, `echo-demo`, for tests of skill switching.
+//! It offers a skill on request, `echo-demo`, for tests of skill switching, and
+//! compacts a session's context when asked, at once.
 //!
 //! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
 //! `/card` items, both built from the fixed set of UI nodes.
@@ -391,6 +392,7 @@ impl Provider for Echo {
                     PermissionMode::Full,
                 ],
                 mcp_toggle: true,
+                compact: true,
             },
         }
     }
@@ -442,6 +444,20 @@ impl Provider for Echo {
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
         self.run(&input.thread, &input.text, &input.notes)
+    }
+
+    /// A turn that sums up nothing: the tokens so far go down to none.
+    fn compact(&mut self, thread: String) -> Result<(), String> {
+        let session = self.sessions.get_mut(&thread).ok_or("the session was not started")?;
+        if session.turn.is_some() {
+            return Err("a turn is running".into());
+        }
+        let before = session.input_tokens + session.output_tokens;
+        session.input_tokens = 0;
+        session.output_tokens = 0;
+        let compaction =
+            Compaction { automatic: false, tokens_before: Some(before), tokens_after: Some(0) };
+        deltas::emit(&thread, &[Delta::TurnOpen, Delta::ContextCompacted(compaction), completed()])
     }
 
     fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {

@@ -8,11 +8,11 @@ use qcc_plugin_host::{EnvironmentRequest, Outcome, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     Delivery, Empty, InteractionResolveParams, MessageContext, SendMode, StopMode,
-    ThreadDeliverParams, ThreadDeliverResult, ThreadEventsParams, ThreadEventsResult,
-    ThreadIsolateParams, ThreadRenameParams, ThreadResult, ThreadSendParams, ThreadSendResult,
-    ThreadSetAgentParams, ThreadSetMcpParams, ThreadSetModeParams, ThreadSetParentParams,
-    ThreadSetProjectParams, ThreadSpawnParams, ThreadStopParams, ThreadUnqueueParams,
-    ThreadUnqueueResult,
+    ThreadCompactParams, ThreadDeliverParams, ThreadDeliverResult, ThreadEventsParams,
+    ThreadEventsResult, ThreadIsolateParams, ThreadRenameParams, ThreadResetParams, ThreadResult,
+    ThreadSendParams, ThreadSendResult, ThreadSetAgentParams, ThreadSetMcpParams,
+    ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams, ThreadSpawnParams,
+    ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
 };
 use qcc_runtime::NewThread;
 
@@ -692,6 +692,66 @@ impl Core {
             events.extend(engine.set_agent(provider, model, effort, now));
             events
         })
+    }
+
+    pub(super) fn thread_reset(&mut self, p: ThreadResetParams) -> Result<ThreadResult, RpcError> {
+        let ThreadResetParams { thread_id } = p;
+        let result = self.reconfigure(&thread_id, "the conversation", |engine, now| {
+            engine.record(EventPayload::ConversationReset, now)
+        })?;
+        // What the old session was to hear means nothing to the next one.
+        if let Some(session) = self.sessions.get_mut(&thread_id) {
+            session.notes.clear();
+            session.compact_after_start = false;
+        }
+        Ok(result)
+    }
+
+    pub(super) fn thread_compact(
+        &mut self,
+        p: ThreadCompactParams,
+    ) -> Result<ThreadResult, RpcError> {
+        let ThreadCompactParams { thread_id } = p;
+        self.check_open(&thread_id)?;
+        let thread =
+            self.supervisor.thread(&thread_id).ok_or_else(|| thread_not_found(&thread_id))?;
+        let can =
+            self.host.provider(&thread.provider).is_some_and(|(_, info)| info.capabilities.compact);
+        if !can {
+            return Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                format!("provider {} cannot compact a session's context", thread.provider),
+            ));
+        }
+        let resumable = thread.provider_session.is_some();
+        let held = self.in_transition(&thread_id);
+        let engine =
+            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        if engine.busy() || held || engine.has_queued_input() {
+            return Err(RpcError::new(
+                codes::THREAD_BUSY,
+                "a turn is running; compact the context once it ends",
+            ));
+        }
+        let live = engine.session_live();
+        if !live && !resumable {
+            return Err(RpcError::new(
+                codes::INVALID_PARAMS,
+                "the thread has no conversation to compact yet",
+            ));
+        }
+        engine.compact_requested();
+        if live {
+            self.call_provider(&thread_id, Action::Compact, None, |thread| {
+                ProviderRequest::Compact { thread }
+            });
+        } else {
+            // Resume the session first; it is compacted once it is up.
+            self.start_session(&thread_id, None);
+            self.sessions.entry(thread_id.clone()).or_default().compact_after_start = true;
+        }
+        let thread = self.supervisor.thread(&thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
     }
 
     /// Change what a session is constructed with. Refused while a turn runs or the

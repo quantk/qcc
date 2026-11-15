@@ -177,6 +177,12 @@ impl Bridge {
         output
     }
 
+    /// Compact the session's context. Claude Code takes `/compact` as a message and
+    /// runs it as a turn ending in a `result`, reporting a `compact_boundary`.
+    pub fn compact(&mut self) -> Output {
+        self.prompt("/compact")
+    }
+
     /// The user sent a message for the running turn. On the wire it is the same
     /// message as a prompt: the agent takes it into the turn at its next step.
     pub fn steer(&mut self, text: &str) -> Output {
@@ -271,6 +277,16 @@ impl Bridge {
         let kind = str_field(&message, "type");
 
         if kind == "system" {
+            // The agent summed up the conversation: when asked (`/compact`) or on
+            // its own, its context being full.
+            if str_field(&message, "subtype") == "compact_boundary" {
+                let metadata = &message["compact_metadata"];
+                output.deltas.push(Delta::ContextCompacted(Compaction {
+                    automatic: str_field(metadata, "trigger") == "auto",
+                    tokens_before: metadata["pre_tokens"].as_u64(),
+                    tokens_after: metadata["post_tokens"].as_u64(),
+                }));
+            }
             if str_field(&message, "subtype") == "init" {
                 let id = str_field(&message, "session_id");
                 if !id.is_empty() && self.session.as_deref() != Some(id) {
@@ -680,6 +696,41 @@ mod tests {
                 _ => "other",
             })
             .collect()
+    }
+
+    #[test]
+    fn compacting_is_a_turn_that_reports_the_boundary() {
+        let mut bridge = Bridge::new(None);
+        let asked = bridge.compact();
+        assert!(asked.writes[0].contains("\"content\":\"/compact\""), "{:?}", asked.writes);
+        assert_eq!(kinds(&asked.deltas), ["turn.open"]);
+        let boundary = json!({"type": "system", "subtype": "compact_boundary",
+            "compact_metadata": {"trigger": "manual", "pre_tokens": 900, "post_tokens": 100}});
+        assert_eq!(
+            bridge.on_line(&boundary.to_string()).deltas,
+            [Delta::ContextCompacted(Compaction {
+                automatic: false,
+                tokens_before: Some(900),
+                tokens_after: Some(100),
+            })]
+        );
+        // The summary is replayed as a user message with text content: not a tool result.
+        let replay = json!({"type": "user", "message": {"role": "user", "content": "Summary"}});
+        assert!(bridge.on_line(&replay.to_string()).deltas.is_empty());
+        assert_eq!(
+            kinds(&bridge.on_line(&result(json!({}))).deltas),
+            ["usage", "boundary.completed"]
+        );
+
+        // On its own, mid-turn, the agent says so too.
+        bridge.prompt("go on");
+        let auto = json!({"type": "system", "subtype": "compact_boundary",
+            "compact_metadata": {"trigger": "auto"}});
+        let Delta::ContextCompacted(compaction) = &bridge.on_line(&auto.to_string()).deltas[0]
+        else {
+            panic!("expected a compaction");
+        };
+        assert!(compaction.automatic);
     }
 
     #[test]

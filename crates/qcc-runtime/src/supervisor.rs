@@ -73,6 +73,7 @@ impl Supervisor {
             mcp_disabled: Vec::new(),
             skills_enabled: sorted(new.skills_enabled),
             skills_disabled: sorted(new.skills_disabled),
+            conversations: 0,
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

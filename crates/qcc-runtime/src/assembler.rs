@@ -247,6 +247,9 @@ impl DeltaAssembler {
                 out.push(EventPayload::ItemCompleted { turn_id, item });
             }
             Delta::Usage { usage } => out.push(EventPayload::UsageUpdated { usage }),
+            Delta::ContextCompacted { compaction } => {
+                out.push(EventPayload::ContextCompacted { compaction });
+            }
             Delta::InteractionRequest { request_id, item, request } => {
                 if self.interactions.iter().any(|pending| pending.request_id == request_id) {
                     self.violations.push(GrammarViolation::InteractionAlreadyPending(request_id));

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventPayload, Item, ThreadEvent } from "../api/protocol.gen";
-import { type Timeline, applyEvents, emptyTimeline, pendingInteractions, queuedMessages } from "./timeline";
+import {
+  type Timeline,
+  applyEvents,
+  conversationStart,
+  earlierConversations,
+  emptyTimeline,
+  pendingInteractions,
+  queuedMessages,
+} from "./timeline";
 
 function events(...payloads: EventPayload[]): ThreadEvent[] {
   return payloads.map((payload, index) => ({ thread_id: "t", seq: index + 1, ts: 1000 + index, ...payload }));
@@ -17,6 +25,20 @@ const message = (text: string, status: Item["status"] = "pending"): Item => ({
 });
 
 describe("timeline", () => {
+  it("marks where a new conversation starts and says when the context was compacted", () => {
+    const timeline = fold(
+      { type: "input/submitted", text: "one" },
+      { type: "session/compacted", compaction: { tokens_before: 1200, tokens_after: 300 } },
+      { type: "thread/reset" },
+      { type: "input/submitted", text: "two" },
+    );
+    expect(timeline.entries.map((entry) => entry.kind)).toEqual(["user", "notice", "conversation", "user"]);
+    expect(timeline.entries[1]).toMatchObject({ text: "Context compacted: 1,200 → 300 tokens" });
+    expect(conversationStart(timeline.entries)).toBe(3);
+    expect(earlierConversations(timeline.entries)).toBe(1);
+    expect(conversationStart(fold({ type: "input/submitted", text: "one" }).entries)).toBe(0);
+  });
+
   it("keeps what qcc told the agent with a message", () => {
     const timeline = fold(
       { type: "input/submitted", text: "hi", notes: ["The user is looking at thread t2."] },

@@ -120,6 +120,10 @@ pub enum Delta {
     #[serde(rename = "mcp.status")]
     McpStatus { server: McpServerStatus },
 
+    /// The agent compacted its context, asked to or on its own.
+    #[serde(rename = "context.compacted")]
+    ContextCompacted { compaction: Compaction },
+
     #[serde(rename = "provider.error")]
     ProviderError { message: String },
 
@@ -129,4 +133,17 @@ pub enum Delta {
     /// Provider traffic the bridge recognised as unknown. Kept for diagnostics.
     #[serde(rename = "unhandled")]
     Unhandled { payload: Value },
+}
+
+/// The agent summed up its conversation so far to make room in its context.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Compaction {
+    /// The agent did it on its own, its context being full.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub automatic: bool,
+    /// About how many tokens the context held before and after.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_before: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens_after: Option<u64>,
 }

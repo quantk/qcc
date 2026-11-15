@@ -3,7 +3,7 @@
 // entries the same way (moving it to a project lives with projects).
 
 import { isUnread } from "../../state/reads";
-import { folderOf } from "../../state/selectors";
+import { findProvider, folderOf } from "../../state/selectors";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
 import { ArchiveDialog } from "./ArchiveDialog";
@@ -62,6 +62,26 @@ export const threadMenuModule: UiModule = {
       group: "edit",
       when: (thread) => !thread.archived && !thread.environment && thread.status !== "active",
       run: (thread) => ui.showDialog(({ close }) => <IsolateDialog thread={thread} close={close} />),
+    });
+    ui.threadMenuItem({
+      id: "compact",
+      title: "Compact the context",
+      order: 45,
+      group: "run",
+      when: (thread) =>
+        !thread.archived &&
+        thread.status !== "active" &&
+        Boolean(thread.provider_session) &&
+        (findProvider(store().getState().allPlugins, thread.provider)?.capabilities.compact ?? false),
+      run: (thread) => void store().compact(thread.id),
+    });
+    ui.threadMenuItem({
+      id: "reset",
+      title: "Start a new conversation",
+      order: 46,
+      group: "run",
+      when: (thread) => !thread.archived && thread.status !== "active" && Boolean(thread.last_turn_at),
+      run: (thread) => void store().resetConversation(thread.id),
     });
     ui.threadMenuItem({
       id: "stop",

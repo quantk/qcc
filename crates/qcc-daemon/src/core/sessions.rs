@@ -224,6 +224,12 @@ impl Core {
                     self.commit(events);
                 }
                 self.apply_deltas(&id, session.buffered);
+                // The session was started to be compacted.
+                if session.compact_after_start {
+                    self.call_provider(&id, Action::Compact, None, |thread| {
+                        ProviderRequest::Compact { thread }
+                    });
+                }
             }
             Ok(other) => {
                 self.apply_deltas(&id, session.buffered);
@@ -288,7 +294,7 @@ impl Core {
             Ok(_) => {}
             // The provider refused; it is still alive and the user should see why.
             Err(PluginError::Rejected(message)) => {
-                if matches!(action, Action::Input)
+                if matches!(action, Action::Input | Action::Compact)
                     && let Ok(engine) = self.supervisor.engine(&id)
                 {
                     // No turn will open for this message; do not wait for one.
@@ -308,7 +314,11 @@ impl Core {
             session.stopping = false;
         }
         match action {
-            Action::Input | Action::Steer | Action::Resolve | Action::SwitchMcp => {}
+            Action::Input
+            | Action::Steer
+            | Action::Resolve
+            | Action::SwitchMcp
+            | Action::Compact => {}
             Action::Interrupt => {
                 // The backstop: a bridge that settled its own turn makes this a no-op.
                 if let Ok(engine) = self.supervisor.engine(&id) {

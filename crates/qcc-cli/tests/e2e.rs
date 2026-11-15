@@ -1408,6 +1408,57 @@ fn a_message_tells_the_agent_what_it_is_about() {
 }
 
 #[test]
+fn a_thread_starts_its_conversation_afresh_and_compacts_its_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("first words");
+    daemon.wait_for(&id, "turn/completed");
+    let turns = |events: &[Value]| types(events).iter().filter(|t| **t == "turn/completed").count();
+    let wait_turns = |count: usize| {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let events = daemon.events(&id);
+            if turns(&events) >= count {
+                return events;
+            }
+            assert!(Instant::now() < deadline, "turn {count} never ended: {events:#?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    // Compacting is a turn of the agent's own, with no message of the user's.
+    let compacted = daemon.qcc(&["thread", "compact", &id, "--follow"]);
+    assert!(compacted.ok, "{}", compacted.stderr);
+    assert!(compacted.stdout.contains("context compacted:"), "{}", compacted.stdout);
+    let events = wait_turns(2);
+    let event = events.iter().find(|e| e["type"] == "session/compacted").unwrap();
+    assert!(event["compaction"]["tokens_before"].as_u64().unwrap() > 0, "{event}");
+    assert_eq!(inputs(&events), ["first words"]);
+
+    // A new conversation: the next message starts a session of its own, and
+    // the transcript is that conversation's.
+    assert!(daemon.qcc(&["thread", "reset", &id]).ok);
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["conversations"], 1);
+    assert!(thread.get("provider_session").is_none(), "{thread}");
+    assert!(daemon.qcc(&["thread", "send", &id, "second words"]).ok);
+    let events = wait_turns(3);
+    let reset = events.iter().position(|e| e["type"] == "thread/reset").unwrap();
+    let started = events[reset..].iter().find(|e| e["type"] == "session/started").unwrap();
+    assert_eq!(started["resumed"], false, "{started}");
+    let shown = daemon.qcc(&["thread", "show", &id]).stdout;
+    assert!(shown.contains("a new conversation"), "{shown}");
+    assert!(shown.contains("first words"), "earlier conversations stay in the timeline: {shown}");
+    let waited = daemon.qcc(&["thread", "wait", &id, "--json"]).json();
+    assert_eq!(waited["threads"][0]["last_message"], "second words");
+
+    // Nothing to compact in a conversation not started yet.
+    assert!(daemon.qcc(&["thread", "reset", &id]).ok);
+    let refused = daemon.qcc(&["thread", "compact", &id]);
+    assert!(!refused.ok && refused.stderr.contains("no conversation"), "{}", refused.stderr);
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

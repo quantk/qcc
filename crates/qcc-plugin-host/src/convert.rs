@@ -1,5 +1,6 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
+use qcc_domain::Compaction;
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
@@ -166,6 +167,13 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                 error: status.error,
             },
         },
+        wit::Delta::ContextCompacted(c) => Delta::ContextCompacted {
+            compaction: Compaction {
+                automatic: c.automatic,
+                tokens_before: c.tokens_before,
+                tokens_after: c.tokens_after,
+            },
+        },
         wit::Delta::ProviderError(message) => Delta::ProviderError { message },
         wit::Delta::ProviderWarning(message) => Delta::ProviderWarning { message },
         wit::Delta::Unhandled(payload) => Delta::Unhandled { payload: json(&payload)? },
@@ -182,6 +190,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 fork: p.capabilities.fork,
                 steer: p.capabilities.steer,
                 mcp_toggle: p.capabilities.mcp_toggle,
+                compact: p.capabilities.compact,
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -427,6 +436,7 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),
+                ProviderRequest::Compact { thread } => wit::ProviderRequest::Compact(thread.0),
                 ProviderRequest::SetMcpServer { thread, name, enabled } => {
                     wit::ProviderRequest::SetMcpServer(wit::McpSwitch {
                         thread: thread.0,

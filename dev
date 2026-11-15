@@ -6,12 +6,12 @@
 #   ./dev demo        start a daemon, run a few echo threads through it, stop it
 #   ./dev qcc ARGS    run the CLI against the dev daemon, e.g. ./dev qcc thread list
 #   ./dev desktop     build and open the desktop app against the dev daemon
-#
-# Every command that builds also restarts a dev daemon left running from an older
-# build; if agents are working in it, it asks first.
 #   ./dev check       fmt, clippy and all tests
 #   ./dev test [ARGS] cargo test --workspace [ARGS]
 #   ./dev clean       remove ./.dev (the dev daemon's journal and plugins)
+#
+# Every command that builds also restarts a dev daemon left running from an older
+# build; if agents are working in it, it asks first.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -151,7 +151,7 @@ case "$command" in
     rm -rf "$QCC_DATA_DIR"
     ;;
   *)
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//' >&2
     exit 2
     ;;
 esac

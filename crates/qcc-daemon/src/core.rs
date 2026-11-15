@@ -1641,6 +1641,7 @@ impl Core {
             self.session_failed(id, message);
             return;
         };
+        let extra_dirs = self.extra_dirs(&thread);
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
         let prompt = match prompt {
@@ -1658,6 +1659,7 @@ impl Core {
                 permission_mode: thread.permission_mode,
                 env: self.session_env(id),
                 skills: self.skills.clone(),
+                extra_dirs,
             }),
         };
         self.sessions.entry(id.clone()).or_default().starting = true;
@@ -1666,6 +1668,32 @@ impl Core {
             let result = plugin.call(request).await;
             let _ = commands.send(Command::SessionStartFinished { thread, resumed, result });
         });
+    }
+
+    /// The folders of the thread's project other than the one it works in. A thread
+    /// in a worktree works in a copy of its source folder, which is left out too.
+    fn extra_dirs(&self, thread: &qcc_domain::Thread) -> Vec<String> {
+        let Some(project) =
+            self.projects.iter().find(|project| Some(&project.id) == thread.project.as_ref())
+        else {
+            return Vec::new();
+        };
+        let own: Vec<&str> = std::iter::once(thread.cwd.as_str())
+            .chain(thread.environment.as_ref().map(|env| env.source_dir.as_str()))
+            .collect();
+        project
+            .folders
+            .iter()
+            .filter(|folder| {
+                let folder = std::path::Path::new(folder);
+                // Neither the folder it works in nor one inside it, nor one around it.
+                !own.iter().any(|dir| {
+                    let dir = std::path::Path::new(dir);
+                    dir.starts_with(folder) || folder.starts_with(dir)
+                })
+            })
+            .cloned()
+            .collect()
     }
 
     /// The first message for an agent that takes over from another one.

@@ -350,6 +350,11 @@ interface types {
     /// Skills plugins offer. The bridge tells the agent about them the way its
     /// agent takes extra instructions; `qcc_plugin_sdk::skills_prompt` words it.
     skills: list<skill-ref>,
+    /// Other folders of the thread's project (absolute paths). The agent should
+    /// see them as part of its work, as its own permission mode allows: the
+    /// bridge passes them the way its agent takes extra directories, or tells it
+    /// about them (`qcc_plugin_sdk::extra_dirs_prompt`).
+    extra-dirs: list<string>,
   }
 
   record session-started {

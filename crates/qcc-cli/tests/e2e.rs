@@ -292,6 +292,14 @@ fn projects_group_threads_by_their_folders() {
     assert!(!missing.ok);
     assert!(missing.stderr.contains("not an absolute path to a directory"), "{}", missing.stderr);
 
+    // A thread sees the project's other folders, not the one it works in.
+    assert!(daemon.qcc(&["project", "add-folder", "Store", api]).ok);
+    let told = spawn_in(app, &["--prompt", "/skills"]);
+    daemon.wait_for(&told, "turn/completed");
+    let reply = daemon.qcc(&["thread", "show", &told]).stdout;
+    assert!(reply.contains(&format!("- {api}")), "{reply}");
+    assert!(!reply.contains(&format!("- {app}")), "{reply}");
+
     // Deleting a project leaves its threads, outside any project.
     assert!(daemon.qcc(&["project", "delete", "Store"]).ok);
     assert!(daemon.thread(&early).get("project").is_none());

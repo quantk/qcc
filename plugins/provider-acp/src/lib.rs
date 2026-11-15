@@ -80,6 +80,7 @@ impl Provider for AcpProvider {
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
+        let context = session_context(&start);
         let process = process::spawn(&process::SpawnOptions {
             program: self.agent.program.into(),
             args: self.agent.args.iter().map(|arg| (*arg).to_owned()).collect(),
@@ -88,7 +89,8 @@ impl Provider for AcpProvider {
         })?;
         let (mut bridge, handshake) =
             Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
-        bridge.set_context(skills_prompt(&start.skills));
+        // ACP has no extra directories: the agent is told of them instead.
+        bridge.set_context(context);
         self.sessions.insert(&start.thread, process, Running { agent: self.agent.name, bridge });
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;

@@ -14,7 +14,7 @@
 //! | `/kv`                | counts invocations in the plugin's key-value store           |
 //! | `/card <text>`       | an item of the plugin's own kind, drawn by the plugin        |
 //! | `/fail <message>`    | the turn fails                                               |
-//! | `/skills`            | says what the session was told about skills, word for word   |
+//! | `/skills`            | says what the session was told (skills, project folders)     |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -48,7 +48,7 @@ struct Session {
     turn: Option<Turn>,
     next_request: u64,
     mode: Option<PermissionMode>,
-    /// What a real bridge would hand its agent about the session's skills.
+    /// What a real bridge would hand its agent: skills and the project's folders.
     skills: Option<String>,
 }
 
@@ -343,7 +343,7 @@ impl Provider for Echo {
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
         let session = Session {
             mode: start.permission_mode,
-            skills: skills_prompt(&start.skills),
+            skills: session_context(&start),
             ..Session::default()
         };
         self.sessions.insert(start.thread.clone(), session);

@@ -61,6 +61,7 @@ pub struct Bridge {
     interrupted: HashSet<String>,
     approvals: HashMap<String, Approval>,
     instructions: Option<String>,
+    writable_roots: Vec<String>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -161,6 +162,7 @@ impl Bridge {
             interrupted: HashSet::new(),
             approvals: HashMap::new(),
             instructions: None,
+            writable_roots: Vec::new(),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -168,6 +170,13 @@ impl Bridge {
             Call::Initialize,
         );
         (bridge, Output { writes: vec![initialize], ..Output::default() })
+    }
+
+    /// More directories the sandbox lets the agent write to: the other folders of
+    /// the thread's project. Sent as a config override with `thread/start` and
+    /// `thread/resume`.
+    pub fn set_writable_roots(&mut self, roots: Vec<String>) {
+        self.writable_roots = roots;
     }
 
     /// Developer instructions for the thread (the skills qcc offers), sent with
@@ -425,6 +434,10 @@ impl Bridge {
         if let Some(model) = &self.model {
             params["model"] = json!(model);
         }
+        if !self.writable_roots.is_empty() {
+            params["config"] =
+                json!({"sandbox_workspace_write": {"writable_roots": self.writable_roots}});
+        }
         match &self.resume {
             Some(thread) => {
                 params["threadId"] = json!(thread);
@@ -640,11 +653,24 @@ mod tests {
         let initialized = bridge.on_line(r#"{"id":1,"result":{"userAgent":"x"}}"#);
         assert_eq!(methods(&initialized), ["initialized", "thread/start"]);
         assert!(initialized.writes[1].contains("\"model\":\"gpt-x\""));
+        assert!(!initialized.writes[1].contains("writable_roots"));
 
         let ready = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(methods(&ready), ["turn/start"]);
         assert_eq!(ready.deltas, [Delta::SessionIdentity("th".into()), Delta::TurnOpen]);
         assert!(ready.writes[0].contains("\"threadId\":\"th\""));
+    }
+
+    #[test]
+    fn the_project_folders_are_writable_roots() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        bridge.set_writable_roots(vec!["/api".into(), "/web".into()]);
+        let initialized = bridge.on_line(r#"{"id":1,"result":{}}"#);
+        let start: serde_json::Value = serde_json::from_str(&initialized.writes[1]).unwrap();
+        assert_eq!(
+            start["params"]["config"],
+            json!({"sandbox_workspace_write": {"writable_roots": ["/api", "/web"]}})
+        );
     }
 
     #[test]

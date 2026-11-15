@@ -40,6 +40,7 @@ impl Provider for Codex {
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
+        let context = session_context(&start);
         let process = process::spawn(&process::SpawnOptions {
             program: PROGRAM.into(),
             args: vec!["app-server".into()],
@@ -48,7 +49,8 @@ impl Provider for Codex {
         })?;
         let (mut bridge, handshake) =
             Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
-        bridge.set_instructions(skills_prompt(&start.skills));
+        bridge.set_instructions(context);
+        bridge.set_writable_roots(start.extra_dirs);
         self.sessions.insert(&start.thread, process, bridge);
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;

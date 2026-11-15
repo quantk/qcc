@@ -229,6 +229,7 @@ impl Harness {
             permission_mode: self.permission_mode,
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
             skills: Vec::new(),
+            extra_dirs: Vec::new(),
         }));
         match outcome {
             Ok(Outcome::SessionStarted { provider_session }) => {

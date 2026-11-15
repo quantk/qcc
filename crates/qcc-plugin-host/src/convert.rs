@@ -354,6 +354,7 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
                 path: skill.path,
             })
             .collect(),
+        extra_dirs: start.extra_dirs,
     }
 }
 

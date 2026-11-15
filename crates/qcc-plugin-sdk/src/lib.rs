@@ -83,8 +83,8 @@ use types::{
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas, kv,
-        log, process, skills_prompt, threads, timers,
+        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas,
+        extra_dirs_prompt, kv, log, process, session_context, skills_prompt, threads, timers,
     };
 }
 
@@ -266,6 +266,33 @@ pub fn skills_prompt(skills: &[SkillRef]) -> Option<String> {
         text.push_str(&format!("\n- {}: {} (file: {})", skill.name, skill.description, skill.path));
     }
     Some(text)
+}
+
+/// The paragraph that tells an agent about the other folders of its project, or
+/// `None` if there are none. For bridges whose agent has no way to take extra
+/// directories, or to make sure it knows of them.
+pub fn extra_dirs_prompt(dirs: &[String]) -> Option<String> {
+    if dirs.is_empty() {
+        return None;
+    }
+    let mut text = String::from(
+        "Besides the working directory, these folders belong to the same project. Read \
+         and change them as the task needs, the same way as the working directory:\n",
+    );
+    for dir in dirs {
+        text.push_str(&format!("\n- {dir}"));
+    }
+    Some(text)
+}
+
+/// Everything qcc tells an agent at the start of a session that is not the user's
+/// message: its skills and the folders of its project.
+pub fn session_context(start: &SessionStart) -> Option<String> {
+    let parts: Vec<String> = [skills_prompt(&start.skills), extra_dirs_prompt(&start.extra_dirs)]
+        .into_iter()
+        .flatten()
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
 }
 
 /// The plugin itself. Every method has a default, so implement only what you contribute.

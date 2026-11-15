@@ -70,6 +70,10 @@ impl Provider for ClaudeCode {
         if let Some(session) = &start.resume {
             args.extend(["--resume".to_owned(), session.clone()]);
         }
+        // The project's other folders are working directories too.
+        for dir in &start.extra_dirs {
+            args.extend(["--add-dir".to_owned(), dir.clone()]);
+        }
         if let Some(skills) = skills_prompt(&start.skills) {
             args.extend(["--append-system-prompt".to_owned(), skills]);
         }

@@ -31,6 +31,8 @@ pub struct SessionStart {
     /// Variables the agent process must see.
     pub env: Vec<(String, String)>,
     pub skills: Vec<SkillRef>,
+    /// Other folders of the thread's project.
+    pub extra_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

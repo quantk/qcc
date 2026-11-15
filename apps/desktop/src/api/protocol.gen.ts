@@ -244,6 +244,17 @@ export type PluginPermissions = {
 	process: string[],
 };
 
+/**  A program some plugin may run, and which file that is now. */
+export type ProgramStatus = {
+	name: string,
+	/**  The plugins whose `process` permission names it. */
+	plugins: string[],
+	/**  The file that runs. Absent when there is none. */
+	path?: string | null,
+	/**  Why there is none, or why the configured one cannot run. */
+	error?: string | null,
+};
+
 /**
  *  What the user works on: one or several repositories or folders under a name.
  *  A thread belongs to at most one project and works in one of its folders.
@@ -321,6 +332,17 @@ export type ProviderModelsResult = {
 	models: ModelInfo[],
 };
 
+export type ProviderSettings = {
+	/**  The model a new thread gets when none is named. */
+	model?: string | null,
+	/**  The permission mode a new thread gets when none is named. */
+	permission_mode?: PermissionMode | null,
+	/**  Variables every session of this agent sees (an API key, a config path). */
+	env?: { [key in string]: string },
+	/**  Left out where the app offers agents to pick from. */
+	hidden?: boolean,
+};
+
 export type RpcError = {
 	code: number,
 	message: string,
@@ -336,6 +358,29 @@ export type SendMode =
  *  cannot steer.
  */
 "steer";
+
+/**  What the user set for the daemon. Kept in `<data>/settings.json`. */
+export type Settings = {
+	/**  The agent a new thread gets when none is named. */
+	default_provider?: ProviderId | null,
+	/**
+	 *  Where the programs plugins run live, by the name a plugin runs them by
+	 *  (`claude` → `/opt/claude/bin/claude`). A name not here is looked up on the
+	 *  daemon's `PATH`.
+	 */
+	programs?: { [key in string]: string },
+	providers?: { [key in ProviderId]: ProviderSettings },
+};
+
+export type SettingsResult = {
+	settings: Settings,
+	/**  Every program plugins may run, by name. */
+	programs: ProgramStatus[],
+};
+
+export type SettingsSetParams = {
+	settings: Settings,
+};
 
 export type StopMode = 
 /**  Settle the running turn as interrupted; the session stays attached. */
@@ -745,6 +790,8 @@ export type Methods = {
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
 	"provider.models": { params: ProviderModelsParams; result: ProviderModelsResult },
+	"settings.get": { params: Empty; result: SettingsResult },
+	"settings.set": { params: SettingsSetParams; result: SettingsResult },
 	"command.list": { params: Empty; result: CommandListResult },
 	"command.run": { params: CommandRunParams; result: CommandRunResult },
 	"ui.contributions": { params: Empty; result: UiContributionsResult },

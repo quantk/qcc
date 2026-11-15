@@ -16,6 +16,8 @@ import type {
   ProjectId,
   ProviderId,
   SendMode,
+  Settings,
+  SettingsResult,
   Thread,
   ThreadEvent,
   ThreadId,
@@ -59,6 +61,8 @@ export type AppState = {
   models: Readonly<Record<ProviderId, ModelList>>;
   /** Oldest first. */
   projects: readonly Project[];
+  /** The daemon's settings and where its programs are. Null until read. */
+  settings: SettingsResult | null;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -83,6 +87,7 @@ export class AppStore {
     notice: null,
     models: {},
     projects: [],
+    settings: null,
   };
   private listeners = new Set<() => void>();
   private notifying = false;
@@ -140,14 +145,15 @@ export class AppStore {
     const watch = this.nextSubscription++;
     this.watch = watch;
     try {
-      const [list, plugins, projects] = await Promise.all([
+      const [list, plugins, projects, settings] = await Promise.all([
         this.api.call("thread.watch", { subscription: watch }),
         this.api.call("plugin.list", {}),
         this.api.call("project.list", {}),
+        this.api.call("settings.get", {}),
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
-      this.set({ projects: projects.projects });
+      this.set({ projects: projects.projects, settings });
       this.set({
         allPlugins: plugins.plugins,
         plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
@@ -342,6 +348,19 @@ export class AppStore {
       this.api.call("thread.set_agent", { thread_id: threadId, provider, model }),
     );
     if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
+  /** Read the settings again: a program may have been installed meanwhile. */
+  async reloadSettings() {
+    const settings = await this.attempt(() => this.api.call("settings.get", {}));
+    if (settings) this.set({ settings });
+  }
+
+  /** Resolves to whether the daemon took them; its refusal is shown as the error. */
+  async saveSettings(settings: Settings): Promise<boolean> {
+    const result = await this.attempt(() => this.api.call("settings.set", { settings }));
+    if (result) this.set({ settings: result, models: {} });
     return result !== null;
   }
 

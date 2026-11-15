@@ -1,4 +1,5 @@
-// Preferences of this window: for now the interface scale.
+// The settings screen: the daemon's settings (agents' programs, defaults and
+// environment), the plugins, and preferences of this window such as its scale.
 
 import { zoomIn, zoomOut } from "../../state/zoom";
 import type { UiModule } from "../../ui/registry";

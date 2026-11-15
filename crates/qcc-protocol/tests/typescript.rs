@@ -60,6 +60,8 @@ fn generate() -> String {
         .method::<InteractionResolve>()
         .method::<PluginList>()
         .method::<ProviderModels>()
+        .method::<SettingsGet>()
+        .method::<SettingsSet>()
         .method::<CommandList>()
         .method::<CommandRun>()
         .method::<UiContributions>()

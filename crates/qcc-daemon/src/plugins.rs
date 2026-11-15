@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 use qcc_domain::{Delta, SkillRef, ThreadId};
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{
-    Contribution, Grant, MANIFEST_FILE, Permissions, PluginHost, Services, ThreadsCall,
+    Contribution, Grant, MANIFEST_FILE, Permissions, PluginHost, ProgramPaths, Services,
+    ThreadsCall,
 };
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -50,6 +51,7 @@ fn grant_for(config: &Config, id: &str) -> Grant {
 pub(crate) fn load_all(
     config: &Config,
     commands: &UnboundedSender<Command>,
+    programs: &ProgramPaths,
 ) -> anyhow::Result<PluginHost> {
     let plugins_dir = config.plugins_dir();
     qcc_plugins_bundle::install(&plugins_dir)?;
@@ -81,7 +83,9 @@ pub(crate) fn load_all(
                     });
                 }),
                 kv: Box::new(DirKv::new(config.plugin_data_dir(&manifest.id).join("kv"))),
-                processes: Arc::new(qcc_plugin_host::services::OsProcesses),
+                processes: Arc::new(qcc_plugin_host::services::OsProcesses::with_paths(
+                    programs.clone(),
+                )),
                 threads: Arc::new(move |plugin: &str, call: ThreadsCall| {
                     let (reply, answer) = std::sync::mpsc::channel();
                     // Past the deadline the core refuses the call instead of running

@@ -38,7 +38,7 @@ impl Services {
         Self {
             deltas,
             kv: Box::new(MemoryKv::default()),
-            processes: Arc::new(OsProcesses),
+            processes: Arc::new(OsProcesses::default()),
             threads: Arc::new(|_, _| Err("no daemon is attached to answer for threads".into())),
             on_crash: Arc::new(|_, _| {}),
         }
@@ -303,8 +303,34 @@ const INHERITED_ENV: &[&str] = &[
     "NIX_SSL_CERT_FILE",
 ];
 
+/// Where the user says a program lives, by the name plugins run it by. Shared by
+/// every plugin's process backend and changed while they run.
+#[derive(Debug, Clone, Default)]
+pub struct ProgramPaths(Arc<std::sync::RwLock<std::collections::HashMap<String, PathBuf>>>);
+
+impl ProgramPaths {
+    /// Replace every entry. A plugin is still limited to the names its `process`
+    /// permission lists: this only says which file such a name means.
+    pub fn set(&self, paths: impl IntoIterator<Item = (String, PathBuf)>) {
+        *self.0.write().unwrap_or_else(|p| p.into_inner()) = paths.into_iter().collect();
+    }
+
+    pub fn get(&self, program: &str) -> Option<PathBuf> {
+        self.0.read().unwrap_or_else(|p| p.into_inner()).get(program).cloned()
+    }
+}
+
 /// Real operating-system processes.
-pub struct OsProcesses;
+#[derive(Debug, Clone, Default)]
+pub struct OsProcesses {
+    paths: ProgramPaths,
+}
+
+impl OsProcesses {
+    pub fn with_paths(paths: ProgramPaths) -> Self {
+        Self { paths }
+    }
+}
 
 impl ProcessBackend for OsProcesses {
     fn spawn(
@@ -312,7 +338,7 @@ impl ProcessBackend for OsProcesses {
         options: SpawnOptions,
         sink: ProcessSink,
     ) -> Result<Box<dyn ProcessHandle>, String> {
-        let program = resolve_program(&options.program)?;
+        let program = resolve_program(&options.program, &self.paths)?;
         let mut command = Command::new(program);
         command.args(&options.args).env_clear();
         for name in INHERITED_ENV {
@@ -361,14 +387,22 @@ impl ProcessBackend for OsProcesses {
     }
 }
 
-/// Where the program a plugin names lives, looked up on the daemon's own `PATH`.
+/// Where the program a plugin names lives: where the user said, or else on the
+/// daemon's own `PATH`.
 ///
 /// The permission names a program, and that is the program that runs: left to
 /// `Command`, a bare name would be looked up on the `PATH` the plugin passes to the
 /// child, and any directory there could provide a program of that name.
-fn resolve_program(program: &str) -> Result<PathBuf, String> {
+pub fn resolve_program(program: &str, paths: &ProgramPaths) -> Result<PathBuf, String> {
     if program.contains('/') {
         return Ok(PathBuf::from(program));
+    }
+    if let Some(path) = paths.get(program) {
+        return if is_executable(&path) {
+            Ok(path)
+        } else {
+            Err(format!("cannot run {program:?}: {} is not an executable file", path.display()))
+        };
     }
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::split_paths(&path)
@@ -501,7 +535,7 @@ mod tests {
         let sink: ProcessSink = Arc::new(move |output| {
             let _ = tx.send(output);
         });
-        let mut process = OsProcesses
+        let mut process = OsProcesses::default()
             .spawn(
                 SpawnOptions {
                     program: "sh".into(),
@@ -524,7 +558,7 @@ mod tests {
         assert!(process.write_stdin(b"x").is_err());
 
         assert!(
-            OsProcesses
+            OsProcesses::default()
                 .spawn(
                     SpawnOptions {
                         program: "qcc-no-such-program".into(),
@@ -551,7 +585,7 @@ mod tests {
             let _ = tx.send(output);
         });
         let path = dir.path().to_str().unwrap().to_owned();
-        let _process = OsProcesses
+        let _process = OsProcesses::default()
             .spawn(
                 SpawnOptions {
                     program: "echo".into(),
@@ -566,7 +600,7 @@ mod tests {
             rx.iter().take_while(|e| !matches!(e, ProcessOutput::Exit(_))).collect();
         assert_eq!(events, [ProcessOutput::Stdout(b"real\n".to_vec())]);
 
-        let preload = OsProcesses.spawn(
+        let preload = OsProcesses::default().spawn(
             SpawnOptions {
                 program: "echo".into(),
                 args: vec![],
@@ -579,12 +613,29 @@ mod tests {
     }
 
     #[test]
+    fn the_user_says_where_a_program_lives() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let mine = dir.path().join("my-agent");
+        std::fs::write(&mine, "#!/bin/sh\necho mine\n").unwrap();
+        std::fs::set_permissions(&mine, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let paths = ProgramPaths::default();
+        assert!(resolve_program("qcc-agent", &paths).is_err());
+        paths.set([("qcc-agent".to_owned(), mine.clone())]);
+        assert_eq!(resolve_program("qcc-agent", &paths), Ok(mine));
+        paths.set([("qcc-agent".to_owned(), dir.path().join("missing"))]);
+        let error = resolve_program("qcc-agent", &paths).unwrap_err();
+        assert!(error.contains("not an executable file"), "{error}");
+    }
+
+    #[test]
     fn os_process_kill() {
         let (tx, rx) = std::sync::mpsc::channel();
         let sink: ProcessSink = Arc::new(move |output| {
             let _ = tx.send(output);
         });
-        let mut process = OsProcesses
+        let mut process = OsProcesses::default()
             .spawn(
                 SpawnOptions {
                     program: "sleep".into(),

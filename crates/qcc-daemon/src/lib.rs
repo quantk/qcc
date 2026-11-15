@@ -10,6 +10,7 @@ mod handover;
 mod plugins;
 mod projects;
 mod server;
+mod settings;
 
 use std::future::Future;
 use std::path::PathBuf;
@@ -49,6 +50,10 @@ impl Config {
     /// Skills plugins offer to agents, written out as `<plugin>/<name>/SKILL.md`.
     pub fn skills_dir(&self) -> PathBuf {
         self.data_dir.join("skills")
+    }
+
+    pub fn settings(&self) -> PathBuf {
+        self.data_dir.join("settings.json")
     }
 
     pub fn database(&self) -> PathBuf {

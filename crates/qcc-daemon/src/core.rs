@@ -13,18 +13,19 @@ use qcc_domain::{
 };
 use qcc_plugin_host::{
     Contribution, EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost,
-    PluginRequest, ProviderRequest, SessionStart, SettledThread, ThreadSummary, ThreadsAnswer,
-    ThreadsCall, UiRequest,
+    PluginRequest, ProgramPaths, ProviderRequest, SessionStart, SettledThread, ThreadSummary,
+    ThreadsAnswer, ThreadsCall, UiRequest,
 };
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandList, CommandListResult, CommandRun, CommandRunParams,
     CommandRunResult, DaemonStatus, DaemonStatusResult, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PROJECTS_UPDATED, PluginInfo, PluginList, PluginListResult,
-    PluginPermissions, ProjectCreate, ProjectCreateParams, ProjectDelete, ProjectDeleteParams,
-    ProjectList, ProjectListResult, ProjectResult, ProjectUpdate, ProjectUpdateParams,
-    ProjectsUpdatedNotification, ProviderModels, ProviderModelsParams, ProviderModelsResult,
-    SendMode, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
+    PluginPermissions, ProgramStatus, ProjectCreate, ProjectCreateParams, ProjectDelete,
+    ProjectDeleteParams, ProjectList, ProjectListResult, ProjectResult, ProjectUpdate,
+    ProjectUpdateParams, ProjectsUpdatedNotification, ProviderModels, ProviderModelsParams,
+    ProviderModelsResult, SendMode, Settings, SettingsGet, SettingsResult, SettingsSet,
+    SettingsSetParams, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
     ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
     ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
     ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
@@ -44,7 +45,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::{Config, handover, plugins, projects};
+use crate::{Config, handover, plugins, projects, settings};
 
 /// Answers one request on the connection it came from.
 pub(crate) struct Responder {
@@ -243,6 +244,9 @@ pub(crate) struct Core {
     skills: Vec<SkillRef>,
     /// Oldest first.
     projects: Vec<Project>,
+    settings: Settings,
+    /// Where the programs plugins run live, as `settings.programs` says.
+    programs: ProgramPaths,
     /// What each provider said it offers, until asked to look again.
     models: HashMap<ProviderId, Vec<ModelInfo>>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
@@ -275,7 +279,11 @@ impl Core {
     ) -> anyhow::Result<Self> {
         let store = Store::open(config.database())
             .with_context(|| format!("cannot open {}", config.database().display()))?;
-        let host = plugins::load_all(config, &commands).context("cannot load plugins")?;
+        let settings = settings::load(&config.settings());
+        let programs = ProgramPaths::default();
+        programs.set(settings.programs.iter().map(|(name, path)| (name.clone(), path.into())));
+        let host =
+            plugins::load_all(config, &commands, &programs).context("cannot load plugins")?;
         let skills = plugins::write_skills(config, &host);
         let cli_dir = std::env::current_exe()
             .ok()
@@ -323,6 +331,8 @@ impl Core {
             skills,
             models: HashMap::new(),
             projects,
+            settings,
+            programs,
             cli_dir,
             fatal: None,
         })
@@ -428,6 +438,11 @@ impl Core {
             }
             ThreadSetMode::NAME => {
                 let result = params::<ThreadSetMode>(raw).and_then(|p| self.thread_set_mode(p));
+                responder.reply(result);
+            }
+            SettingsGet::NAME => responder.reply(Ok(self.settings_result())),
+            SettingsSet::NAME => {
+                let result = params::<SettingsSet>(raw).and_then(|p| self.settings_set(p));
                 responder.reply(result);
             }
             ThreadSetProject::NAME => {
@@ -593,7 +608,16 @@ impl Core {
         }
     }
 
-    fn thread_spawn(&mut self, p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
+    fn thread_spawn(&mut self, mut p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
+        // What the user set for this agent fills in what the caller left out.
+        if let Some(defaults) = self.settings.providers.get(&p.provider) {
+            if p.model.is_none() {
+                p.model.clone_from(&defaults.model);
+            }
+            if p.permission_mode.is_none() {
+                p.permission_mode = defaults.permission_mode;
+            }
+        }
         self.check_mode(&p.provider, p.permission_mode)?;
         if let Some(parent) = &p.parent {
             if self.supervisor.thread(parent).is_none() {
@@ -775,6 +799,45 @@ impl Core {
         self.commit(events);
         self.queued.insert(thread_id);
         Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    fn settings_set(&mut self, p: SettingsSetParams) -> Result<SettingsResult, RpcError> {
+        let SettingsSetParams { settings: next } = p;
+        settings::check(&next).map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
+        settings::save(&self.config.settings(), &next).map_err(|error| {
+            RpcError::new(codes::INTERNAL_ERROR, format!("cannot save the settings: {error}"))
+        })?;
+        self.programs.set(next.programs.iter().map(|(name, path)| (name.clone(), path.into())));
+        self.settings = next;
+        // Another program may offer other models.
+        self.models.clear();
+        Ok(self.settings_result())
+    }
+
+    fn settings_result(&self) -> SettingsResult {
+        let mut programs: Vec<ProgramStatus> = Vec::new();
+        for plugin in self.host.plugins() {
+            for name in &plugin.permissions().process {
+                match programs.iter_mut().find(|program| &program.name == name) {
+                    Some(program) => program.plugins.push(plugin.id().to_owned()),
+                    None => {
+                        let (path, error) =
+                            match qcc_plugin_host::resolve_program(name, &self.programs) {
+                                Ok(path) => (Some(path.display().to_string()), None),
+                                Err(error) => (None, Some(error)),
+                            };
+                        programs.push(ProgramStatus {
+                            name: name.clone(),
+                            plugins: vec![plugin.id().to_owned()],
+                            path,
+                            error,
+                        });
+                    }
+                }
+            }
+        }
+        programs.sort_by(|a, b| a.name.cmp(&b.name));
+        SettingsResult { settings: self.settings.clone(), programs }
     }
 
     fn project(&self, id: &ProjectId) -> Result<&Project, RpcError> {
@@ -1207,10 +1270,17 @@ impl Core {
     }
 
     fn session_env(&self, id: &ThreadId) -> Vec<(String, String)> {
-        let mut env = vec![
+        // The user's variables for this agent first: those qcc sets come later and win.
+        let mut env: Vec<(String, String)> = self
+            .supervisor
+            .thread(id)
+            .and_then(|thread| self.settings.providers.get(&thread.provider))
+            .map(|defaults| defaults.env.clone().into_iter().collect())
+            .unwrap_or_default();
+        env.extend([
             (paths::THREAD_ID_ENV.into(), id.to_string()),
             (paths::SOCKET_ENV.into(), self.config.socket.display().to_string()),
-        ];
+        ]);
         if let Some(dir) = &self.cli_dir {
             env.push((paths::CLI_BIN_ENV.into(), dir.join("qcc").display().to_string()));
             let path = match std::env::var("PATH") {

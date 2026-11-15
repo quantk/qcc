@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
 import { modelLabel } from "../../state/models";
-import { findProvider, providersOf } from "../../state/selectors";
+import { findProvider, pickableProviders } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { Choice, ModelPicker } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
@@ -14,15 +14,16 @@ import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitl
 export function AgentSwitch({ thread }: { thread: Thread }) {
   const plugins = useApp((state) => state.plugins);
   const allPlugins = useApp((state) => state.allPlugins);
+  const settings = useApp((state) => state.settings?.settings);
   // The slice must be stable: select the list, not a fallback made on every read.
   const list = useApp((state) => state.models[thread.provider]);
   const models = list?.models ?? [];
   // The thread's own agent stays on the list even when its plugin is hidden.
   const providers = useMemo(() => {
-    const shown = providersOf(plugins);
+    const shown = pickableProviders(plugins, settings);
     const own = findProvider(allPlugins, thread.provider);
     return own && !shown.some((candidate) => candidate.id === own.id) ? [own, ...shown] : shown;
-  }, [plugins, allPlugins, thread.provider]);
+  }, [plugins, allPlugins, settings, thread.provider]);
   const [open, setOpen] = useState(false);
   const [provider, setProvider] = useState(thread.provider);
   const [model, setModel] = useState<string | null>(thread.model ?? null);

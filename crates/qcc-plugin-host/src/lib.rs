@@ -25,4 +25,4 @@ pub use api::{
 pub use host::{LoadError, PluginHost};
 pub use manifest::{API_VERSION, MANIFEST_FILE, Manifest, ManifestError};
 pub use permissions::{Grant, Permissions};
-pub use services::Services;
+pub use services::{ProgramPaths, Services, resolve_program};

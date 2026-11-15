@@ -1,5 +1,5 @@
 import { relativePath, tailPath } from "../util/format";
-import type { PermissionMode, PluginInfo, Project, ProviderInfo, Thread } from "../api/protocol.gen";
+import type { PermissionMode, PluginInfo, Project, ProviderInfo, Settings, Thread } from "../api/protocol.gen";
 
 /** Example plugins are left out unless asked for. */
 export function visiblePlugins(plugins: readonly PluginInfo[], showExamples: boolean): readonly PluginInfo[] {
@@ -8,6 +8,11 @@ export function visiblePlugins(plugins: readonly PluginInfo[], showExamples: boo
 
 export function providersOf(plugins: readonly PluginInfo[]): ProviderInfo[] {
   return plugins.flatMap((plugin) => plugin.providers);
+}
+
+/** The agents offered to pick from: the user can hide some in the settings. */
+export function pickableProviders(plugins: readonly PluginInfo[], settings: Settings | undefined): ProviderInfo[] {
+  return providersOf(plugins).filter((provider) => !settings?.providers?.[provider.id]?.hidden);
 }
 
 export function environmentsOf(plugins: readonly PluginInfo[]) {

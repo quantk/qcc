@@ -2,7 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useMemo, useRef, useState } from "react";
 
 import type { PermissionMode, ProjectId } from "../../api/protocol.gen";
-import { environmentsOf, modeLabel, providersOf } from "../../state/selectors";
+import { environmentsOf, modeLabel, pickableProviders } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { Choice, ModelPicker } from "../../ui/kit";
 import { tailPath } from "../../util/format";
@@ -35,11 +35,12 @@ function remembered(): Remembered {
 export function NewThreadDialog({ close: onClose, project: preset }: { close: () => void; project?: ProjectId }) {
   const plugins = useApp((state) => state.plugins);
   const projects = useApp((state) => state.projects);
-  const providers = useMemo(() => providersOf(plugins), [plugins]);
+  const settings = useApp((state) => state.settings?.settings);
+  const providers = useMemo(() => pickableProviders(plugins, settings), [plugins, settings]);
   const environments = useMemo(() => environmentsOf(plugins), [plugins]);
   const last = useMemo(remembered, []);
 
-  const [providerId, setProviderId] = useState(last.provider ?? "");
+  const [providerId, setProviderId] = useState(settings?.default_provider ?? last.provider ?? "");
   const [projectId, setProjectId] = useState<string | null>(preset ?? last.project ?? null);
   const project = projects.find((candidate) => candidate.id === projectId);
   // In a project, the directory is one of its folders unless asked otherwise.
@@ -127,7 +128,12 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
                 value={provider?.id ?? null}
                 options={providerOptions}
                 onChange={(value) => {
-                  if ((value ?? "") !== provider?.id) setModel(null);
+                  if ((value ?? "") !== provider?.id) {
+                    // What the user set for that agent, if anything.
+                    const defaults = value ? settings?.providers?.[value] : undefined;
+                    setModel(defaults?.model ?? null);
+                    setMode(defaults?.permission_mode ?? "");
+                  }
                   setProviderId(value ?? "");
                 }}
               />

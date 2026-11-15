@@ -304,6 +304,53 @@ fn projects_group_threads_by_their_folders() {
 }
 
 #[test]
+fn settings_choose_programs_and_fill_in_defaults() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let fake = dir.path().join("my-echo");
+    std::fs::write(&fake, "#!/bin/sh\necho \"mine: $*\"\n").unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // The plugin runs `echo`; the user says which file that is.
+    assert!(daemon.qcc(&["settings", "program", "echo", fake.to_str().unwrap()]).ok);
+    let shown = daemon.qcc(&["settings", "show", "--json"]).json();
+    let echo = shown["programs"].as_array().unwrap().iter().find(|p| p["name"] == "echo").unwrap();
+    assert_eq!(echo["path"], fake.to_str().unwrap());
+    assert_eq!(echo["plugins"][0], "provider-echo");
+    let id = daemon.spawn("/exec echo hello");
+    daemon.wait_for(&id, "turn/completed");
+    let shown = daemon.qcc(&["thread", "show", &id]).stdout;
+    assert!(shown.contains("mine: hello"), "{shown}");
+
+    // Defaults of an agent fill in what a spawn leaves out.
+    assert!(
+        daemon
+            .qcc(&["settings", "provider", "echo", "--model", "echo-2", "--permission-mode", "ask"])
+            .ok
+    );
+    assert!(daemon.qcc(&["settings", "default-provider", "echo"]).ok);
+    let output = daemon.qcc(&["thread", "spawn", "--json"]);
+    assert!(output.ok, "{}", output.stderr);
+    let thread = &output.json()["thread"];
+    assert_eq!(thread["provider"], "echo");
+    assert_eq!(thread["model"], "echo-2");
+    assert_eq!(thread["permission_mode"], "ask");
+
+    // Back to PATH, and settings that could not work are refused.
+    assert!(daemon.qcc(&["settings", "program", "echo"]).ok);
+    let refused = daemon.qcc(&["settings", "provider", "echo", "--env", "LD_PRELOAD=/x.so"]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("cannot be set"), "{}", refused.stderr);
+    let saved: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("data/settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(saved.get("programs").is_none());
+    assert_eq!(saved["providers"]["echo"]["model"], "echo-2");
+}
+
+#[test]
 fn a_queued_message_can_be_taken_back() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

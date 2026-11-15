@@ -520,6 +520,73 @@ pub struct ProviderModelsResult {
     pub models: Vec<ModelInfo>,
 }
 
+// ----- settings ---------------------------------------------------------------------
+
+/// What the user set for the daemon. Kept in `<data>/settings.json`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Settings {
+    /// The agent a new thread gets when none is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_provider: Option<ProviderId>,
+    /// Where the programs plugins run live, by the name a plugin runs them by
+    /// (`claude` → `/opt/claude/bin/claude`). A name not here is looked up on the
+    /// daemon's `PATH`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub programs: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub providers: BTreeMap<ProviderId, ProviderSettings>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderSettings {
+    /// The model a new thread gets when none is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// The permission mode a new thread gets when none is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+    /// Variables every session of this agent sees (an API key, a config path).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    /// Left out where the app offers agents to pick from.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+}
+
+/// A program some plugin may run, and which file that is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProgramStatus {
+    pub name: String,
+    /// The plugins whose `process` permission names it.
+    pub plugins: Vec<String>,
+    /// The file that runs. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Why there is none, or why the configured one cannot run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SettingsResult {
+    pub settings: Settings,
+    /// Every program plugins may run, by name.
+    pub programs: Vec<ProgramStatus>,
+}
+
+method!(SettingsGet, "settings.get", Empty => SettingsResult);
+
+method!(
+    /// Replace the settings. They apply at once: to programs started from now on and
+    /// to threads spawned from now on.
+    SettingsSet, "settings.set", SettingsSetParams => SettingsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct SettingsSetParams {
+    pub settings: Settings,
+}
+
 // ----- plugin commands --------------------------------------------------------------
 
 method!(

@@ -231,6 +231,7 @@ impl Harness {
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],
             skills: Vec::new(),
             extra_dirs: Vec::new(),
+            mcp_servers: Vec::new(),
         }));
         match outcome {
             Ok(Outcome::SessionStarted { provider_session }) => {

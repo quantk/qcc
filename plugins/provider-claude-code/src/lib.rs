@@ -74,6 +74,11 @@ impl Provider for ClaudeCode {
         for dir in &start.extra_dirs {
             args.extend(["--add-dir".to_owned(), dir.clone()]);
         }
+        // Added to the servers of the user's Claude Code configuration. The flag takes
+        // several values, so the config goes in the same argument.
+        if let Some(config) = bridge::mcp_config(&start.mcp_servers) {
+            args.push(format!("--mcp-config={config}"));
+        }
         if let Some(skills) = skills_prompt(&start.skills) {
             args.extend(["--append-system-prompt".to_owned(), skills]);
         }

@@ -1,5 +1,7 @@
 //! What plugins declare about the extension points they contribute.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::ProviderId;
@@ -205,6 +207,35 @@ pub struct SkillRef {
     pub description: String,
     /// Absolute path of the skill's `SKILL.md`.
     pub path: String,
+}
+
+/// An MCP server an agent session connects to, on top of those the agent's own
+/// configuration names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct McpServer {
+    /// Letters, digits, `_` and `-`: agents use it in tool names and config keys.
+    pub name: String,
+    pub transport: McpTransport,
+}
+
+/// How an agent reaches an MCP server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum McpTransport {
+    /// A program the agent starts and talks to over its stdin and stdout.
+    Stdio {
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+    },
+    /// A server the agent reaches over streamable HTTP.
+    Http {
+        url: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        headers: BTreeMap<String, String>,
+    },
 }
 
 #[cfg(test)]

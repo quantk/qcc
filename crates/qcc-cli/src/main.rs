@@ -4,6 +4,7 @@
 //! and a `qcc thread spawn` run from inside an agent session records that session's
 //! thread as the parent. Plugin commands run as `qcc <plugin> <command>`.
 
+mod mcp;
 mod project;
 mod render;
 mod settings;
@@ -24,6 +25,7 @@ use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
 use serde::Serialize;
 
+use mcp::McpCommand;
 use project::ProjectCommand;
 use settings::SettingsCommand;
 use thread::ThreadCommand;
@@ -65,6 +67,10 @@ enum Command {
     /// environment of each agent.
     #[command(subcommand)]
     Settings(SettingsCommand),
+    /// MCP servers every agent session gets on top of those of the agent's own
+    /// configuration.
+    #[command(subcommand)]
+    Mcp(McpCommand),
     /// Inspect agent providers.
     #[command(subcommand)]
     Provider(ProviderCommand),
@@ -186,6 +192,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Project(command) => return project::run(&client, command, json).await,
 
         Command::Settings(command) => return settings::run(&client, command, json).await,
+
+        Command::Mcp(command) => return mcp::run(&client, command, json).await,
 
         Command::Interaction(InteractionCommand::Resolve { thread, interaction, answer }) => {
             let resolution = match answer {

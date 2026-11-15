@@ -27,8 +27,8 @@ pub use item::{Item, ItemShape, ItemStatus};
 pub use project::{Project, project_of};
 pub use provider::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, EnvironmentChanges,
-    EnvironmentInfo, ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SkillInfo,
-    SkillRef, UiPlacement, UiScope, UiViewInfo,
+    EnvironmentInfo, McpServer, McpTransport, ModelInfo, PermissionMode, ProviderCapabilities,
+    ProviderInfo, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
 };
 pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,

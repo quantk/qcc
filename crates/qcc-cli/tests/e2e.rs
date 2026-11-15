@@ -363,6 +363,46 @@ fn settings_choose_programs_and_fill_in_defaults() {
 }
 
 #[test]
+fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let told = |id: &str| {
+        let waited = daemon.qcc(&["thread", "wait", id, "--json"]).json();
+        waited["threads"][0]["last_message"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(told(&daemon.spawn("/mcp")), "no MCP servers");
+
+    let added = daemon.qcc(&["mcp", "add", "docs", "--env", "TOKEN=t", "--", "npx", "-y", "docs"]);
+    assert!(added.ok, "{}", added.stderr);
+    let url = "https://example.com/mcp";
+    assert!(daemon.qcc(&["mcp", "add", "web", "--url", url, "--header", "X-Key=k"]).ok);
+    let listed = daemon.qcc(&["mcp", "list"]).stdout;
+    assert!(listed.contains("docs") && listed.contains("npx -y docs"), "{listed}");
+    let listed = daemon.qcc(&["mcp", "list", "--json"]).json();
+    assert_eq!(listed["docs"]["transport"]["env"]["TOKEN"], "t");
+    assert_eq!(listed["web"]["transport"]["headers"]["X-Key"], "k");
+    assert_eq!(
+        told(&daemon.spawn("/mcp")),
+        "docs stdio npx -y docs\nweb http https://example.com/mcp"
+    );
+
+    // A server turned off stays in the settings but no session gets it.
+    assert!(daemon.qcc(&["mcp", "disable", "docs"]).ok);
+    assert!(daemon.qcc(&["mcp", "list"]).stdout.contains("(off)"));
+    assert_eq!(told(&daemon.spawn("/mcp")), "web http https://example.com/mcp");
+    assert!(daemon.qcc(&["mcp", "enable", "docs"]).ok);
+    assert!(daemon.qcc(&["mcp", "remove", "web"]).ok);
+    assert_eq!(told(&daemon.spawn("/mcp")), "docs stdio npx -y docs");
+
+    // What could not work is refused.
+    let refused = daemon.qcc(&["mcp", "add", "my docs", "--", "npx"]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("not an MCP server name"), "{}", refused.stderr);
+    assert!(!daemon.qcc(&["mcp", "add", "docs"]).ok);
+    assert!(!daemon.qcc(&["mcp", "remove", "nope"]).ok);
+}
+
+#[test]
 fn a_queued_message_can_be_taken_back() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

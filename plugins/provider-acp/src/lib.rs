@@ -91,6 +91,7 @@ impl Provider for AcpProvider {
             Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
         // ACP has no extra directories: the agent is told of them instead.
         bridge.set_context(context);
+        bridge.set_mcp_servers(start.mcp_servers);
         self.sessions.insert(&start.thread, process, Running { agent: self.agent.name, bridge });
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;

@@ -3,9 +3,9 @@
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
-    ItemShape, ItemStatus, ModelInfo, OptionKind, PermissionMode, ProviderCapabilities,
-    ProviderInfo, Role, SkillInfo, TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry,
-    TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
+    ItemShape, ItemStatus, McpServer, McpTransport, ModelInfo, OptionKind, PermissionMode,
+    ProviderCapabilities, ProviderInfo, Role, SkillInfo, TextChannel, ThreadId, ThreadState,
+    TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
 };
 
 use crate::api::{
@@ -356,7 +356,22 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
             })
             .collect(),
         extra_dirs: start.extra_dirs,
+        mcp_servers: start.mcp_servers.into_iter().map(mcp_server).collect(),
     }
+}
+
+fn mcp_server(server: McpServer) -> wit::McpServer {
+    let transport = match server.transport {
+        McpTransport::Stdio { command, args, env } => wit::McpTransport::Stdio(wit::McpStdio {
+            command,
+            args,
+            env: env.into_iter().collect(),
+        }),
+        McpTransport::Http { url, headers } => {
+            wit::McpTransport::Http(wit::McpHttp { url, headers: headers.into_iter().collect() })
+        }
+    };
+    wit::McpServer { name: server.name, transport }
 }
 
 fn resolution(resolution: InteractionResolution) -> wit::InteractionResolution {

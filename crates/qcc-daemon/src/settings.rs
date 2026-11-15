@@ -2,6 +2,7 @@
 
 use std::path::Path;
 
+use qcc_domain::McpTransport;
 use qcc_protocol::methods::Settings;
 
 /// Missing or unreadable settings are the defaults; a broken file is reported and
@@ -51,16 +52,54 @@ pub(crate) fn check(settings: &Settings) -> Result<(), String> {
     }
     for (provider, provider_settings) in &settings.providers {
         for name in provider_settings.env.keys() {
-            let valid = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
-                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-            if !valid {
-                return Err(format!("{name:?} is not a variable name ({provider})"));
+            check_variable(name).map_err(|error| format!("{error} ({provider})"))?;
+        }
+    }
+    for (name, server) in &settings.mcp_servers {
+        // Agents put the name into tool names and config keys (`mcp_servers.<name>`).
+        let valid = !name.is_empty()
+            && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+        if !valid {
+            return Err(format!(
+                "{name:?} is not an MCP server name: use letters, digits, `_` and `-`"
+            ));
+        }
+        match &server.transport {
+            McpTransport::Stdio { command, env, .. } => {
+                if command.trim().is_empty() {
+                    return Err(format!("the MCP server {name} has no command"));
+                }
+                for variable in env.keys() {
+                    check_variable(variable)
+                        .map_err(|error| format!("{error} (MCP server {name})"))?;
+                }
             }
-            // The loader's variables would let a setting change what runs.
-            if name.starts_with("LD_") || name.starts_with("DYLD_") || name.starts_with("QCC_") {
-                return Err(format!("{name} cannot be set for an agent ({provider})"));
+            McpTransport::Http { url, headers } => {
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err(format!(
+                        "the URL of the MCP server {name} must be http(s), not {url:?}"
+                    ));
+                }
+                if let Some(header) = headers.keys().find(|header| {
+                    header.is_empty() || !header.chars().all(|c| c.is_ascii_graphic() && c != ':')
+                }) {
+                    return Err(format!("{header:?} is not a header name (MCP server {name})"));
+                }
             }
         }
+    }
+    Ok(())
+}
+
+fn check_variable(name: &str) -> Result<(), String> {
+    let valid = name.chars().next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !valid {
+        return Err(format!("{name:?} is not a variable name"));
+    }
+    // The loader's variables would let a setting change what runs.
+    if name.starts_with("LD_") || name.starts_with("DYLD_") || name.starts_with("QCC_") {
+        return Err(format!("{name} cannot be set for an agent"));
     }
     Ok(())
 }
@@ -68,7 +107,7 @@ pub(crate) fn check(settings: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use qcc_domain::ProviderId;
-    use qcc_protocol::methods::ProviderSettings;
+    use qcc_protocol::methods::{McpServerSettings, ProviderSettings};
 
     use super::*;
 
@@ -107,5 +146,33 @@ mod tests {
         let mut settings = Settings::default();
         settings.programs.insert("claude".into(), "relative/claude".into());
         assert!(check(&settings).is_err());
+    }
+
+    #[test]
+    fn mcp_servers_that_cannot_work_are_refused() {
+        let with_server = |name: &str, transport: McpTransport| {
+            let mut settings = Settings::default();
+            settings
+                .mcp_servers
+                .insert(name.into(), McpServerSettings { transport, disabled: false });
+            check(&settings)
+        };
+        let stdio = |command: &str, env: &[&str]| McpTransport::Stdio {
+            command: command.into(),
+            args: Vec::new(),
+            env: env.iter().map(|name| ((*name).to_owned(), "x".to_owned())).collect(),
+        };
+        let http = |url: &str, header: &str| McpTransport::Http {
+            url: url.into(),
+            headers: [(header.to_owned(), "x".to_owned())].into(),
+        };
+        assert!(with_server("docs_2-x", stdio("npx", &["API_KEY"])).is_ok());
+        assert!(with_server("docs", http("https://example.com/mcp", "Authorization")).is_ok());
+        assert!(with_server("my docs", stdio("npx", &[])).is_err());
+        assert!(with_server("a.b", stdio("npx", &[])).is_err());
+        assert!(with_server("docs", stdio(" ", &[])).is_err());
+        assert!(with_server("docs", stdio("npx", &["LD_PRELOAD"])).is_err());
+        assert!(with_server("docs", http("ftp://example.com", "X")).is_err());
+        assert!(with_server("docs", http("https://example.com", "Bad: name")).is_err());
     }
 }

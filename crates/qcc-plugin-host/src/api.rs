@@ -3,8 +3,8 @@
 
 use qcc_domain::{
     CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionResolution,
-    ModelInfo, PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread, ThreadId,
-    ThreadState, TranscriptEntry, UiViewInfo,
+    McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo, SkillInfo, SkillRef, Thread,
+    ThreadId, ThreadState, TranscriptEntry, UiViewInfo,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,8 @@ pub struct SessionStart {
     pub skills: Vec<SkillRef>,
     /// Other folders of the thread's project.
     pub extra_dirs: Vec<String>,
+    /// MCP servers to add to the agent's own.
+    pub mcp_servers: Vec<McpServer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

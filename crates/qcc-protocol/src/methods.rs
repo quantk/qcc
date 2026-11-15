@@ -4,8 +4,8 @@ use std::collections::BTreeMap;
 
 use qcc_domain::{
     CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
-    InteractionResolution, ModelInfo, PermissionMode, Project, ProjectId, ProviderId, ProviderInfo,
-    Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
+    InteractionResolution, McpTransport, ModelInfo, PermissionMode, Project, ProjectId, ProviderId,
+    ProviderInfo, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -597,6 +597,18 @@ pub struct Settings {
     pub programs: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub providers: BTreeMap<ProviderId, ProviderSettings>,
+    /// MCP servers every agent session gets on top of those the agent's own
+    /// configuration names, by server name.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub mcp_servers: BTreeMap<String, McpServerSettings>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct McpServerSettings {
+    pub transport: McpTransport,
+    /// Kept in the settings but given to no session.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disabled: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

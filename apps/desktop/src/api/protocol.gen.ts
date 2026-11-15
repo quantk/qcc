@@ -194,6 +194,19 @@ export type ItemStatus = "pending" | "completed" | "failed" |
 /**  Settled by the core because its turn or session went away. */
 "interrupted";
 
+export type McpServerSettings = {
+	transport: McpTransport,
+	/**  Kept in the settings but given to no session. */
+	disabled?: boolean,
+};
+
+/**  How an agent reaches an MCP server. */
+export type McpTransport = 
+/**  A program the agent starts and talks to over its stdin and stdout. */
+{ type: "stdio"; command: string; args?: string[]; env?: { [key in string]: string } } | 
+/**  A server the agent reaches over streamable HTTP. */
+{ type: "http"; url: string; headers?: { [key in string]: string } };
+
 export type ModelInfo = {
 	/**  What the agent is started with. */
 	id: string,
@@ -389,6 +402,11 @@ export type Settings = {
 	 */
 	programs?: { [key in string]: string },
 	providers?: { [key in ProviderId]: ProviderSettings },
+	/**
+	 *  MCP servers every agent session gets on top of those the agent's own
+	 *  configuration names, by server name.
+	 */
+	mcp_servers?: { [key in string]: McpServerSettings },
 };
 
 export type SettingsResult = {

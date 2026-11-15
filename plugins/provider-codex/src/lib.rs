@@ -51,6 +51,7 @@ impl Provider for Codex {
             Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
         bridge.set_instructions(context);
         bridge.set_writable_roots(start.extra_dirs);
+        bridge.set_mcp_servers(start.mcp_servers);
         self.sessions.insert(&start.thread, process, bridge);
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;

@@ -334,6 +334,32 @@ interface types {
     path: string,
   }
 
+  /// An MCP server the agent connects to, on top of those its own configuration
+  /// names.
+  record mcp-server {
+    /// Letters, digits, `_` and `-`.
+    name: string,
+    transport: mcp-transport,
+  }
+
+  variant mcp-transport {
+    /// A program the agent starts and talks to over stdio.
+    stdio(mcp-stdio),
+    /// A server the agent reaches over streamable HTTP.
+    http(mcp-http),
+  }
+
+  record mcp-stdio {
+    command: string,
+    args: list<string>,
+    env: list<tuple<string, string>>,
+  }
+
+  record mcp-http {
+    url: string,
+    headers: list<tuple<string, string>>,
+  }
+
   record session-start {
     thread: thread-id,
     /// Working directory of the thread.
@@ -355,6 +381,9 @@ interface types {
     /// bridge passes them the way its agent takes extra directories, or tells it
     /// about them (`qcc_plugin_sdk::extra_dirs_prompt`).
     extra-dirs: list<string>,
+    /// MCP servers the user set up in qcc. The bridge adds them to those the
+    /// agent's own configuration names, the way its agent takes them.
+    mcp-servers: list<mcp-server>,
   }
 
   record session-started {

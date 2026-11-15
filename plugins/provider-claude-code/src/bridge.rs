@@ -515,6 +515,38 @@ impl LineBridge for Bridge {
     }
 }
 
+/// The value of `--mcp-config` that adds qcc's MCP servers to the user's own, or
+/// nothing when there are none.
+pub fn mcp_config(servers: &[McpServer]) -> Option<String> {
+    if servers.is_empty() {
+        return None;
+    }
+    let servers: serde_json::Map<String, Value> = servers
+        .iter()
+        .map(|server| {
+            let config = match &server.transport {
+                McpTransport::Stdio(stdio) => json!({
+                    "type": "stdio",
+                    "command": stdio.command,
+                    "args": stdio.args,
+                    "env": pairs(&stdio.env),
+                }),
+                McpTransport::Http(http) => json!({
+                    "type": "http",
+                    "url": http.url,
+                    "headers": pairs(&http.headers),
+                }),
+            };
+            (server.name.clone(), config)
+        })
+        .collect();
+    Some(json!({ "mcpServers": servers }).to_string())
+}
+
+fn pairs(pairs: &[(String, String)]) -> serde_json::Map<String, Value> {
+    pairs.iter().map(|(name, value)| (name.clone(), json!(value))).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,5 +745,37 @@ mod tests {
         assert_eq!(kinds(&bridge.on_line(r#"{"type":"brand_new"}"#).deltas), ["unhandled"]);
         assert_eq!(bridge.on_line("not json at all"), Output::default());
         assert!(bridge.resolve("nope", &InteractionResolution::Cancelled).is_err());
+    }
+
+    #[test]
+    fn mcp_servers_become_one_mcp_config() {
+        assert_eq!(mcp_config(&[]), None);
+        let servers = [
+            McpServer {
+                name: "docs".into(),
+                transport: McpTransport::Stdio(McpStdio {
+                    command: "npx".into(),
+                    args: vec!["docs-mcp".into()],
+                    env: vec![("TOKEN".into(), "t".into())],
+                }),
+            },
+            McpServer {
+                name: "web".into(),
+                transport: McpTransport::Http(McpHttp {
+                    url: "https://example.com/mcp".into(),
+                    headers: vec![("Authorization".into(), "Bearer x".into())],
+                }),
+            },
+        ];
+        let config: Value = serde_json::from_str(&mcp_config(&servers).unwrap()).unwrap();
+        assert_eq!(
+            config,
+            json!({"mcpServers": {
+                "docs": {"type": "stdio", "command": "npx", "args": ["docs-mcp"],
+                         "env": {"TOKEN": "t"}},
+                "web": {"type": "http", "url": "https://example.com/mcp",
+                        "headers": {"Authorization": "Bearer x"}},
+            }})
+        );
     }
 }

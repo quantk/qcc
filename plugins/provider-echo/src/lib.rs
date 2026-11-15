@@ -15,6 +15,7 @@
 //! | `/card <text>`       | an item of the plugin's own kind, drawn by the plugin        |
 //! | `/fail <message>`    | the turn fails                                               |
 //! | `/skills`            | says what the session was told (skills, project folders)     |
+//! | `/mcp`               | lists the MCP servers the session was given                  |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -50,6 +51,8 @@ struct Session {
     mode: Option<PermissionMode>,
     /// What a real bridge would hand its agent: skills and the project's folders.
     skills: Option<String>,
+    /// The MCP servers it was given, one line each.
+    mcp_servers: Vec<String>,
 }
 
 /// What the running turn is waiting for.
@@ -275,6 +278,17 @@ impl Echo {
                 out.push(completed());
             }
             "/fail" => out.push(boundary(TurnStatus::Failed, Some(rest.to_owned()))),
+            "/mcp" => {
+                let reply = if session.mcp_servers.is_empty() {
+                    "no MCP servers".to_owned()
+                } else {
+                    session.mcp_servers.join("\n")
+                };
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/crash" => panic!("echo provider was asked to crash"),
             "/skills" => {
                 let reply = session.skills.clone().unwrap_or_else(|| "no skills".into());
@@ -344,6 +358,16 @@ impl Provider for Echo {
         let session = Session {
             mode: start.permission_mode,
             skills: session_context(&start),
+            mcp_servers: start
+                .mcp_servers
+                .iter()
+                .map(|server| match &server.transport {
+                    McpTransport::Stdio(stdio) => {
+                        format!("{} stdio {} {}", server.name, stdio.command, stdio.args.join(" "))
+                    }
+                    McpTransport::Http(http) => format!("{} http {}", server.name, http.url),
+                })
+                .collect(),
             ..Session::default()
         };
         self.sessions.insert(start.thread.clone(), session);

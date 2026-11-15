@@ -104,6 +104,10 @@ pub struct Bridge {
     /// ACP has no system prompt, so it goes in front of the first prompt of a fresh
     /// session; a continued session has it in its history already.
     context: Option<String>,
+    /// qcc's MCP servers, added to the agent's own with every session request.
+    mcp_servers: Vec<McpServer>,
+    /// `mcpServers` as the agent takes them, once it said what it supports.
+    mcp_param: Value,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -197,6 +201,12 @@ fn is_empty(value: &Value) -> bool {
 }
 
 impl Bridge {
+    /// MCP servers to add to those of the agent's own configuration. Set before
+    /// the handshake goes out.
+    pub fn set_mcp_servers(&mut self, servers: Vec<McpServer>) {
+        self.mcp_servers = servers;
+    }
+
     /// A bridge for a new agent process, and the handshake to send it.
     pub fn new(
         cwd: String,
@@ -225,6 +235,8 @@ impl Bridge {
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             context_window: None,
             context: None,
+            mcp_servers: Vec::new(),
+            mcp_param: json!([]),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -376,13 +388,14 @@ impl Bridge {
                 let capabilities = &result["agentCapabilities"];
                 let can_resume = capabilities["sessionCapabilities"].get("resume").is_some();
                 let can_load = capabilities["loadSession"].as_bool().unwrap_or(false);
+                let http = capabilities["mcpCapabilities"]["http"].as_bool().unwrap_or(false);
+                self.mcp_param = self.session_mcp_servers(http, &mut output.deltas);
                 let request = match &self.resume {
                     Some(session) if can_resume || can_load => {
                         // `resume` picks the session up silently; `load` replays it.
                         self.replaying = !can_resume;
                         let method = if can_resume { "session/resume" } else { "session/load" };
-                        let params =
-                            json!({"sessionId": session, "cwd": self.cwd, "mcpServers": []});
+                        let params = json!({"sessionId": session, "cwd": self.cwd, "mcpServers": self.mcp_param});
                         self.peer.request(method, params, Call::Continue)
                     }
                     Some(_) => {
@@ -441,10 +454,40 @@ impl Bridge {
         }
     }
 
+    /// `mcpServers` for the session requests. An agent that does not say it takes
+    /// HTTP servers gets only the stdio ones, which every ACP agent must take.
+    fn session_mcp_servers(&self, http: bool, deltas: &mut Vec<Delta>) -> Value {
+        let pairs = |pairs: &[(String, String)]| -> Vec<Value> {
+            pairs.iter().map(|(name, value)| json!({"name": name, "value": value})).collect()
+        };
+        let mut servers = Vec::new();
+        for server in &self.mcp_servers {
+            match &server.transport {
+                McpTransport::Stdio(stdio) => servers.push(json!({
+                    "name": server.name,
+                    "command": stdio.command,
+                    "args": stdio.args,
+                    "env": pairs(&stdio.env),
+                })),
+                McpTransport::Http(http_server) if http => servers.push(json!({
+                    "type": "http",
+                    "name": server.name,
+                    "url": http_server.url,
+                    "headers": pairs(&http_server.headers),
+                })),
+                McpTransport::Http(_) => deltas.push(Delta::ProviderWarning(format!(
+                    "the agent does not take HTTP MCP servers; {} is left out",
+                    server.name
+                ))),
+            }
+        }
+        Value::Array(servers)
+    }
+
     fn new_session(&mut self) -> String {
         self.peer.request(
             "session/new",
-            json!({"cwd": self.cwd, "mcpServers": []}),
+            json!({"cwd": self.cwd, "mcpServers": self.mcp_param}),
             Call::NewSession,
         )
     }
@@ -783,6 +826,50 @@ mod tests {
         assert!(matches!(&gone.deltas[..], [Delta::ProviderWarning(w)] if w.contains("not found")));
         let fresh = bridge.on_line(r#"{"jsonrpc":"2.0","id":3,"result":{"sessionId":"new"}}"#);
         assert_eq!(fresh.deltas, [Delta::SessionIdentity("new".into())]);
+    }
+
+    #[test]
+    fn mcp_servers_go_with_every_session_request() {
+        let servers = vec![
+            McpServer {
+                name: "docs".into(),
+                transport: McpTransport::Stdio(McpStdio {
+                    command: "npx".into(),
+                    args: vec!["docs-mcp".into()],
+                    env: vec![("TOKEN".into(), "t".into())],
+                }),
+            },
+            McpServer {
+                name: "web".into(),
+                transport: McpTransport::Http(McpHttp {
+                    url: "https://example.com/mcp".into(),
+                    headers: vec![("Authorization".into(), "Bearer x".into())],
+                }),
+            },
+        ];
+        let docs = json!({"name": "docs", "command": "npx", "args": ["docs-mcp"],
+                          "env": [{"name": "TOKEN", "value": "t"}]});
+        let request = |line: &str| -> Value { serde_json::from_str(line).unwrap() };
+
+        // An agent without HTTP support gets the stdio server and a warning.
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        bridge.set_mcp_servers(servers.clone());
+        let new = bridge.on_line(INIT);
+        assert_eq!(request(&new.writes[0])["params"]["mcpServers"], json!([docs]));
+        assert!(matches!(&new.deltas[..], [Delta::ProviderWarning(w)] if w.contains("web")));
+
+        // One that takes HTTP gets both, on a resumed session too.
+        let init = r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"sessionCapabilities":{"resume":{}},"mcpCapabilities":{"http":true}}}}"#;
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("s".into()), None);
+        bridge.set_mcp_servers(servers);
+        let resume = bridge.on_line(init);
+        assert_eq!(method(&resume.writes[0]), "session/resume");
+        assert_eq!(
+            request(&resume.writes[0])["params"]["mcpServers"],
+            json!([docs, {"type": "http", "name": "web", "url": "https://example.com/mcp",
+                          "headers": [{"name": "Authorization", "value": "Bearer x"}]}])
+        );
+        assert!(resume.deltas.is_empty());
     }
 
     #[test]

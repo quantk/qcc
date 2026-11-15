@@ -62,6 +62,7 @@ pub struct Bridge {
     approvals: HashMap<String, Approval>,
     instructions: Option<String>,
     writable_roots: Vec<String>,
+    mcp_servers: Vec<McpServer>,
 }
 
 fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
@@ -163,6 +164,7 @@ impl Bridge {
             approvals: HashMap::new(),
             instructions: None,
             writable_roots: Vec::new(),
+            mcp_servers: Vec::new(),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -183,6 +185,12 @@ impl Bridge {
     /// `thread/start` and `thread/resume`.
     pub fn set_instructions(&mut self, instructions: Option<String>) {
         self.instructions = instructions;
+    }
+
+    /// MCP servers to add to those of the user's Codex configuration. Sent as a
+    /// config override with `thread/start` and `thread/resume`.
+    pub fn set_mcp_servers(&mut self, servers: Vec<McpServer>) {
+        self.mcp_servers = servers;
     }
 
     /// The user sent a message. It goes out as soon as the agent can take it.
@@ -434,9 +442,18 @@ impl Bridge {
         if let Some(model) = &self.model {
             params["model"] = json!(model);
         }
+        let mut config = serde_json::Map::new();
         if !self.writable_roots.is_empty() {
-            params["config"] =
-                json!({"sandbox_workspace_write": {"writable_roots": self.writable_roots}});
+            config.insert(
+                "sandbox_workspace_write".into(),
+                json!({"writable_roots": self.writable_roots}),
+            );
+        }
+        if !self.mcp_servers.is_empty() {
+            config.insert("mcp_servers".into(), mcp_servers(&self.mcp_servers));
+        }
+        if !config.is_empty() {
+            params["config"] = Value::Object(config);
         }
         match &self.resume {
             Some(thread) => {
@@ -616,6 +633,29 @@ impl LineBridge for Bridge {
     }
 }
 
+/// The `mcp_servers` table of Codex's configuration for qcc's servers. Codex
+/// merges it into the user's own.
+fn mcp_servers(servers: &[McpServer]) -> Value {
+    let pairs = |pairs: &[(String, String)]| -> serde_json::Map<String, Value> {
+        pairs.iter().map(|(name, value)| (name.clone(), json!(value))).collect()
+    };
+    let servers: serde_json::Map<String, Value> = servers
+        .iter()
+        .map(|server| {
+            let config = match &server.transport {
+                McpTransport::Stdio(stdio) => {
+                    json!({"command": stdio.command, "args": stdio.args, "env": pairs(&stdio.env)})
+                }
+                McpTransport::Http(http) => {
+                    json!({"url": http.url, "http_headers": pairs(&http.headers)})
+                }
+            };
+            (server.name.clone(), config)
+        })
+        .collect();
+    Value::Object(servers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -670,6 +710,43 @@ mod tests {
         assert_eq!(
             start["params"]["config"],
             json!({"sandbox_workspace_write": {"writable_roots": ["/api", "/web"]}})
+        );
+    }
+
+    #[test]
+    fn mcp_servers_are_a_config_override() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        bridge.set_writable_roots(vec!["/api".into()]);
+        bridge.set_mcp_servers(vec![
+            McpServer {
+                name: "docs".into(),
+                transport: McpTransport::Stdio(McpStdio {
+                    command: "npx".into(),
+                    args: vec!["docs-mcp".into()],
+                    env: vec![("TOKEN".into(), "t".into())],
+                }),
+            },
+            McpServer {
+                name: "web".into(),
+                transport: McpTransport::Http(McpHttp {
+                    url: "https://example.com/mcp".into(),
+                    headers: vec![("Authorization".into(), "Bearer x".into())],
+                }),
+            },
+        ]);
+        let initialized = bridge.on_line(r#"{"id":1,"result":{}}"#);
+        assert_eq!(methods(&initialized), ["initialized", "thread/resume"]);
+        let resume: Value = serde_json::from_str(&initialized.writes[1]).unwrap();
+        assert_eq!(
+            resume["params"]["config"],
+            json!({
+                "sandbox_workspace_write": {"writable_roots": ["/api"]},
+                "mcp_servers": {
+                    "docs": {"command": "npx", "args": ["docs-mcp"], "env": {"TOKEN": "t"}},
+                    "web": {"url": "https://example.com/mcp",
+                            "http_headers": {"Authorization": "Bearer x"}},
+                },
+            })
         );
     }
 

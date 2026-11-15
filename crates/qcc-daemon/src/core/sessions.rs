@@ -1,6 +1,6 @@
 //! Provider sessions: starting them, calling providers and taking their deltas.
 
-use qcc_domain::{Delta, EnvironmentState, EventPayload, ProviderId, Role, ThreadId};
+use qcc_domain::{Delta, EnvironmentState, EventPayload, McpServer, ProviderId, Role, ThreadId};
 use qcc_plugin_host::{Outcome, PluginError, PluginRequest, ProviderRequest, SessionStart};
 use qcc_protocol::methods::Empty;
 use qcc_protocol::paths;
@@ -70,6 +70,7 @@ impl Core {
                 env: self.session_env(id),
                 skills: self.skills.clone(),
                 extra_dirs,
+                mcp_servers: self.mcp_servers(),
             }),
         };
         self.sessions.entry(id.clone()).or_default().starting = true;
@@ -78,6 +79,19 @@ impl Core {
             let result = plugin.call(request).await;
             let _ = commands.send(Command::SessionStartFinished { thread, resumed, result });
         });
+    }
+
+    /// The MCP servers the user set up and did not turn off.
+    fn mcp_servers(&self) -> Vec<McpServer> {
+        self.settings
+            .mcp_servers
+            .iter()
+            .filter(|(_, server)| !server.disabled)
+            .map(|(name, server)| McpServer {
+                name: name.clone(),
+                transport: server.transport.clone(),
+            })
+            .collect()
     }
 
     /// The folders of the thread's project other than the one it works in. A thread

@@ -70,3 +70,44 @@ export function activityText(thread: Thread): string {
       return detail;
   }
 }
+
+/** How far up a chain of parents is followed: a guard, not a limit anyone reaches. */
+const MAX_ANCESTORS = 32;
+
+/** The thread a family of delegated threads started from: the one the user began. */
+export function rootOf(thread: Thread, threads: Readonly<Record<string, Thread>>): Thread {
+  let current = thread;
+  for (let step = 0; step < MAX_ANCESTORS && current.parent; step++) {
+    const parent = threads[current.parent];
+    if (!parent) break;
+    current = parent;
+  }
+  return current;
+}
+
+/** The threads a thread started, oldest first. */
+export function childrenOf(threads: readonly Thread[], id: string): Thread[] {
+  return threads.filter((thread) => thread.parent === id).sort((a, b) => a.created_at - b.created_at);
+}
+
+export type TreeRow = { thread: Thread; depth: number; children: number };
+
+/**
+ * Threads as a list in which delegated threads sit under the thread that started
+ * them, in the order they were started. Threads without a parent in the list come
+ * first, newest first.
+ */
+export function threadTree(threads: readonly Thread[]): TreeRow[] {
+  const known = new Set(threads.map((thread) => thread.id));
+  const rows: TreeRow[] = [];
+  const visit = (thread: Thread, depth: number) => {
+    const children = childrenOf(threads, thread.id);
+    rows.push({ thread, depth, children: children.length });
+    if (depth < MAX_ANCESTORS) for (const child of children) visit(child, depth + 1);
+  };
+  const roots = threads
+    .filter((thread) => !thread.parent || !known.has(thread.parent))
+    .sort((a, b) => b.created_at - a.created_at);
+  for (const root of roots) visit(root, 0);
+  return rows;
+}

@@ -27,7 +27,7 @@ describe("plugin contributions", () => {
 
     const shown = (provider: string) =>
       tabs
-        .filter((tab) => tab.when?.({ thread: thread(provider), timeline: undefined, provider: undefined }) ?? true)
+        .filter((tab) => tab.when?.({ thread: thread(provider), timeline: undefined, provider: undefined, parent: undefined, children: [] }) ?? true)
         .map((tab) => tab.id);
     expect(shown("echo")).toEqual(["provider-echo/playground", "notes/thread"]);
     expect(shown("codex")).toEqual(["notes/thread"]);

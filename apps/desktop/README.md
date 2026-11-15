@@ -24,8 +24,8 @@ plugin's UI does:
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
 | A screen in the sidebar | `ui.appView` | `modules/overview` |
-| A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes` |
-| A control in the thread header | `ui.threadAction` | `modules/thread-controls` |
+| A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage` |
+| A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
 | A command (palette, shortcut) | `ui.command` | `modules/new-thread` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
@@ -75,12 +75,17 @@ that plugin only and posts the answer back.
 Adding a node type means adding a case to `NodeView` and a builder to
 `crates/qcc-plugin-sdk/src/ui.rs`.
 
+Plugin commands (`command.list`) go the same way: `modules/plugin-commands` registers
+each as a palette command, offers the ones that act on a thread in the thread header,
+and asks for their parameters in a dialog before `command.run`.
+
 Rules that keep modules independent:
 
 - A module talks to the daemon through `store().api.call(...)` and reads state with
   `useApp(...)`. It does not reach into another module's files; shared pieces go to
   `src/ui/kit`.
-- Per-thread contributions get a `ThreadContext` (`thread`, `timeline`, `provider`) and
+- Per-thread contributions get a `ThreadContext` (`thread`, `timeline`, `provider`,
+  `parent`, `children`) and
   decide with `when` whether they apply. The shell never asks which provider or which
   environment a thread has.
 - A timeline item without a renderer is shown as its data, so a new item kind is

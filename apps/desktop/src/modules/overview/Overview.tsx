@@ -27,6 +27,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const plugins = useApp((state) => state.plugins);
   const attention = attentionOf(thread);
   const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
+  const parent = useApp((state) => (thread.parent ? state.threads[thread.parent] : undefined));
   const activity = activityText(thread);
   const technical = thread.activity && !["agentMessage", "reasoning", "plan"].includes(thread.activity.kind);
   const open = () => store().select(thread.id);
@@ -55,6 +56,11 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
         <span>{provider}</span>
         {thread.model && <span>{thread.model}</span>}
         {thread.environment && <span>worktree</span>}
+        {parent && (
+          <span className="agent-parent" title="Started by another agent">
+            ↳ {parent.title ?? "a thread"}
+          </span>
+        )}
         {(thread.queued_inputs ?? 0) > 0 && <span>{plural(thread.queued_inputs ?? 0, "message")} queued</span>}
       </div>
       {attention === "failed" && <div className="agent-failed">{thread.status === "failed" ? "The session failed" : "The last turn failed"} — open the thread to see why</div>}

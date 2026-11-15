@@ -3,10 +3,21 @@
 
 import type { UiModule } from "../ui/registry";
 import { changesModule } from "./changes";
+import { lineageModule } from "./lineage";
 import { newThreadModule } from "./new-thread";
 import { overviewModule } from "./overview";
+import { pluginCommandsModule } from "./plugin-commands";
 import { pluginUiModule } from "./plugin-ui";
 import { threadControlsModule } from "./thread-controls";
 import { timelineModule } from "./timeline";
 
-export const builtinModules: UiModule[] = [overviewModule, timelineModule, changesModule, threadControlsModule, newThreadModule, pluginUiModule];
+export const builtinModules: UiModule[] = [
+  overviewModule,
+  timelineModule,
+  changesModule,
+  lineageModule,
+  threadControlsModule,
+  newThreadModule,
+  pluginUiModule,
+  pluginCommandsModule,
+];

@@ -29,6 +29,7 @@ export function App() {
   const daemon = useApp((state) => state.daemon);
   const selected = useApp((state) => state.selected);
   const error = useApp((state) => state.error);
+  const notice = useApp((state) => state.notice);
   const commands = useUi((snapshot) => snapshot.commands);
   const Dialog = useUi((snapshot) => snapshot.dialog);
   const views = useUi((snapshot) => snapshot.views);
@@ -52,6 +53,13 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [commands]);
 
+  // A notice says what just happened; it does not stay.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(store().dismissNotice, 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   return (
     <div className="app">
       <Sidebar />
@@ -67,6 +75,12 @@ export function App() {
       </main>
       {Dialog && <Dialog close={ui.closeDialog} />}
       {palette && <CommandPalette commands={commands} close={() => setPalette(false)} />}
+      {notice && !error && (
+        <div className="toast notice" role="status">
+          <span>{notice}</span>
+          <button onClick={store().dismissNotice}>Dismiss</button>
+        </div>
+      )}
       {error && (
         <div className="toast" role="alert">
           <span>{error}</span>

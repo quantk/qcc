@@ -13,6 +13,10 @@ export type ThreadContext = {
   /** Absent until the thread's events are read. */
   timeline: Timeline | undefined;
   provider: ProviderInfo | undefined;
+  /** The thread that started this one, if it is known. */
+  parent: Thread | undefined;
+  /** The threads this one started, oldest first. */
+  children: readonly Thread[];
 };
 
 /** A tab of the thread view. */

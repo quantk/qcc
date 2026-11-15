@@ -5,6 +5,8 @@ import { useSyncExternalStore } from "react";
 
 import { type Api, ApiError, type DaemonState, type Notification, codes } from "../api/api";
 import type {
+  CommandRunParams,
+  CommandRunResult,
   InteractionId,
   InteractionResolution,
   PermissionMode,
@@ -29,6 +31,8 @@ export type AppState = {
   loading: boolean;
   /** The last thing that went wrong, until dismissed. */
   error: string | null;
+  /** Something the user should hear about that is not a failure. */
+  notice: string | null;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -48,6 +52,7 @@ export class AppStore {
     timelines: {},
     loading: false,
     error: null,
+    notice: null,
   };
   private listeners = new Set<() => void>();
   private notifying = false;
@@ -196,6 +201,19 @@ export class AppStore {
   // ----- actions ------------------------------------------------------------------
 
   dismissError = () => this.set({ error: null });
+
+  notify = (notice: string) => this.set({ notice });
+
+  dismissNotice = () => this.set({ notice: null });
+
+  /** Run a plugin command. Its refusal comes back for the dialog that asked. */
+  async runCommand(params: CommandRunParams): Promise<CommandRunResult | { error: string }> {
+    try {
+      return await this.api.call("command.run", params);
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : String(error) };
+    }
+  }
 
   select = (threadId: ThreadId | null) => {
     if (threadId === this.state.selected) return;

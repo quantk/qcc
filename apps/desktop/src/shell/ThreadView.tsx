@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
 
 import type { ThreadId } from "../api/protocol.gen";
-import { attentionLabel, attentionOf, findProvider } from "../state/selectors";
+import { attentionLabel, attentionOf, childrenOf, findProvider } from "../state/selectors";
 import { useApp } from "../state/store";
 import { type ThreadContext, useUi } from "../ui/registry";
 import { tailPath } from "../util/format";
 
 /** The frame of one thread. What fills it — tabs and header controls — is contributed. */
 export function ThreadView({ threadId }: { threadId: ThreadId }) {
-  const thread = useApp((state) => state.threads[threadId]);
+  const threads = useApp((state) => state.threads);
+  const thread = threads[threadId];
   const timeline = useApp((state) => state.timelines[threadId]);
   const loading = useApp((state) => state.loading);
   const plugins = useApp((state) => state.plugins);
@@ -17,9 +18,11 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
   const [chosen, setChosen] = useState<string | null>(null);
 
   const provider = useMemo(() => (thread ? findProvider(plugins, thread.provider) : undefined), [plugins, thread]);
+  const children = useMemo(() => childrenOf(Object.values(threads), threadId), [threads, threadId]);
   if (!thread) return <div className="empty">{loading ? "Loading…" : "This thread is not known to the daemon."}</div>;
 
-  const context: ThreadContext = { thread, timeline, provider };
+  const parent = thread.parent ? threads[thread.parent] : undefined;
+  const context: ThreadContext = { thread, timeline, provider, parent, children };
   const tabs = allTabs.filter((tab) => tab.when?.(context) ?? true);
   const actions = allActions.filter((action) => action.when?.(context) ?? true);
   const tab = tabs.find((candidate) => candidate.id === chosen) ?? tabs[0];

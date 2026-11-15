@@ -15,7 +15,8 @@ use std::time::{Duration, Instant};
 use base64::Engine as _;
 use qcc_client::{Client, ClientError};
 use qcc_protocol::jsonrpc::RpcError;
-use qcc_protocol::paths;
+use qcc_protocol::methods::{DaemonStatus, Empty};
+use qcc_protocol::{PROTOCOL_VERSION, paths};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::http::{Response, StatusCode, header};
@@ -30,6 +31,8 @@ const NOTIFICATION_EVENT: &str = "daemon-notification";
 const RETRY_EVERY: Duration = Duration::from_millis(500);
 /// A daemon that keeps dying is not restarted in a tight loop.
 const LAUNCH_EVERY: Duration = Duration::from_secs(15);
+/// How often a daemon of another build is asked again, in case it was replaced.
+const MISMATCH_RETRY_EVERY: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
@@ -147,6 +150,24 @@ fn launch_daemon() -> std::io::Result<()> {
     Ok(())
 }
 
+/// Why the daemon on the socket cannot serve this app, if it cannot.
+async fn protocol_mismatch(client: &Client) -> Option<String> {
+    let status = match client.call::<DaemonStatus>(Empty {}).await {
+        Ok(status) => status,
+        Err(error) => return Some(format!("qccd did not say which version it is: {error}")),
+    };
+    (status.protocol != PROTOCOL_VERSION).then(|| {
+        format!(
+            "the running qccd (pid {pid}, version {version}) speaks protocol {theirs}, this app \
+             needs {PROTOCOL_VERSION}. Stop it (`kill {pid}`; agents it runs are interrupted) \
+             and the app starts the new one",
+            pid = status.pid,
+            version = status.version,
+            theirs = status.protocol,
+        )
+    })
+}
+
 /// Hold a connection for as long as the app runs, starting the daemon when there
 /// is none to connect to.
 async fn keep_connected(app: AppHandle, daemon: Arc<Daemon>) {
@@ -154,6 +175,13 @@ async fn keep_connected(app: AppHandle, daemon: Arc<Daemon>) {
     loop {
         match Client::connect_raw(&daemon.socket).await {
             Ok((client, mut notifications)) => {
+                // A daemon from another build answers, but not with the methods this
+                // app calls. It is not restarted from here: it may be running agents.
+                if let Some(error) = protocol_mismatch(&client).await {
+                    daemon.set_state(&app, DaemonState::Disconnected { error });
+                    tokio::time::sleep(MISMATCH_RETRY_EVERY).await;
+                    continue;
+                }
                 *daemon.client.lock().unwrap() = Some(client);
                 let socket = daemon.socket.display().to_string();
                 daemon.set_state(&app, DaemonState::Connected { socket });

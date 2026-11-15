@@ -4,6 +4,7 @@
 import type { UiModule } from "../ui/registry";
 import { changesModule } from "./changes";
 import { lineageModule } from "./lineage";
+import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
 import { overviewModule } from "./overview";
 import { pluginCommandsModule } from "./plugin-commands";
@@ -22,6 +23,7 @@ export const builtinModules: UiModule[] = [
   threadControlsModule,
   threadMenuModule,
   newThreadModule,
+  navigationModule,
   projectsModule,
   pluginUiModule,
   pluginCommandsModule,

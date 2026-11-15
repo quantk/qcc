@@ -1,4 +1,4 @@
-import { FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { activityText, attentionLabel, attentionOf, findProvider, threadGroups, threadTree } from "../state/selectors";
@@ -18,6 +18,7 @@ export function Sidebar() {
   const threads = useApp((state) => state.threads);
   const plugins = useApp((state) => state.allPlugins);
   const projects = useApp((state) => state.projects);
+  const history = useApp((state) => state.history);
   const seen = useApp((state) => state.seen);
   const selected = useApp((state) => state.selected);
   const connected = useApp((state) => state.daemon.status === "connected");
@@ -37,6 +38,29 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-head">
         <span className="brand">qcc</span>
+        <span className="ml-2 flex gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Back"
+            title="Back (Alt+Left)"
+            disabled={history.index === 0}
+            onClick={() => store().navigate(-1)}
+          >
+            <ArrowLeftIcon />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Forward"
+            title="Forward (Alt+Right)"
+            disabled={history.index >= history.places.length - 1}
+            onClick={() => store().navigate(1)}
+          >
+            <ArrowRightIcon />
+          </Button>
+        </span>
+        <span className="flex-1" />
         {newThread && (
           <Button size="sm" disabled={!connected} onClick={newThread.run} title={newThread.shortcut}>
             <PlusIcon /> {newThread.title}

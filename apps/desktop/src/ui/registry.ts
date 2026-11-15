@@ -231,6 +231,8 @@ export function useUi<T>(select: (snapshot: Snapshot) => T): T {
 const NAMED_KEYS: Record<string, readonly string[]> = {
   plus: ["+", "="],
   minus: ["-", "_"],
+  left: ["arrowleft"],
+  right: ["arrowright"],
 };
 
 /** Whether a keyboard event is the shortcut a command asks for. */

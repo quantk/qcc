@@ -23,6 +23,7 @@ import type {
   ThreadId,
   ThreadSpawnParams,
 } from "../api/protocol.gen";
+import { type History, type Place, startHistory, step, visit } from "./history";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { visiblePlugins } from "./selectors";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
@@ -90,6 +91,8 @@ export type AppState = {
   settings: SettingsResult | null;
   /** How far the user has seen each thread; see `reads.ts`. */
   seen: Seen;
+  /** Where the user has been, for back and forward. */
+  history: History;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -116,6 +119,7 @@ export class AppStore {
     projects: [],
     settings: null,
     seen: readSeen() ?? {},
+    history: startHistory,
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -346,18 +350,32 @@ export class AppStore {
   };
 
   select = (threadId: ThreadId | null) => {
+    this.go({ thread: threadId, view: this.state.view }, true);
+  };
+
+  /** Leave the selected thread for one of the app's own screens. */
+  openView = (view: string) => {
+    this.go({ thread: null, view }, true);
+  };
+
+  /** Go back (`-1`) or forward (`1`) through the places visited. */
+  navigate = (by: -1 | 1) => {
+    const next = step(this.state.history, by);
+    if (!next) return;
+    this.set({ history: next.history });
+    this.go(next.place, false);
+  };
+
+  private go(place: Place, record: boolean) {
+    if (record) this.set({ history: visit(this.state.history, place) });
+    if (place.view !== this.state.view) this.set({ view: place.view });
+    const threadId = place.thread;
     if (threadId === this.state.selected) return;
     this.set({ selected: threadId, loading: false });
     this.seeSelected();
     if (threadId === null) this.unfollow();
     else if (this.state.daemon.status === "connected") void this.follow(threadId);
-  };
-
-  /** Leave the selected thread for one of the app's own screens. */
-  openView = (view: string) => {
-    this.select(null);
-    this.set({ view });
-  };
+  }
 
   async spawn(params: ThreadSpawnParams): Promise<Thread | null> {
     const result = await this.attempt(() => this.api.call("thread.spawn", params));

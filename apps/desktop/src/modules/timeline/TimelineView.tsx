@@ -2,7 +2,7 @@ import { memo, useLayoutEffect, useRef } from "react";
 
 import type { Item, Thread } from "../../api/protocol.gen";
 import type { Entry, Timeline } from "../../state/timeline";
-import { DataTrace, InteractionPrompt } from "../../ui/kit";
+import { DataTrace, InteractionOutcome, InteractionPrompt } from "../../ui/kit";
 import { itemKey, useUi } from "../../ui/registry";
 
 /** An item nobody registered a renderer for: shown as the data it is. */
@@ -18,20 +18,7 @@ function ItemView({ item, thread }: { item: Item; thread: Thread }) {
 function InteractionView({ thread, entry }: { thread: Thread; entry: Extract<Entry, { kind: "interaction" }> }) {
   const { request, resolution } = entry;
   if (!resolution) return <InteractionPrompt threadId={thread.id} id={entry.id} request={request} />;
-  const options = request.options ?? [];
-  const answer =
-    resolution.type === "selected"
-      ? (options.find((option) => option.id === resolution.option_id)?.label ?? resolution.option_id)
-      : resolution.type === "text"
-        ? resolution.text
-        : "not answered";
-  return (
-    <div className="interaction resolved">
-      <span className="label">{request.type === "approval" ? "Approval" : "Question"}</span>
-      <span className="one-line">{request.type === "approval" ? request.title : request.question}</span>
-      <span className={`tag${resolution.type === "cancelled" ? " interrupted" : ""}`}>{answer}</span>
-    </div>
-  );
+  return <InteractionOutcome request={request} resolution={resolution} />;
 }
 
 const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; entry: Entry }) {

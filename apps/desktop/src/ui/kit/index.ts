@@ -4,5 +4,5 @@ export { DiffView, fileAnchor } from "./DiffView";
 export { Markdown } from "./Markdown";
 export { CommandTrace, DataTrace, ItemTrace, ReasoningTrace, ToolTrace } from "./AgentTrace";
 export { StatusMark } from "./StatusMark";
-export { InteractionPrompt } from "./InteractionPrompt";
+export { InteractionOutcome, InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";

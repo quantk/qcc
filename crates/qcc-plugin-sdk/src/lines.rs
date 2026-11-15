@@ -10,17 +10,21 @@ impl LineBuffer {
     /// Add a chunk and return the lines it completed, without their terminators.
     /// Invalid UTF-8 is replaced rather than dropped; empty lines are skipped.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        // What is pending already holds no newline: only the new chunk is searched,
+        // so a long line costs its length once, not once per chunk.
+        let mut searched = self.pending.len();
         self.pending.extend_from_slice(chunk);
         let mut lines = Vec::new();
         let mut start = 0;
-        while let Some(offset) = self.pending[start..].iter().position(|byte| *byte == b'\n') {
-            let end = start + offset;
+        while let Some(offset) = self.pending[searched..].iter().position(|byte| *byte == b'\n') {
+            let end = searched + offset;
             let line = String::from_utf8_lossy(&self.pending[start..end]);
             let line = line.trim_end_matches('\r');
             if !line.trim().is_empty() {
                 lines.push(line.to_owned());
             }
             start = end + 1;
+            searched = start;
         }
         self.pending.drain(..start);
         lines

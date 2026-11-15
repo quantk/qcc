@@ -63,6 +63,7 @@ pub mod bindings {
 #[cfg(feature = "jsonrpc")]
 pub mod jsonrpc;
 pub mod lines;
+pub mod stdio;
 #[cfg(feature = "ui")]
 pub mod ui;
 

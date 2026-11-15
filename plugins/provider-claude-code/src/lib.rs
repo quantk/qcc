@@ -6,38 +6,16 @@
 
 pub mod bridge;
 
-use std::collections::HashMap;
-
-use qcc_plugin_sdk::lines::{LineBuffer, Tail};
 use qcc_plugin_sdk::prelude::*;
+use qcc_plugin_sdk::stdio::Sessions;
 
-use bridge::{Bridge, Output};
+use bridge::Bridge;
 
 const PROGRAM: &str = "claude";
 
 #[derive(Default)]
 struct ClaudeCode {
-    sessions: HashMap<String, Session>,
-}
-
-struct Session {
-    process: u64,
-    stdout: LineBuffer,
-    stderr: Tail,
-    bridge: Bridge,
-}
-
-impl Session {
-    /// Carry out what the bridge decided: write to the agent, report to the core.
-    fn apply(&mut self, thread: &str, output: Output) -> Result<(), String> {
-        for line in output.writes {
-            process::write_stdin(self.process, format!("{line}\n").as_bytes())?;
-        }
-        if output.deltas.is_empty() {
-            return Ok(());
-        }
-        deltas::emit(thread, &output.deltas)
-    }
+    sessions: Sessions<Bridge>,
 }
 
 impl Provider for ClaudeCode {
@@ -60,9 +38,6 @@ impl Provider for ClaudeCode {
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
-        if let Some(old) = self.sessions.remove(&start.thread) {
-            let _ = process::kill(old.process);
-        }
         let mut args: Vec<String> = [
             "-p",
             "--input-format",
@@ -103,55 +78,48 @@ impl Provider for ClaudeCode {
             cwd: Some(start.cwd),
         })?;
 
-        let mut session = Session {
-            process,
-            stdout: LineBuffer::default(),
-            stderr: Tail::new(4096),
-            bridge: Bridge::new(start.resume.clone()),
-        };
+        self.sessions.insert(&start.thread, process, Bridge::new(start.resume.clone()));
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {
-            let output = session.bridge.prompt(prompt);
-            session.apply(&start.thread, output)?;
+            let output = self.sessions.bridge(&start.thread)?.prompt(prompt);
+            self.sessions.apply(&start.thread, output)?;
         }
-        self.sessions.insert(start.thread, session);
         // A new session is named by the agent's first message; the bridge reports it
         // with `session-identity` when it arrives.
         Ok(SessionStarted { provider_session: start.resume })
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
-        let output = session.bridge.prompt(&input.text);
-        session.apply(&input.thread, output)
+        let output = self.sessions.bridge(&input.thread)?.prompt(&input.text);
+        self.sessions.apply(&input.thread, output)
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let session = self.sessions.get_mut(&input.thread).ok_or("the session is not running")?;
-        let output = session.bridge.steer(&input.text);
-        session.apply(&input.thread, output)
+        let output = self.sessions.bridge(&input.thread)?.steer(&input.text);
+        self.sessions.apply(&input.thread, output)
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
-        let Some(session) = self.sessions.get_mut(&thread) else {
+        let Ok(bridge) = self.sessions.bridge(&thread) else {
             return Ok(());
         };
-        let output = session.bridge.interrupt();
-        session.apply(&thread, output)
+        let output = bridge.interrupt();
+        self.sessions.apply(&thread, output)
     }
 
     fn stop(&mut self, thread: String) -> Result<(), String> {
-        let Some(mut session) = self.sessions.remove(&thread) else {
+        let Some(mut bridge) = self.sessions.kill(&thread) else {
             return Ok(());
         };
-        let _ = process::kill(session.process);
-        deltas::emit(&thread, &session.bridge.stopped())
+        deltas::emit(&thread, &bridge.stopped())
     }
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
-        let session = self.sessions.get_mut(&answer.thread).ok_or("the session is not running")?;
-        let output = session.bridge.resolve(&answer.request_id, &answer.resolution)?;
-        session.apply(&answer.thread, output)
+        let output = self
+            .sessions
+            .bridge(&answer.thread)?
+            .resolve(&answer.request_id, &answer.resolution)?;
+        self.sessions.apply(&answer.thread, output)
     }
 
     fn models(&mut self) -> Result<Vec<ModelInfo>, String> {
@@ -168,43 +136,7 @@ impl Plugin for ClaudeCode {
     }
 
     fn on_process(&mut self, event: ProcessEvent) {
-        let process = match &event {
-            ProcessEvent::Stdout { process, .. }
-            | ProcessEvent::Stderr { process, .. }
-            | ProcessEvent::Exit { process, .. } => *process,
-        };
-        // A process whose session was stopped has nobody to report to.
-        let Some(thread) = self
-            .sessions
-            .iter()
-            .find(|(_, session)| session.process == process)
-            .map(|(thread, _)| thread.clone())
-        else {
-            return;
-        };
-        let result = match event {
-            ProcessEvent::Stdout { data, .. } => {
-                let session = self.sessions.get_mut(&thread).expect("found above");
-                let mut result = Ok(());
-                for line in session.stdout.push(&data) {
-                    let output = session.bridge.on_line(&line);
-                    result = result.and(session.apply(&thread, output));
-                }
-                result
-            }
-            ProcessEvent::Stderr { data, .. } => {
-                self.sessions.get_mut(&thread).expect("found above").stderr.push(&data);
-                Ok(())
-            }
-            ProcessEvent::Exit { code, .. } => {
-                let mut session = self.sessions.remove(&thread).expect("found above");
-                let ending = session.bridge.exited(code, session.stderr.last_line());
-                deltas::emit(&thread, &ending)
-            }
-        };
-        if let Err(error) = result {
-            log::error(format!("thread {thread}: {error}"));
-        }
+        self.sessions.on_process(event);
     }
 }
 

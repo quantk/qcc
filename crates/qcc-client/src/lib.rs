@@ -35,7 +35,9 @@ pub enum ClientError {
     Protocol(#[from] serde_json::Error),
 }
 
-type Pending = Arc<Mutex<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>;
+/// Calls waiting for their answer; `None` once the connection is gone, so a call
+/// made after that fails at once instead of waiting for an answer that cannot come.
+type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>>;
 type Subscriptions = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ThreadEvent>>>>;
 
 /// A notification as the daemon sent it.
@@ -78,7 +80,7 @@ impl Client {
         let (reader, writer) = stream.into_split();
         let client = Arc::new(Self {
             writer: tokio::sync::Mutex::new(writer),
-            pending: Arc::default(),
+            pending: Arc::new(Mutex::new(Some(HashMap::new()))),
             subscriptions: Arc::default(),
             next_id: AtomicU64::new(1),
         });
@@ -92,7 +94,8 @@ impl Client {
                         let Some(id) = response.id.as_u64() else {
                             continue;
                         };
-                        if let Some(reply) = pending.lock().unwrap().remove(&id) {
+                        let reply = pending.lock().unwrap().as_mut().and_then(|p| p.remove(&id));
+                        if let Some(reply) = reply {
                             let result = match response.error {
                                 Some(error) => Err(error),
                                 None => Ok(response.result.unwrap_or(Value::Null)),
@@ -126,7 +129,7 @@ impl Client {
                 }
             }
             // Wake everyone waiting: dropping the senders reports the disconnect.
-            pending.lock().unwrap().clear();
+            pending.lock().unwrap().take();
             subscriptions.lock().unwrap().clear();
         });
         Ok(client)
@@ -142,13 +145,18 @@ impl Client {
     pub async fn call_raw(&self, method: &str, params: Value) -> Result<Value, ClientError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (reply, receiver) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, reply);
+        match self.pending.lock().unwrap().as_mut() {
+            Some(pending) => pending.insert(id, reply),
+            None => return Err(ClientError::Disconnected),
+        };
 
         let request = Request::new(id, method, params);
         let mut line = serde_json::to_string(&request)?;
         line.push('\n');
         if let Err(error) = self.writer.lock().await.write_all(line.as_bytes()).await {
-            self.pending.lock().unwrap().remove(&id);
+            if let Some(pending) = self.pending.lock().unwrap().as_mut() {
+                pending.remove(&id);
+            }
             return Err(error.into());
         }
 
@@ -215,7 +223,8 @@ impl EventStream {
         }
     }
 
-    /// Stop following. Dropping the stream does the same lazily.
+    /// Stop following, and wait until the daemon has stopped sending. Dropping the
+    /// stream stops following too, without waiting.
     pub async fn close(mut self) {
         if let Some((subscription, _)) = self.live.take() {
             self.client.subscriptions.lock().unwrap().remove(&subscription);
@@ -229,8 +238,17 @@ impl EventStream {
 
 impl Drop for EventStream {
     fn drop(&mut self) {
-        if let Some((subscription, _)) = &self.live {
-            self.client.subscriptions.lock().unwrap().remove(subscription);
+        let Some((subscription, _)) = self.live.take() else { return };
+        self.client.subscriptions.lock().unwrap().remove(&subscription);
+        // Otherwise the daemon keeps sending this thread's events down the connection
+        // for as long as it stays open. Outside a runtime there is nobody to ask; the
+        // events are then dropped here, unread.
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let client = self.client.clone();
+            runtime.spawn(async move {
+                let params = ThreadUnsubscribeParams { subscription };
+                let _ = client.call::<ThreadUnsubscribe>(params).await;
+            });
         }
     }
 }

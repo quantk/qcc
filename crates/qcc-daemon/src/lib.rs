@@ -67,17 +67,28 @@ pub async fn serve(
 
     let (commands, queue) = tokio::sync::mpsc::unbounded_channel();
     let core = core::Core::start(&config, commands.clone())?;
-    let core_task = tokio::spawn(core.run(queue));
+    let mut core_task = tokio::spawn(core.run(queue));
     tracing::info!(socket = %config.socket.display(), "qccd is listening");
     ready();
 
-    tokio::select! {
-        () = server::accept(listener, commands.clone()) => {}
-        () = shutdown => tracing::info!("shutting down"),
-    }
+    // The core ending on its own (a journal it cannot write, a panic) stops the
+    // daemon too: without it every connection would be refused anyway.
+    let finished = tokio::select! {
+        () = server::accept(listener, commands.clone()) => None,
+        () = shutdown => {
+            tracing::info!("shutting down");
+            None
+        }
+        finished = &mut core_task => Some(finished),
+    };
 
-    let _ = commands.send(core::Command::Shutdown);
-    let result = core_task.await.context("core task panicked")?;
+    let finished = match finished {
+        Some(finished) => finished,
+        None => {
+            let _ = commands.send(core::Command::Shutdown);
+            core_task.await
+        }
+    };
     let _ = std::fs::remove_file(&config.socket);
-    result
+    finished.context("core task panicked")?
 }

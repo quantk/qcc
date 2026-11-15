@@ -1,13 +1,13 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeSet, HashMap};
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use qcc_domain::ThreadId;
 use tokio::sync::oneshot;
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
-use wasmtime::{Engine, Store, StoreLimits, StoreLimitsBuilder};
+use wasmtime::{Engine, ResourceLimiter, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 use crate::api::{Contribution, Outcome, PluginRequest, ThreadsAnswer, ThreadsCall};
@@ -21,9 +21,26 @@ use crate::services::{ProcessHandle, ProcessOutput, ProcessSink, Services, Spawn
 
 /// How long one `handle` call may run before the plugin is considered hung.
 const HANDLE_BUDGET: Duration = Duration::from_secs(10);
+/// Linear memory of all the plugin's instances together.
 const MEMORY_LIMIT_BYTES: usize = 256 * 1024 * 1024;
+/// Elements of all the plugin's tables together.
+const TABLE_ELEMENTS_LIMIT: usize = 1_000_000;
+/// A component is a handful of core instances, memories and tables (its own code, the
+/// WASI adapter, shims); these leave room for that and nothing like wasmtime's
+/// default of ten thousand each.
+const MAX_INSTANCES: usize = 64;
+const MAX_MEMORIES: usize = 16;
+const MAX_TABLES: usize = 64;
 const MAX_TIMERS: usize = 1024;
 const MAX_PROCESSES: usize = 64;
+/// Process output queued for the plugin and not yet handled. Past this a process
+/// waits until the plugin catches up; its pipe then fills and the child waits too.
+const MAX_OUTPUT_IN_FLIGHT: usize = 8 * 1024 * 1024;
+/// Callers a plugin may keep waiting at once.
+const MAX_DEFERRED: usize = 1024;
+/// Answers a plugin may give inside one call for requests that call defers. More
+/// than one is already unusual; the cap keeps a plugin from piling host memory up.
+const MAX_EARLY: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PluginError {
@@ -44,6 +61,8 @@ pub(crate) enum Message {
     },
     /// Something the host itself produced: process output or exit.
     Internal(wit::Event),
+    /// Answered once everything queued before it is handled.
+    Flush(oneshot::Sender<()>),
     Shutdown,
 }
 
@@ -107,6 +126,16 @@ impl PluginHandle {
         self.send(request)?.blocking_recv().map_err(|_| PluginError::Gone)?.map(convert::outcome)
     }
 
+    /// Wait until the plugin has handled everything queued so far, its own process
+    /// output and timers included. For callers that must see a quiet plugin, like
+    /// a deterministic test.
+    pub fn flush_blocking(&self) {
+        let (done, wait) = oneshot::channel();
+        if self.inner.tx.send(Message::Flush(done)).is_ok() {
+            let _ = wait.blocking_recv();
+        }
+    }
+
     fn send(
         &self,
         request: PluginRequest,
@@ -135,7 +164,7 @@ pub(crate) fn spawn(
     let state = State {
         wasi: WasiCtx::builder().inherit_stderr().build(),
         table: ResourceTable::new(),
-        limits: StoreLimitsBuilder::new().memory_size(MEMORY_LIMIT_BYTES).build(),
+        limits: Limits::default(),
         plugin_id: manifest.id.clone(),
         permissions: permissions.clone(),
         services,
@@ -146,6 +175,7 @@ pub(crate) fn spawn(
         next_process: 0,
         deferred: HashMap::new(),
         early: HashMap::new(),
+        output: Arc::default(),
     };
     let thread = std::thread::Builder::new()
         .name(format!("plugin-{}", manifest.id))
@@ -178,7 +208,7 @@ pub(crate) fn spawn(
 struct State {
     wasi: WasiCtx,
     table: ResourceTable,
-    limits: StoreLimits,
+    limits: Limits,
     plugin_id: String,
     permissions: Permissions,
     services: Services,
@@ -194,6 +224,40 @@ struct State {
     /// Answers given during the very `handle` call that defers them: the token is
     /// not registered until that call returns. Emptied after every call.
     early: HashMap<u64, Result<wit::Outcome, PluginError>>,
+    /// Process output sent to the actor's queue and not handled yet.
+    output: Arc<OutputBudget>,
+}
+
+/// Bytes of process output on their way to the plugin, shared by the threads that
+/// read the processes and the actor that hands the output on.
+#[derive(Debug, Default)]
+struct OutputBudget {
+    state: Mutex<(usize, bool)>,
+    drained: Condvar,
+}
+
+impl OutputBudget {
+    /// Wait for room for `bytes` more, then take it. Returns at once when the plugin
+    /// is gone. A chunk larger than the whole budget still goes alone.
+    fn take(&self, bytes: usize) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        while !state.1 && state.0 > 0 && state.0 + bytes > MAX_OUTPUT_IN_FLIGHT {
+            state = self.drained.wait(state).unwrap_or_else(|p| p.into_inner());
+        }
+        state.0 += bytes;
+    }
+
+    fn give_back(&self, bytes: usize) {
+        let mut state = self.state.lock().unwrap_or_else(|p| p.into_inner());
+        state.0 = state.0.saturating_sub(bytes);
+        self.drained.notify_all();
+    }
+
+    /// Nobody will hand output on any more: let every waiting reader go.
+    fn close(&self) {
+        self.state.lock().unwrap_or_else(|p| p.into_inner()).1 = true;
+        self.drained.notify_all();
+    }
 }
 
 type Reply = oneshot::Sender<Result<wit::Outcome, PluginError>>;
@@ -202,6 +266,60 @@ impl State {
     fn denied(&self, permission: &str) -> String {
         tracing::warn!(plugin = %self.plugin_id, permission, "permission denied");
         format!("permission denied: {permission}")
+    }
+}
+
+/// Resource limits on everything a plugin can grow inside its store.
+///
+/// Memories and tables are counted together, not each on its own: a component may
+/// hold several, and a cap per memory would multiply by their number. Nothing is
+/// ever freed before the store goes, so the totals only grow.
+#[derive(Debug, Default)]
+struct Limits {
+    memory: usize,
+    table_elements: usize,
+}
+
+impl Limits {
+    fn grow(used: &mut usize, current: usize, desired: usize, limit: usize) -> bool {
+        let total = (*used - current.min(*used)).saturating_add(desired);
+        if total > limit {
+            return false;
+        }
+        *used = total;
+        true
+    }
+}
+
+impl ResourceLimiter for Limits {
+    fn memory_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        _maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        Ok(Self::grow(&mut self.memory, current, desired, MEMORY_LIMIT_BYTES))
+    }
+
+    fn table_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        _maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
+        Ok(Self::grow(&mut self.table_elements, current, desired, TABLE_ELEMENTS_LIMIT))
+    }
+
+    fn instances(&self) -> usize {
+        MAX_INSTANCES
+    }
+
+    fn tables(&self) -> usize {
+        MAX_TABLES
+    }
+
+    fn memories(&self) -> usize {
+        MAX_MEMORIES
     }
 }
 
@@ -263,17 +381,44 @@ impl Actor {
                         let _ = reply.send(answer);
                     }
                 },
-                Message::Internal(event) => self.handle_internal(&event),
+                Message::Internal(event) => {
+                    let bytes = match &event {
+                        wit::Event::ProcessStdout(output) | wit::Event::ProcessStderr(output) => {
+                            output.data.len()
+                        }
+                        _ => 0,
+                    };
+                    self.handle_internal(&event);
+                    if bytes > 0 {
+                        self.store.data().output.give_back(bytes);
+                    }
+                }
+                Message::Flush(done) => {
+                    let _ = done.send(());
+                }
                 Message::Shutdown => break,
             }
         }
+        self.store.data().output.close();
     }
 
     /// The plugin will answer later. Park the caller until it does.
     fn defer(&mut self, token: u64, reply: Reply) {
         let state = self.store.data_mut();
-        if let Some(answer) = state.early.remove(&token) {
+        // Only the answer to this very call can be waiting here; any other one names a
+        // token nobody deferred, and kept it could answer a later, unrelated call.
+        let early = state.early.remove(&token);
+        state.early.clear();
+        if let Some(answer) = early {
             let _ = reply.send(answer);
+            return;
+        }
+        // Callers that gave up waiting (a daemon-side timeout) free their place.
+        state.deferred.retain(|_, reply| !reply.is_closed());
+        if state.deferred.len() >= MAX_DEFERRED {
+            let _ = reply.send(Err(PluginError::Rejected(format!(
+                "plugin keeps more than {MAX_DEFERRED} requests waiting"
+            ))));
         } else if let Entry::Vacant(slot) = state.deferred.entry(token) {
             slot.insert(reply);
         } else {
@@ -283,13 +428,18 @@ impl Actor {
         }
     }
 
+    /// Fire the timers that are due now. Ones the plugin starts meanwhile wait for the
+    /// next round, even with no delay: a plugin restarting a zero timer from
+    /// `on_timer` must not keep the actor from its queue.
     fn fire_due_timers(&mut self) {
+        let now = Instant::now();
+        // Timer ids only grow, so this also leaves out a new timer due at `now` itself.
+        let newest = self.store.data().next_timer;
         loop {
-            let now = Instant::now();
             let Some(&(deadline, timer)) = self.store.data().timers.first() else {
                 return;
             };
-            if deadline > now {
+            if deadline > now || timer > newest {
                 return;
             }
             self.store.data_mut().timers.remove(&(deadline, timer));
@@ -332,6 +482,7 @@ impl Actor {
                 state.processes.clear();
                 state.timers.clear();
                 state.early.clear();
+                state.output.close();
                 for (_, reply) in state.deferred.drain() {
                     let _ = reply.send(Err(PluginError::Crashed(reason.clone())));
                 }
@@ -377,6 +528,11 @@ impl imports::completions::Host for State {
                 let _ = reply.send(answer);
             }
             None => {
+                if self.early.len() >= MAX_EARLY && !self.early.contains_key(&token) {
+                    return Err(format!(
+                        "more than {MAX_EARLY} answers to requests not yet deferred"
+                    ));
+                }
                 self.early.insert(token, answer);
             }
         }
@@ -456,12 +612,15 @@ impl imports::process::Host for State {
         self.next_process += 1;
         let process = self.next_process;
         let tx = self.tx.clone();
+        let budget = self.output.clone();
         let sink: ProcessSink = Arc::new(move |output| {
             let event = match output {
                 ProcessOutput::Stdout(data) => {
+                    budget.take(data.len());
                     wit::Event::ProcessStdout(wit::ProcessOutput { process, data })
                 }
                 ProcessOutput::Stderr(data) => {
+                    budget.take(data.len());
                     wit::Event::ProcessStderr(wit::ProcessOutput { process, data })
                 }
                 ProcessOutput::Exit(code) => {
@@ -542,5 +701,46 @@ impl imports::threads::Host for State {
 impl State {
     fn process(&mut self, process: u64) -> Result<&mut Box<dyn ProcessHandle>, String> {
         self.processes.get_mut(&process).ok_or_else(|| format!("no process {process}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_output_waits_for_the_plugin_to_catch_up() {
+        let budget = Arc::new(OutputBudget::default());
+        budget.take(MAX_OUTPUT_IN_FLIGHT);
+        let reader = {
+            let budget = budget.clone();
+            std::thread::spawn(move || budget.take(1))
+        };
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(!reader.is_finished(), "a full budget let more output through");
+        budget.give_back(1);
+        reader.join().unwrap();
+
+        // A plugin that goes away releases everyone still waiting.
+        let blocked = {
+            let budget = budget.clone();
+            std::thread::spawn(move || budget.take(MAX_OUTPUT_IN_FLIGHT))
+        };
+        budget.close();
+        blocked.join().unwrap();
+    }
+
+    #[test]
+    fn memory_is_limited_across_all_memories_of_a_plugin() {
+        let mut limits = Limits::default();
+        let half = MEMORY_LIMIT_BYTES / 2;
+        assert!(limits.memory_growing(0, half, None).unwrap());
+        assert!(limits.memory_growing(0, half, None).unwrap(), "a second memory fits in the rest");
+        assert!(!limits.memory_growing(0, 1, None).unwrap(), "a third one does not");
+        // Growing an existing memory counts only what it adds.
+        let mut limits = Limits::default();
+        assert!(limits.memory_growing(0, half, None).unwrap());
+        assert!(limits.memory_growing(half, MEMORY_LIMIT_BYTES, None).unwrap());
+        assert!(!limits.memory_growing(MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES + 1, None).unwrap());
     }
 }

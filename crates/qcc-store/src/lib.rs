@@ -18,7 +18,9 @@ pub enum StoreError {
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("corrupt record: {0}")]
-    Corrupt(#[from] serde_json::Error),
+    Corrupt(serde_json::Error),
+    #[error("cannot encode a record: {0}")]
+    Encode(serde_json::Error),
     #[error("thread {thread}: event seq {got} does not follow {last}")]
     OutOfOrder { thread: ThreadId, last: u64, got: u64 },
     #[error("thread {0}: the first event must be thread/created")]
@@ -119,9 +121,9 @@ impl Store {
                 "INSERT INTO events (thread_id, seq, ts, payload) VALUES (?1, ?2, ?3, ?4)",
                 params![
                     event.thread_id.as_str(),
-                    event.seq as i64,
-                    event.ts as i64,
-                    serde_json::to_string(&event.payload)?
+                    event.seq.cast_signed(),
+                    event.ts.cast_signed(),
+                    encode(&event.payload)?
                 ],
             )?;
             thread.apply(event);
@@ -147,7 +149,7 @@ impl Store {
         let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
         let mut threads = Vec::new();
         for data in rows {
-            threads.push(serde_json::from_str(&data?)?);
+            threads.push(decode(&data?)?);
         }
         Ok(threads)
     }
@@ -158,17 +160,19 @@ impl Store {
         let mut statement = conn.prepare(
             "SELECT seq, ts, payload FROM events WHERE thread_id = ?1 AND seq > ?2 ORDER BY seq",
         )?;
-        let rows = statement.query_map(params![id.as_str(), after as i64], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
-        })?;
+        let rows = statement.query_map(
+            // Past `i64::MAX` nothing can follow; wrapping would return everything.
+            params![id.as_str(), i64::try_from(after).unwrap_or(i64::MAX)],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?)),
+        )?;
         let mut events = Vec::new();
         for row in rows {
             let (seq, ts, payload) = row?;
             events.push(ThreadEvent {
                 thread_id: id.clone(),
-                seq: seq as u64,
-                ts: ts as u64,
-                payload: serde_json::from_str(&payload)?,
+                seq: seq.cast_unsigned(),
+                ts: ts.cast_unsigned(),
+                payload: decode(&payload)?,
             });
         }
         Ok(events)
@@ -195,7 +199,7 @@ impl Store {
         let rows = statement.query_map([id.as_str()], |row| row.get::<_, String>(0))?;
         let mut entries = Vec::new();
         for row in rows {
-            let entry = match serde_json::from_str(&row?)? {
+            let entry = match decode(&row?)? {
                 EventPayload::InputSubmitted { text, .. } => {
                     TranscriptEntry { role: Role::User, text }
                 }
@@ -217,12 +221,20 @@ impl Store {
     }
 }
 
+fn encode(value: &impl serde::Serialize) -> Result<String> {
+    serde_json::to_string(value).map_err(StoreError::Encode)
+}
+
+fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
+    serde_json::from_str(text).map_err(StoreError::Corrupt)
+}
+
 fn load_thread(tx: &Transaction<'_>, id: &ThreadId) -> Result<Option<Thread>> {
     let data: Option<String> = tx
         .query_row("SELECT data FROM threads WHERE id = ?1", [id.as_str()], |row| row.get(0))
         .optional()?;
     Ok(match data {
-        Some(data) => Some(serde_json::from_str(&data)?),
+        Some(data) => Some(decode(&data)?),
         None => None,
     })
 }
@@ -230,7 +242,7 @@ fn load_thread(tx: &Transaction<'_>, id: &ThreadId) -> Result<Option<Thread>> {
 fn insert_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
     tx.execute(
         "INSERT INTO threads (id, created_at, data) VALUES (?1, ?2, ?3)",
-        params![thread.id.as_str(), thread.created_at as i64, serde_json::to_string(thread)?],
+        params![thread.id.as_str(), thread.created_at.cast_signed(), encode(thread)?],
     )?;
     Ok(())
 }
@@ -238,7 +250,7 @@ fn insert_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
 fn save_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
     tx.execute(
         "UPDATE threads SET data = ?2 WHERE id = ?1",
-        params![thread.id.as_str(), serde_json::to_string(thread)?],
+        params![thread.id.as_str(), encode(thread)?],
     )?;
     Ok(())
 }
@@ -364,5 +376,7 @@ mod tests {
         assert_eq!(store.threads().unwrap().len(), 2);
         assert_eq!(store.thread(&"b".into()).unwrap().as_ref(), supervisor.thread(&"b".into()));
         assert_eq!(store.events(&"b".into(), 0).unwrap().len(), 7);
+        // Nothing follows a position past the end, however far past.
+        assert_eq!(store.events(&"b".into(), u64::MAX).unwrap().len(), 0);
     }
 }

@@ -16,5 +16,11 @@ ui = ["dep:serde_json"]
 wit-bindgen.workspace = true
 serde_json = { workspace = true, optional = true }
 
-# Generated component glue needs `unsafe`, which the workspace lints forbid.
-[lints]
+# Generated component glue needs `unsafe`, which the workspace lints forbid: `deny`
+# here lets `mod bindings` allow it while the hand-written code still may not.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

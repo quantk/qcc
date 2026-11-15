@@ -18,7 +18,7 @@ pub(crate) const EPOCH_TICK: Duration = Duration::from_millis(50);
 
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
-    #[error("{0}")]
+    #[error(transparent)]
     Manifest(#[from] ManifestError),
     #[error("cannot read {path}: {error}")]
     Io { path: String, error: std::io::Error },

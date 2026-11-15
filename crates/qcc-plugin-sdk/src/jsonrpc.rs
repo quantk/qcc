@@ -7,11 +7,20 @@ use serde_json::{Value, json};
 
 pub const METHOD_NOT_FOUND: i64 = -32601;
 
+/// An error a JSON-RPC peer answered with.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RpcError {
     pub code: i64,
     pub message: String,
 }
+
+impl std::fmt::Display for RpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (code {})", self.message, self.code)
+    }
+}
+
+impl std::error::Error for RpcError {}
 
 /// A line received from the agent.
 #[derive(Debug, Clone, PartialEq)]

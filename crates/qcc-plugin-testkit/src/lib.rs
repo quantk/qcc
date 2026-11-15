@@ -308,8 +308,19 @@ impl Harness {
 
     /// Assemble every delta the plugin has emitted so far.
     pub fn pump(&mut self) {
-        while let Ok((thread, deltas)) = self.rx.try_recv() {
-            self.apply(thread, deltas);
+        // What the plugin's processes said may still be in its queue, and handling it
+        // can make a scripted process say more. Wait until a round brings nothing
+        // new, or what is assembled depends on how fast the plugin thread runs.
+        loop {
+            self.plugin.flush_blocking();
+            let mut quiet = true;
+            while let Ok((thread, deltas)) = self.rx.try_recv() {
+                self.apply(thread, deltas);
+                quiet = false;
+            }
+            if quiet {
+                return;
+            }
         }
     }
 

@@ -3,6 +3,8 @@
 //! Nothing here touches the host: a job says which commands to run and is told how
 //! each one ended. [`crate`] moves the bytes.
 
+use std::collections::HashMap;
+
 use qcc_plugin_sdk::types::{ChangeKind, ChangedFile, EnvironmentChanges};
 use serde_json::{Value, json};
 
@@ -55,9 +57,10 @@ fn git(tag: u32, dir: &str, args: &[&str]) -> Cmd {
         program: "git",
         args: all,
         cwd: None,
-        env: Vec::new(),
         limit: OUTPUT_LIMIT,
         timeout_ms: GIT_TIMEOUT_MS,
+        // The jobs read git's messages; a translated one would not match.
+        env: vec![("LC_ALL".to_owned(), "C".to_owned())],
     }
 }
 
@@ -106,6 +109,9 @@ impl Exit {
         if self.timed_out {
             return "timed out".into();
         }
+        if self.truncated {
+            return "produced too much output and was stopped".into();
+        }
         let stderr = self.stderr.trim();
         match (stderr.is_empty(), self.code) {
             (false, _) => stderr.to_owned(),
@@ -113,6 +119,16 @@ impl Exit {
             (true, None) => "killed by a signal".into(),
         }
     }
+}
+
+/// Whether a failed `git status` in a worktree says the worktree no longer exists:
+/// its directory is gone, or git no longer knows it.
+fn worktree_gone(exit: &Exit) -> bool {
+    exit.code == Some(128)
+        && !exit.truncated
+        && ["cannot change to", "not a git repository"]
+            .iter()
+            .any(|message| exit.stderr.contains(message))
 }
 
 /// What the plugin remembers about a worktree it made.
@@ -257,10 +273,11 @@ impl Prepare {
                 let mut lines = text.lines();
                 let toplevel = lines.next().unwrap_or("").to_owned();
                 if !exit.ok() || toplevel.is_empty() {
-                    return Step::Finish(Err(format!(
-                        "{} is not inside a git repository",
-                        self.source
-                    )));
+                    return Step::Finish(Err(if exit.code == Some(128) {
+                        format!("{} is not inside a git repository", self.source)
+                    } else {
+                        format!("git rev-parse in {}: {}", self.source, exit.reason())
+                    }));
                 }
                 self.prefix = lines.next().unwrap_or("").to_owned();
                 let name = toplevel.trim_end_matches('/').rsplit('/').next().unwrap_or("repo");
@@ -274,11 +291,16 @@ impl Prepare {
                 Step::Run(vec![git(
                     BASE,
                     &record.toplevel,
-                    &["rev-parse", "--verify", "--quiet", &commit],
+                    &["rev-parse", "--verify", "--quiet", "--end-of-options", &commit],
                 )])
             }
             BASE => {
                 let commit = exit.text().trim().to_owned();
+                // `--quiet` makes a missing commit a bare exit code 1; anything else is
+                // git failing for its own reasons.
+                if exit.timed_out || !matches!(exit.code, Some(0 | 1)) {
+                    return Step::Finish(Err(format!("git rev-parse: {}", exit.reason())));
+                }
                 if !exit.ok() || commit.is_empty() {
                     return Step::Finish(Err(match &self.base {
                         Some(base) => {
@@ -400,10 +422,21 @@ impl Remove {
         let record = &self.record;
         match tag {
             STATUS => {
+                // Only a worktree that is really gone lets a failed status through:
+                // anything else (a timeout, too much output, git not starting) says
+                // nothing about uncommitted work, and the next step is `--force`.
+                if !exit.ok() {
+                    if worktree_gone(&exit) {
+                        return self.teardown();
+                    }
+                    return Step::Finish(Err(format!(
+                        "cannot check {} for uncommitted changes: {}",
+                        record.worktree,
+                        exit.reason()
+                    )));
+                }
                 let dirty = exit.text().lines().filter(|line| !line.is_empty()).count();
-                // A status that fails means the worktree is already gone: go on and
-                // clean up what is left.
-                if exit.ok() && dirty > 0 {
+                if dirty > 0 {
                     return Step::Finish(Err(format!(
                         "{} has {dirty} uncommitted change{}; commit them or force the removal",
                         record.worktree,
@@ -535,17 +568,16 @@ impl Changes {
         if let Some(failed) = exits[..BRANCH as usize].iter().find(|exit| !exit.ok()) {
             return Step::Finish(Err(format!("git: {}", failed.reason())));
         }
-        let stats = parse_numstat(&exits[STATS as usize].stdout);
+        let stats: HashMap<String, (Option<u32>, Option<u32>)> =
+            parse_numstat(&exits[STATS as usize].stdout)
+                .into_iter()
+                .map(|(name, additions, deletions)| (name, (additions, deletions)))
+                .collect();
         let mut files: Vec<ChangedFile> = parse_name_status(&exits[NAMES as usize].stdout)
             .into_iter()
             .map(|(kind, path)| {
-                let stat = stats.iter().find(|(name, ..)| *name == path);
-                ChangedFile {
-                    additions: stat.and_then(|(_, additions, _)| *additions),
-                    deletions: stat.and_then(|(_, _, deletions)| *deletions),
-                    path,
-                    kind,
-                }
+                let (additions, deletions) = stats.get(&path).copied().unwrap_or_default();
+                ChangedFile { additions, deletions, path, kind }
             })
             .collect();
         files.extend(nul_separated(&exits[UNTRACKED as usize].stdout).into_iter().map(|path| {
@@ -649,8 +681,11 @@ impl Diff {
                 return self.next_file();
             }
         }
-        let (Some(tracked), Some(untracked)) = (&self.tracked, &self.untracked) else {
+        if self.tracked.is_none() || self.untracked.is_none() {
             return Step::Wait;
+        }
+        let (Some(tracked), Some(untracked)) = (self.tracked.take(), self.untracked.take()) else {
+            unreachable!("both exits were just checked");
         };
         if !tracked.ok() && !tracked.truncated {
             return Step::Finish(Err(format!("git diff: {}", tracked.reason())));
@@ -664,7 +699,6 @@ impl Diff {
             self.truncated = true;
         }
         files.reverse();
-        let tracked = tracked.clone();
         self.append(&tracked);
         self.pending = files;
         self.next_file()
@@ -681,6 +715,11 @@ mod tests {
 
     fn failed(stderr: &str) -> Exit {
         Exit { code: Some(1), stderr: stderr.into(), ..Exit::default() }
+    }
+
+    /// How git itself fails: exit code 128.
+    fn fatal(stderr: &str) -> Exit {
+        Exit { code: Some(128), stderr: stderr.into(), ..Exit::default() }
     }
 
     fn run(step: Step) -> Vec<Cmd> {
@@ -750,8 +789,16 @@ mod tests {
     fn prepare_explains_what_is_wrong_with_the_source() {
         let mut job = Prepare::new("thr_1".into(), "/tmp/x".into(), "/data".into(), None);
         job.start();
-        let step = job.on_exit(prepare::TOPLEVEL, failed("fatal: not a git repository"));
+        let step = job.on_exit(prepare::TOPLEVEL, fatal("fatal: not a git repository"));
         assert_eq!(step, Step::Finish(Err("/tmp/x is not inside a git repository".into())));
+
+        let mut job = Prepare::new("thr_1".into(), "/tmp/x".into(), "/data".into(), None);
+        job.start();
+        let step = job.on_exit(
+            prepare::TOPLEVEL,
+            Exit { stderr: "no such program".into(), ..Exit::default() },
+        );
+        assert_eq!(step, Step::Finish(Err("git rev-parse in /tmp/x: no such program".into())));
 
         let mut job = Prepare::new("thr_1".into(), "/src/app".into(), "/data".into(), None);
         job.start();
@@ -769,6 +816,13 @@ mod tests {
             panic!("an unknown base was accepted");
         };
         assert!(message.contains("\"nope\" does not name a commit"), "{message}");
+
+        let mut job = Prepare::new("thr_1".into(), "/src/app".into(), "/data".into(), None);
+        job.start();
+        job.on_exit(prepare::TOPLEVEL, out("/src/app\n\n"));
+        let timed_out = Exit { timed_out: true, ..Exit::default() };
+        let step = job.on_exit(prepare::BASE, timed_out);
+        assert_eq!(step, Step::Finish(Err("git rev-parse: timed out".into())));
     }
 
     #[test]
@@ -827,10 +881,30 @@ mod tests {
     }
 
     #[test]
+    fn remove_never_forces_a_worktree_it_could_not_check() {
+        // Each of these says nothing about uncommitted work; a dirty worktree with
+        // more than the output limit of changes is the case that matters most.
+        let unknown = [
+            Exit { truncated: true, ..Exit::default() },
+            Exit { timed_out: true, ..Exit::default() },
+            Exit { stderr: "cannot run git".into(), ..Exit::default() },
+            fatal("fatal: unable to read index"),
+        ];
+        for exit in unknown {
+            let mut job = Remove::new(record(), false);
+            job.start();
+            let step = job.on_exit(remove::STATUS, exit.clone());
+            let Step::Finish(Err(message)) = &step else { panic!("{exit:?} let {step:?} through") };
+            assert!(message.starts_with("cannot check /data/thr_1/app"), "{message}");
+        }
+    }
+
+    #[test]
     fn remove_cleans_up_after_a_worktree_that_is_already_gone() {
         let mut job = Remove::new(record(), false);
         job.start();
-        job.on_exit(remove::STATUS, Exit { stderr: "cannot run git".into(), ..Exit::default() });
+        let missing = fatal("fatal: cannot change to '/data/thr_1/app': No such file or directory");
+        run(job.on_exit(remove::STATUS, missing));
         let gone = failed("fatal: '/data/thr_1/app' is not a working tree");
         run(job.on_exit(remove::TEARDOWN, Exit::default()));
         let branch = run(job.on_exit(remove::WORKTREE, gone));

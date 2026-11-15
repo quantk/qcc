@@ -16,16 +16,10 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub use qcc_plugin_sdk::stdio::Output;
+use qcc_plugin_sdk::stdio::{LineBridge, exit_reason};
 use qcc_plugin_sdk::types::*;
 use serde_json::{Value, json};
-
-/// What the bridge wants done after one input.
-#[derive(Debug, Default, PartialEq)]
-pub struct Output {
-    /// Lines for the agent's stdin, without the newline.
-    pub writes: Vec<String>,
-    pub deltas: Vec<Delta>,
-}
 
 struct Approval {
     tool_use_id: String,
@@ -169,7 +163,7 @@ impl Bridge {
     /// message as a prompt: the agent takes it into the turn at its next step.
     pub fn steer(&mut self, text: &str) -> Output {
         let message = json!({"type": "user", "message": {"role": "user", "content": text}});
-        Output { writes: vec![message.to_string()], deltas: Vec::new() }
+        Output { writes: vec![message.to_string()], ..Output::default() }
     }
 
     /// Interrupt the running turn. The turn is settled right here: whatever the agent
@@ -186,6 +180,13 @@ impl Bridge {
             "request": {"subtype": "interrupt"},
         });
         output.writes.push(request.to_string());
+        // The turn's permission prompts go with it; the agent hears no to each, not
+        // silence. Sorted so the agent hears them in a fixed order.
+        let mut pending: Vec<&String> = self.approvals.keys().collect();
+        pending.sort();
+        for request_id in pending {
+            output.writes.push(denial(request_id, "The turn was interrupted.").to_string());
+        }
         self.draining += 1;
         self.settle(TurnStatus::Interrupted, None, &mut output.deltas);
         output
@@ -201,24 +202,21 @@ impl Bridge {
             .approvals
             .remove(request_id)
             .ok_or_else(|| format!("no permission request {request_id:?} is pending"))?;
-        let response = match resolution {
+        let line = match resolution {
             InteractionResolution::Selected(option) if option == "allow" => {
-                json!({"behavior": "allow", "updatedInput": approval.input})
+                let response = json!({"behavior": "allow", "updatedInput": approval.input});
+                success(request_id, &response)
             }
             other => {
                 self.denied.insert(approval.tool_use_id);
                 let message = match other {
-                    InteractionResolution::Text(text) => text.clone(),
-                    _ => "The user declined this action.".to_owned(),
+                    InteractionResolution::Text(text) => text.as_str(),
+                    _ => "The user declined this action.",
                 };
-                json!({"behavior": "deny", "message": message})
+                denial(request_id, message)
             }
         };
-        let line = json!({
-            "type": "control_response",
-            "response": {"subtype": "success", "request_id": request_id, "response": response},
-        });
-        Ok(Output { writes: vec![line.to_string()], deltas: Vec::new() })
+        Ok(Output { writes: vec![line.to_string()], ..Output::default() })
     }
 
     /// The session was stopped on request.
@@ -234,13 +232,7 @@ impl Bridge {
 
     /// The process went away by itself.
     pub fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let mut reason = match code {
-            Some(code) => format!("claude exited with code {code}"),
-            None => "claude was killed".to_owned(),
-        };
-        if let Some(stderr) = stderr {
-            reason = format!("{reason}: {stderr}");
-        }
+        let reason = exit_reason("claude", code, stderr);
         let mut deltas = Vec::new();
         if self.turn_open {
             self.turn_open = false;
@@ -277,8 +269,18 @@ impl Bridge {
             return output;
         }
         if self.draining > 0 {
-            if kind == "result" {
-                self.draining -= 1;
+            match kind {
+                "result" => self.draining -= 1,
+                // The turn is over for us, but the agent still waits for an answer.
+                "control_request" => {
+                    let request_id = str_field(&message, "request_id");
+                    let refusal = match str_field(&message["request"], "subtype") {
+                        "can_use_tool" => denial(request_id, "The turn was interrupted."),
+                        _ => request_error(request_id),
+                    };
+                    output.writes.push(refusal.to_string());
+                }
+                _ => {}
             }
             return output;
         }
@@ -389,15 +391,7 @@ impl Bridge {
         let request = &message["request"];
         if str_field(request, "subtype") != "can_use_tool" {
             // Never leave a request unanswered: the agent would wait forever.
-            let refusal = json!({
-                "type": "control_response",
-                "response": {
-                    "subtype": "error",
-                    "request_id": request_id,
-                    "error": "qcc does not handle this request",
-                },
-            });
-            output.writes.push(refusal.to_string());
+            output.writes.push(request_error(&request_id).to_string());
             return;
         }
         let tool_use_id = str_field(request, "tool_use_id").to_owned();
@@ -482,8 +476,43 @@ impl Bridge {
     }
 }
 
+/// The answer to a control request of the agent.
+fn success(request_id: &str, response: &Value) -> Value {
+    json!({
+        "type": "control_response",
+        "response": {"subtype": "success", "request_id": request_id, "response": response},
+    })
+}
+
+/// No to a permission prompt.
+fn denial(request_id: &str, message: &str) -> Value {
+    success(request_id, &json!({"behavior": "deny", "message": message}))
+}
+
+/// The answer to a control request qcc does not handle.
+fn request_error(request_id: &str) -> Value {
+    json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "error",
+            "request_id": request_id,
+            "error": "qcc does not handle this request",
+        },
+    })
+}
+
 fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
     Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
+}
+
+impl LineBridge for Bridge {
+    fn on_line(&mut self, line: &str) -> Output {
+        Bridge::on_line(self, line)
+    }
+
+    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
+        Bridge::exited(self, code, stderr)
+    }
 }
 
 #[cfg(test)]
@@ -601,6 +630,29 @@ mod tests {
             kinds(&bridge.on_line(&result(json!({}))).deltas),
             ["usage", "boundary.completed"]
         );
+    }
+
+    #[test]
+    fn an_interrupt_answers_every_request_of_the_turn() {
+        let ask = |id: &str| {
+            json!({"type": "control_request", "request_id": id,
+                   "request": {"subtype": "can_use_tool", "tool_name": "Bash",
+                               "tool_use_id": format!("tu-{id}"), "input": {"command": "ls"}}})
+            .to_string()
+        };
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("go");
+        bridge.on_line(&ask("r1"));
+        let interrupt = bridge.interrupt();
+        assert_eq!(interrupt.writes.len(), 2, "{:?}", interrupt.writes);
+        assert!(interrupt.writes[1].contains("\"request_id\":\"r1\""));
+        assert!(interrupt.writes[1].contains("\"behavior\":\"deny\""));
+
+        // A prompt that raced the interrupt is refused too, and shown to nobody.
+        let late = bridge.on_line(&ask("r2"));
+        assert_eq!(late.deltas, []);
+        assert!(late.writes[0].contains("\"request_id\":\"r2\""), "{late:?}");
+        assert!(late.writes[0].contains("\"behavior\":\"deny\""));
     }
 
     #[test]

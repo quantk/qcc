@@ -16,18 +16,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use qcc_plugin_sdk::jsonrpc::{Incoming, METHOD_NOT_FOUND, Peer, RpcError};
+pub use qcc_plugin_sdk::stdio::Output;
+use qcc_plugin_sdk::stdio::{LineBridge, exit_reason};
 use qcc_plugin_sdk::types::*;
 use serde_json::{Value, json};
-
-/// What the bridge wants done after one input.
-#[derive(Debug, Default, PartialEq)]
-pub struct Output {
-    /// Lines for the agent's stdin, without the newline.
-    pub writes: Vec<String>,
-    pub deltas: Vec<Delta>,
-    /// The session cannot go on; the process should be killed.
-    pub fatal: bool,
-}
 
 /// What a pending request of ours is for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -94,7 +86,10 @@ fn tool_shape(item: &Value) -> Option<ItemShape> {
             command: str_field(item, "command").to_owned(),
             cwd: item.get("cwd").and_then(Value::as_str).map(str::to_owned),
             output: item.get("aggregatedOutput").and_then(Value::as_str).map(str::to_owned),
-            exit_code: item.get("exitCode").and_then(Value::as_i64).map(|code| code as i32),
+            exit_code: item
+                .get("exitCode")
+                .and_then(Value::as_i64)
+                .and_then(|c| i32::try_from(c).ok()),
         }),
         "fileChange" => {
             let changes: Vec<&Value> = item["changes"].as_array().into_iter().flatten().collect();
@@ -307,13 +302,7 @@ impl Bridge {
 
     /// The process went away by itself.
     pub fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let mut reason = match code {
-            Some(code) => format!("codex exited with code {code}"),
-            None => "codex was killed".to_owned(),
-        };
-        if let Some(stderr) = stderr {
-            reason = format!("{reason}: {stderr}");
-        }
+        let reason = exit_reason("codex", code, stderr);
         let mut deltas = Vec::new();
         if self.turn_open {
             self.turn_open = false;
@@ -467,7 +456,9 @@ impl Bridge {
             }
             return;
         }
-        if !self.turn_open {
+        // Between turns only errors matter: an MCP server or the login failing is
+        // still the user's business.
+        if !self.turn_open && method != "error" {
             return;
         }
         let deltas = &mut output.deltas;
@@ -599,6 +590,16 @@ fn text_delta(params: &Value, channel: TextChannel, deltas: &mut Vec<Delta>) {
             channel,
             text: text.to_owned(),
         }));
+    }
+}
+
+impl LineBridge for Bridge {
+    fn on_line(&mut self, line: &str) -> Output {
+        Bridge::on_line(self, line)
+    }
+
+    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
+        Bridge::exited(self, code, stderr)
     }
 }
 
@@ -811,6 +812,10 @@ mod tests {
             json!({"turnId": "t", "willRetry": false, "error": {"message": "nope"}}),
         );
         assert_eq!(bridge.on_line(&fatal).deltas, [Delta::ProviderError("nope".into())]);
+        // Between turns too.
+        let (mut idle, _) = Bridge::new("/work".into(), None, None, None);
+        let mcp = notify("error", json!({"willRetry": false, "error": {"message": "mcp down"}}));
+        assert_eq!(idle.on_line(&mcp).deltas, [Delta::ProviderError("mcp down".into())]);
 
         let refused =
             bridge.on_line(r#"{"id":9,"method":"item/tool/requestUserInput","params":{}}"#);

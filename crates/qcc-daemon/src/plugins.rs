@@ -7,7 +7,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use qcc_domain::{Delta, SkillRef, ThreadId};
 use qcc_plugin_host::services::DirKv;
@@ -35,8 +35,12 @@ fn grant_for(config: &Config, id: &str) -> Grant {
             tracing::error!(plugin = id, %error, "ignoring an invalid grant file");
             Permissions::default()
         }),
-        Err(_) => {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             tracing::warn!(plugin = id, grant = %path.display(), "plugin has no granted permissions");
+            Permissions::default()
+        }
+        Err(error) => {
+            tracing::error!(plugin = id, grant = %path.display(), %error, "cannot read the grant file; granting nothing");
             Permissions::default()
         }
     };
@@ -80,12 +84,16 @@ pub(crate) fn load_all(
                 processes: Arc::new(qcc_plugin_host::services::OsProcesses),
                 threads: Arc::new(move |plugin: &str, call: ThreadsCall| {
                     let (reply, answer) = std::sync::mpsc::channel();
+                    // Past the deadline the core refuses the call instead of running
+                    // it: a call reported as failed must not happen after all.
+                    let deadline = Instant::now() + THREADS_TIMEOUT;
                     threads
-                        .send(Command::Threads { plugin: plugin.to_owned(), call, reply })
+                        .send(Command::Threads { plugin: plugin.to_owned(), call, deadline, reply })
                         .map_err(|_| "the daemon is shutting down".to_owned())?;
                     // The core answers at once; it never waits on a plugin. It is not
-                    // running yet while plugins are being loaded.
-                    answer.recv_timeout(THREADS_TIMEOUT).map_err(|_| {
+                    // running yet while plugins are being loaded. The wait outlasts the
+                    // deadline, so whatever the core did is what the plugin hears.
+                    answer.recv_timeout(THREADS_TIMEOUT + THREADS_GRACE).map_err(|_| {
                         "the daemon did not answer; threads are not available during init"
                             .to_owned()
                     })?
@@ -113,6 +121,8 @@ pub(crate) fn load_all(
 
 /// How long a plugin's `threads` call may wait for the core.
 const THREADS_TIMEOUT: Duration = Duration::from_secs(5);
+/// How much longer a plugin waits than the core may take to start its call.
+const THREADS_GRACE: Duration = Duration::from_secs(1);
 
 fn valid_skill_name(name: &str) -> bool {
     !name.is_empty()
@@ -226,9 +236,14 @@ pub(crate) fn read_asset(
         .filter_map(|entry| Some(entry.ok()?.path()))
         .find(|dir| plugin_id(dir).as_deref() == Some(manifest.id.as_str()))
         .ok_or("the plugin's directory is gone")?;
-    let root = dir.join(web).canonicalize().map_err(|_| "the plugin's web bundle is missing")?;
-    let file =
-        root.join(relative).canonicalize().map_err(|_| format!("no {path:?} in the bundle"))?;
+    let root = dir.join(web).canonicalize().map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => "the plugin's web bundle is missing".to_owned(),
+        _ => format!("cannot open the plugin's web bundle: {error}"),
+    })?;
+    let file = root.join(relative).canonicalize().map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => format!("no {path:?} in the bundle"),
+        _ => format!("cannot open {path:?}: {error}"),
+    })?;
     if !file.starts_with(&root) || !file.is_file() {
         return Err(format!("no {path:?} in the bundle"));
     }

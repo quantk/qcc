@@ -934,6 +934,50 @@ fn a_watching_client_sees_threads_appear_and_change() {
     daemon.stop();
 }
 
+/// A message sent while the session is being released waits for the release, then
+/// starts a fresh session, instead of reaching the one going away.
+#[test]
+fn a_message_sent_during_a_release_starts_a_new_session() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("hello");
+    daemon.wait_for(&id, "turn/completed");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let client = Client::connect(&daemon.socket).await.unwrap();
+        // Both requests go out before the release can be answered: the daemon reads
+        // them in order, and the provider call runs on its own.
+        let (mode, sent) = tokio::join!(
+            client
+                .call_raw("thread.set_mode", json!({ "thread_id": id, "permission_mode": "ask" })),
+            client.call_raw("thread.send", json!({ "thread_id": id, "text": "again" })),
+        );
+        mode.unwrap();
+        assert_eq!(sent.unwrap()["delivery"], "queued");
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let events = loop {
+        let events = daemon.events(&id);
+        if types(&events).iter().filter(|kind| **kind == "turn/completed").count() == 2 {
+            break events;
+        }
+        assert!(Instant::now() < deadline, "the queued message never ran: {events:#?}");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let kinds = types(&events);
+    let changed = kinds.iter().position(|kind| *kind == "thread/permission-mode").unwrap();
+    let after = &kinds[changed..];
+    assert!(!after.contains(&"provider/error"), "{kinds:?}");
+    let ended = after.iter().position(|kind| *kind == "session/ended").unwrap();
+    let started = after.iter().position(|kind| *kind == "session/started").unwrap();
+    assert!(ended < started, "{kinds:?}");
+}
+
 /// A plugin's own UI: views it contributes, actions on them, and its timeline items.
 #[test]
 fn a_plugin_draws_its_views_and_items_from_ui_nodes() {

@@ -100,10 +100,16 @@ impl Worktrees {
         })?;
         // Nothing here reads standard input; a script that tries gets end of file.
         let _ = process::close_stdin(process);
-        let timer = timers::start(cmd.timeout_ms).ok();
-        if let Some(timer) = timer {
-            self.timers.insert(timer, process);
-        }
+        // A command without its timeout could hang the job forever.
+        let timer = match timers::start(cmd.timeout_ms) {
+            Ok(timer) => timer,
+            Err(error) => {
+                let _ = process::kill(process);
+                return Err(format!("cannot time {}: {error}", cmd.program));
+            }
+        };
+        self.timers.insert(timer, process);
+        let timer = Some(timer);
         self.running.insert(
             process,
             Running {

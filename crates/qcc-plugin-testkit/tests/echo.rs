@@ -138,6 +138,16 @@ fn timers_drive_a_slow_stream_and_interrupt_stops_it() {
 }
 
 #[test]
+fn a_plugin_busy_on_zero_delay_timers_still_takes_calls() {
+    let mut harness = echo();
+    harness.start(Some("/spin")).unwrap();
+    // The interrupt is a call queued behind an endless stream of due timers.
+    harness.interrupt().unwrap();
+    harness.wait_turns(1);
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Interrupted, None)]);
+}
+
+#[test]
 fn kv_store_outlives_the_plugin_instance() {
     let dir = tempfile::tempdir().unwrap();
     let run = |prompts: &[&str]| {

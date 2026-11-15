@@ -2,7 +2,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use base64::Engine as _;
@@ -162,6 +162,8 @@ pub(crate) enum Command {
     Threads {
         plugin: String,
         call: ThreadsCall,
+        /// The plugin stops waiting soon after; a call this late is not run.
+        deadline: Instant,
         reply: std::sync::mpsc::Sender<Result<ThreadsAnswer, String>>,
     },
     /// A `thread.wait` ran out of time.
@@ -191,6 +193,10 @@ struct Watch {
 struct Session {
     /// The provider was asked to start and has not answered yet.
     starting: bool,
+    /// The provider was asked to interrupt the turn or release the session and has
+    /// not answered yet. Input meanwhile waits in the queue: delivered now, it could
+    /// reach a session being torn down, or start a turn the answer then settles.
+    stopping: bool,
     /// Deltas that arrived before the start was answered. They are applied after
     /// `session/started`, so the timeline reads in causal order.
     buffered: Vec<Delta>,
@@ -359,8 +365,13 @@ impl Core {
             Command::EnvironmentRemoved { thread, result, responder } => {
                 self.environment_removed(thread, result, responder);
             }
-            Command::Threads { plugin, call, reply } => {
-                let _ = reply.send(self.threads_call(&plugin, call));
+            Command::Threads { plugin, call, deadline, reply } => {
+                let answer = if Instant::now() > deadline {
+                    Err("the daemon was too busy to answer in time".to_owned())
+                } else {
+                    self.threads_call(&plugin, call)
+                };
+                let _ = reply.send(answer);
             }
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {
@@ -654,21 +665,26 @@ impl Core {
         let can_steer = provider
             .and_then(|provider| self.host.provider(&provider))
             .is_some_and(|(_, info)| info.capabilities.steer);
-        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        let held = self.in_transition(&thread_id);
         self.check_open(&thread_id)?;
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let now = now_ms();
 
         // Nothing in the way: the message starts a turn. Queued messages go first.
-        if !engine.busy() && !starting && !engine.has_queued_input() {
+        if !engine.busy() && !held && !engine.has_queued_input() {
             let events = engine.submit_input(text.clone(), now);
             self.commit(events);
             self.deliver(&thread_id, text);
             return Ok(ThreadSendResult { delivery: Delivery::Started, queue_id: None });
         }
 
-        if delivery == SendMode::Steer && can_steer && engine.turn_open() && engine.session_live() {
+        if delivery == SendMode::Steer
+            && can_steer
+            && !held
+            && engine.turn_open()
+            && engine.session_live()
+        {
             let events = engine.steer_input(text.clone(), now);
             self.commit(events);
             self.call_provider(&thread_id, Action::Steer, None, |thread| ProviderRequest::Steer {
@@ -686,6 +702,12 @@ impl Core {
         self.commit(events);
         self.queued.insert(thread_id);
         Ok(ThreadSendResult { delivery: Delivery::Queued, queue_id })
+    }
+
+    /// The provider session is starting or stopping: input waits, and nothing else
+    /// may start or stop it until the provider answers.
+    fn in_transition(&self, id: &ThreadId) -> bool {
+        self.sessions.get(id).is_some_and(|session| session.starting || session.stopping)
     }
 
     /// An archived thread takes no input, and neither does one being archived.
@@ -721,7 +743,7 @@ impl Core {
         }
         let now = now_ms();
         for id in self.queued.clone() {
-            if self.sessions.get(&id).is_some_and(|session| session.starting) {
+            if self.in_transition(&id) {
                 continue;
             }
             let Ok(engine) = self.supervisor.engine(&id) else {
@@ -748,10 +770,10 @@ impl Core {
             .ok_or_else(|| thread_not_found(&thread_id))?;
         self.check_mode(&provider, permission_mode)?;
         self.check_open(&thread_id)?;
-        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        let held = self.in_transition(&thread_id);
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
-        if engine.busy() || starting {
+        if engine.busy() || held {
             return Err(RpcError::new(
                 codes::THREAD_BUSY,
                 "a turn is running; stop it before changing the permission mode",
@@ -764,6 +786,7 @@ impl Core {
         if changed && live {
             // A mode is fixed when a session is constructed. Release this one; the
             // next message resumes the conversation in the new mode.
+            self.sessions.entry(thread_id.clone()).or_default().stopping = true;
             self.call_provider(&thread_id, Action::Release, None, |thread| ProviderRequest::Stop {
                 thread,
             });
@@ -774,13 +797,14 @@ impl Core {
 
     fn thread_stop(&mut self, p: ThreadStopParams, responder: Responder) {
         let ThreadStopParams { thread_id, mode } = p;
+        let held = self.in_transition(&thread_id);
         let Ok(engine) = self.supervisor.engine(&thread_id) else {
             return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
         };
-        if self.sessions.get(&thread_id).is_some_and(|session| session.starting) {
+        if held {
             return responder.reply::<Empty>(Err(RpcError::new(
                 codes::THREAD_BUSY,
-                "the provider session is still starting; try again",
+                "the provider session is still starting or stopping; try again",
             )));
         }
         // Stop means stop: what was waiting for this turn is not run after it.
@@ -792,6 +816,7 @@ impl Core {
             // Nothing is attached, so nothing can be running.
             return responder.reply(Ok(Empty {}));
         }
+        self.sessions.entry(thread_id.clone()).or_default().stopping = true;
         match mode {
             StopMode::Interrupt => {
                 self.call_provider(&thread_id, Action::Interrupt, Some(responder), |thread| {
@@ -912,7 +937,7 @@ impl Core {
 
     /// Where a thread is, for someone waiting on it.
     fn thread_state(&mut self, id: &ThreadId) -> Option<ThreadState> {
-        let starting = self.sessions.get(id).is_some_and(|session| session.starting);
+        let held = self.in_transition(id);
         let archiving = self.archiving.contains(id);
         let engine = self.supervisor.engine(id).ok()?;
         let thread = engine.thread();
@@ -920,7 +945,7 @@ impl Core {
             ThreadState::Archived
         } else if !thread.pending_interactions.is_empty() {
             ThreadState::Waiting
-        } else if starting || archiving || engine.busy() || engine.has_queued_input() {
+        } else if held || archiving || engine.busy() || engine.has_queued_input() {
             ThreadState::Working
         } else if thread.status == ThreadStatus::Failed {
             ThreadState::Failed
@@ -1459,11 +1484,11 @@ impl Core {
         if thread.archived {
             return responder.reply(Ok(ThreadResult { thread }));
         }
-        let starting = self.sessions.get(&thread_id).is_some_and(|session| session.starting);
+        let held = self.in_transition(&thread_id);
         let Ok(engine) = self.supervisor.engine(&thread_id) else {
             return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
         };
-        if engine.busy() || starting || self.archiving.contains(&thread_id) {
+        if engine.busy() || held || self.archiving.contains(&thread_id) {
             return responder.reply::<Empty>(Err(RpcError::new(
                 codes::THREAD_BUSY,
                 "the thread is working; stop it before archiving it",
@@ -1589,6 +1614,11 @@ impl Core {
             Err(PluginError::Gone) => self.session_failed(&id, "provider plugin is gone".into()),
         }
         let now = now_ms();
+        if matches!(action, Action::Interrupt | Action::Release)
+            && let Some(session) = self.sessions.get_mut(&id)
+        {
+            session.stopping = false;
+        }
         match action {
             Action::Input | Action::Steer | Action::Resolve => {}
             Action::Interrupt => {
@@ -1685,7 +1715,9 @@ impl Core {
     /// Persist events, then tell the subscribers. Persisting comes first: a client
     /// never sees an event that a restart could lose.
     fn commit(&mut self, events: Vec<ThreadEvent>) {
-        if events.is_empty() {
+        // After a failed write memory and disk already disagree: write nothing more,
+        // and keep the first error, which is the cause.
+        if events.is_empty() || self.fatal.is_some() {
             return;
         }
         if let Err(error) = self.store.append(&events) {

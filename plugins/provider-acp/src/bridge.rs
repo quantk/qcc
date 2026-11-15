@@ -15,18 +15,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use qcc_plugin_sdk::jsonrpc::{Incoming, METHOD_NOT_FOUND, Peer, RpcError};
+pub use qcc_plugin_sdk::stdio::Output;
+use qcc_plugin_sdk::stdio::exit_reason;
 use qcc_plugin_sdk::types::*;
 use serde_json::{Value, json};
-
-/// What the bridge wants done after one input.
-#[derive(Debug, Default, PartialEq)]
-pub struct Output {
-    /// Lines for the agent's stdin, without the newline.
-    pub writes: Vec<String>,
-    pub deltas: Vec<Delta>,
-    /// The session cannot go on; the process should be killed.
-    pub fatal: bool,
-}
 
 /// What a pending request of ours is for.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -342,13 +334,7 @@ impl Bridge {
 
     /// The process went away by itself.
     pub fn exited(&mut self, agent: &str, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let mut reason = match code {
-            Some(code) => format!("{agent} exited with code {code}"),
-            None => format!("{agent} was killed"),
-        };
-        if let Some(stderr) = stderr {
-            reason = format!("{reason}: {stderr}");
-        }
+        let reason = exit_reason(agent, code, stderr);
         let mut deltas = Vec::new();
         if self.turn_open {
             self.turn_open = false;
@@ -526,6 +512,7 @@ impl Bridge {
         self.tools.clear();
         self.closed.clear();
         self.approvals.clear();
+        self.refused.clear();
         if std::mem::take(&mut self.turn_open) {
             deltas.push(boundary(status, error));
         }

@@ -16,6 +16,7 @@
 //! | `/fail <message>`    | the turn fails                                               |
 //! | `/skills`            | says what the session was told about skills, word for word   |
 //! | `/crash`             | the plugin traps                                             |
+//! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
 //! A message steered into a running `/slow` turn is appended to what it streams.
 //!
@@ -53,10 +54,24 @@ struct Session {
 
 /// What the running turn is waiting for.
 enum Turn {
-    Slow { words: VecDeque<String>, timer: u64 },
-    Asking { request_id: String },
-    Approving { request_id: String, command: String },
-    Exec { process: u64 },
+    Slow {
+        words: VecDeque<String>,
+        timer: u64,
+    },
+    /// Busy on timers alone: each one starts the next with no delay.
+    Spin {
+        timer: u64,
+    },
+    Asking {
+        request_id: String,
+    },
+    Approving {
+        request_id: String,
+        command: String,
+    },
+    Exec {
+        process: u64,
+    },
 }
 
 fn assistant() -> ItemKey {
@@ -144,6 +159,10 @@ impl Echo {
                 let words = rest.split_whitespace().map(str::to_owned).collect();
                 let timer = timers::start(SLOW_TICK_MS)?;
                 session.turn = Some(Turn::Slow { words, timer });
+            }
+            "/spin" => {
+                let timer = timers::start(0)?;
+                session.turn = Some(Turn::Spin { timer });
             }
             "/tool" => {
                 let key = ItemKey::Provider(format!("call-{}", session.request_id()));
@@ -283,7 +302,7 @@ impl Echo {
         };
         match session.turn.take() {
             None => return Ok(()),
-            Some(Turn::Slow { timer, .. }) => timers::cancel(timer),
+            Some(Turn::Slow { timer, .. } | Turn::Spin { timer }) => timers::cancel(timer),
             Some(Turn::Exec { process }) => {
                 // The process may have exited already; its exit event is ignored below
                 // because no turn refers to it any more.
@@ -537,10 +556,21 @@ impl Plugin for Echo {
 
     fn on_timer(&mut self, timer: u64) {
         let Some((thread, session)) = self.sessions.iter_mut().find(|(_, session)| {
-            matches!(&session.turn, Some(Turn::Slow { timer: waiting, .. }) if *waiting == timer)
+            matches!(
+                &session.turn,
+                Some(Turn::Slow { timer: waiting, .. } | Turn::Spin { timer: waiting })
+                    if *waiting == timer
+            )
         }) else {
             return;
         };
+        if let Some(Turn::Spin { timer }) = &mut session.turn {
+            match timers::start(0) {
+                Ok(next) => *timer = next,
+                Err(error) => log::error(format!("cannot restart the spin: {error}")),
+            }
+            return;
+        }
         let Some(Turn::Slow { words, timer }) = &mut session.turn else {
             return;
         };

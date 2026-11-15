@@ -3,8 +3,8 @@
 {"type":"session/started","resumed":false}
 {"type":"turn/started","turn_id":"turn_1"}
 {"type":"thread/status","status":"active"}
-{"type":"input/submitted","text":"Also end your answer with the word BANANA.","steered":true}
 {"type":"session/identified","provider_session":"13d7dba5-0056-4363-a181-4a993e164a6f"}
+{"type":"input/submitted","text":"Also end your answer with the word BANANA.","steered":true}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"command","command":"cat note.txt"}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"command","command":"cat other.txt"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"command","command":"cat other.txt","output":"second file"}}

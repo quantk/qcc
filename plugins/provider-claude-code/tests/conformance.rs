@@ -8,7 +8,7 @@ use std::sync::Arc;
 use qcc_domain::{
     EventPayload, InteractionResolution, ItemShape, ItemStatus, PermissionMode, TurnStatus,
 };
-use qcc_plugin_testkit::{Harness, ScriptedProcesses};
+use qcc_plugin_testkit::{Harness, ScriptStep, ScriptedProcesses, script_from_recording};
 use serde_json::Value;
 
 fn fixture(name: &str) -> PathBuf {
@@ -55,6 +55,22 @@ fn basic_turn() {
     assert!(spawn.env.iter().any(|(name, value)| name == "QCC_THREAD_ID" && value == "thread-1"));
     let sent = processes.stdin_messages();
     assert_eq!(sent[0]["message"]["content"], "Reply with exactly: pong");
+}
+
+/// An agent that exits right after a last line with no newline: that line is still
+/// read, and it is the one that completes the turn.
+#[test]
+fn the_last_line_counts_without_a_newline() {
+    let mut script = script_from_recording(&recording("basic"));
+    let Some(ScriptStep::Stdout(last)) = script.last_mut() else { panic!("ends in output") };
+    assert_eq!(last.pop(), Some(b'\n'));
+    script.push(ScriptStep::Exit(Some(0)));
+    let processes = ScriptedProcesses::new([script]);
+    let mut harness = Harness::bundled("provider-claude-code").processes(processes).build();
+    harness.start(Some("Reply with exactly: pong")).unwrap();
+    harness.wait_turns(1);
+    harness.assert_conformant();
+    assert_eq!(harness.turn_statuses(), [(TurnStatus::Completed, None)]);
 }
 
 #[test]

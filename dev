@@ -6,6 +6,9 @@
 #   ./dev demo        start a daemon, run a few echo threads through it, stop it
 #   ./dev qcc ARGS    run the CLI against the dev daemon, e.g. ./dev qcc thread list
 #   ./dev desktop     build and open the desktop app against the dev daemon
+#
+# Every command that builds also restarts a dev daemon left running from an older
+# build; if agents are working in it, it asks first.
 #   ./dev check       fmt, clippy and all tests
 #   ./dev test [ARGS] cargo test --workspace [ARGS]
 #   ./dev clean       remove ./.dev (the dev daemon's journal and plugins)
@@ -27,7 +30,11 @@ export QCC_SOCKET="$QCC_DATA_DIR/qccd.sock"
 # This script may itself run inside an agent session; do not adopt its thread.
 unset QCC_THREAD_ID
 
-build() { cargo build --quiet -p qcc-daemon -p qcc-cli; }
+# Build, then make sure a dev daemon left running is the one just built.
+build() {
+  cargo build --quiet -p qcc-daemon -p qcc-cli
+  restart_stale_daemon
+}
 qcc() { ./target/debug/qcc "$@"; }
 
 wait_for_daemon() {
@@ -37,6 +44,59 @@ wait_for_daemon() {
   done
   echo "qccd did not start; see $QCC_DATA_DIR/qccd.log" >&2
   return 1
+}
+
+# A daemon started from an older build keeps running its old code after a rebuild
+# (cargo replaces the file, the process keeps the old one), and the app talks to
+# whatever answers on the socket. Stop it so the new build takes over; if agents
+# are at work in it, say so and ask first.
+restart_stale_daemon() {
+  local status pid
+  status=$(qcc daemon status --json 2>/dev/null) || return 0
+  pid=$(sed -n 's/.*"pid":\([0-9]*\).*/\1/p' <<<"$status")
+  [[ -n "$pid" && -e "/proc/$pid/exe" ]] || return 0
+  # Same inode: the running daemon is the file just built.
+  if [[ "$(stat -L -c %i "/proc/$pid/exe")" == "$(stat -c %i ./target/debug/qccd)" ]]; then
+    return 0
+  fi
+
+  local active
+  active=$(qcc thread list 2>/dev/null | awk '$2 == "active"') || active=""
+  if [[ -n "$active" ]]; then
+    echo "The dev daemon (pid $pid) is from an older build, and agents are working in it:" >&2
+    sed 's/^/  /' <<<"$active" >&2
+    echo "Restarting it interrupts their turns; they can be resumed with a new message." >&2
+    if [[ ! -t 0 ]]; then
+      echo "Not restarting it (no terminal to ask). Stop it yourself: kill $pid" >&2
+      return 0
+    fi
+    local answer
+    read -r -p "Restart it now? [y/N] " answer
+    if [[ "$answer" != [yY]* ]]; then
+      echo "Keeping the old daemon; the app will say it is outdated until it is stopped (kill $pid)." >&2
+      return 0
+    fi
+  fi
+
+  echo "restarting the dev daemon (pid $pid): it is from an older build" >&2
+  kill "$pid"
+  for _ in $(seq 100); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "qccd (pid $pid) did not stop; stop it yourself and run this again" >&2
+    exit 1
+  fi
+  # `./dev run` and `./dev desktop` start the new one themselves; the rest need it now.
+  case "$command" in
+    run | desktop) ;;
+    *)
+      # Its own session: it outlives this terminal, like one the app starts.
+      setsid ./target/debug/qccd 2>>"$QCC_DATA_DIR/qccd.log" </dev/null >/dev/null &
+      wait_for_daemon
+      ;;
+  esac
 }
 
 command="${1:-run}"

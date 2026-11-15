@@ -41,8 +41,10 @@ export function ThreadMcp({ thread, provider }: { thread: Thread; provider: Prov
               <span className="flex-1" />
               {row.status ? (
                 <McpStateMark state={row.status.state} />
-              ) : (
+              ) : row.off ? (
                 <McpStateMark state="disabled" />
+              ) : (
+                <span className="text-xs text-muted-foreground">Not reported</span>
               )}
               <Switch
                 aria-label={`Use ${row.name} in this thread`}
@@ -52,7 +54,12 @@ export function ThreadMcp({ thread, provider }: { thread: Thread; provider: Prov
                 onCheckedChange={(on) => void store().setThreadMcp(thread.id, row.name, on)}
               />
             </div>
-            {row.pending && <p className="text-xs text-muted-foreground">Kept off in this thread; the session has not taken the change yet.</p>}
+            {row.pending && (
+              <p className="text-xs text-muted-foreground">Kept off in this thread; the session has not taken the change yet.</p>
+            )}
+            {row.pendingOn && !live && (
+              <p className="text-xs text-muted-foreground">On again from the thread's next session.</p>
+            )}
             {row.status?.error && !row.off && (
               <p className="line-clamp-3 text-xs break-all text-destructive" title={row.status.error}>
                 {row.status.error}

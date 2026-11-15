@@ -381,6 +381,13 @@ impl Bridge {
                 .unwrap_or_default();
                 for name in std::mem::take(&mut self.mcp_disabled) {
                     if configured.contains_key(&name) {
+                        // Codex says nothing of a server it does not start; without
+                        // this the thread would lose sight of it.
+                        output.deltas.push(Delta::McpStatus(McpStatus {
+                            name: name.clone(),
+                            state: McpState::Disabled,
+                            error: None,
+                        }));
                         self.mcp_off.push(name);
                     } else {
                         output.deltas.push(Delta::ProviderWarning(format!(
@@ -817,9 +824,11 @@ mod tests {
             start["params"]["config"],
             json!({"mcp_servers": {"playwright": {"enabled": false}}})
         );
-        assert!(
-            matches!(&started.deltas[..], [Delta::ProviderWarning(w)] if w.contains("codex_apps"))
-        );
+        assert!(matches!(
+            &started.deltas[..],
+            [Delta::McpStatus(McpStatus { name, state: McpState::Disabled, .. }), Delta::ProviderWarning(w)]
+                if name == "playwright" && w.contains("codex_apps")
+        ));
 
         // Nothing to turn off: no detour through the configuration.
         let (mut plain, _) = Bridge::new("/work".into(), None, None, None);

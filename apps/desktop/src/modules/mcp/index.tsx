@@ -2,6 +2,7 @@
 // they and the agents' own servers are doing, and a tab with the servers of one
 // thread's session.
 
+import { mcpServersOf } from "../../state/mcp";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
 import { McpView } from "./McpView";
@@ -17,7 +18,11 @@ export const mcpModule: UiModule = {
       id: "mcp",
       title: "MCP",
       order: 30,
-      when: ({ thread }) => (thread.mcp_servers ?? []).length > 0 || (thread.mcp_disabled ?? []).length > 0,
+      // Shown wherever there is a server to switch: reported, kept off, or set up in qcc.
+      when: ({ thread }) =>
+        (thread.mcp_servers ?? []).length > 0 ||
+        (thread.mcp_disabled ?? []).length > 0 ||
+        mcpServersOf(store().getState().settings?.settings).some(([, server]) => !server.disabled),
       render: ({ thread, provider }) => <ThreadMcp thread={thread} provider={provider} />,
     });
     registry.command({ id: "mcp.add", title: "Add an MCP server", enabled: connected, run: () => openMcpServer() });

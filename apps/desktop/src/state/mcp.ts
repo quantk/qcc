@@ -196,9 +196,14 @@ export type ThreadMcpRow = {
   ours: boolean;
   /** The thread keeps it off but the session still runs it: it has not taken the change yet. */
   pending: boolean;
+  /** The session runs without it although the thread wants it: on from a session that takes the change. */
+  pendingOn: boolean;
 };
 
-/** The servers the session reports, then those the thread keeps off that it does not. */
+/**
+ * The servers the session reports, then those the thread keeps off that it does not,
+ * then qcc's that it does not: every server the thread can switch stays in sight.
+ */
 export function threadMcpRows(thread: Thread, settings: Settings | undefined): ThreadMcpRow[] {
   const ours = settings?.mcp_servers ?? {};
   const off = new Set(thread.mcp_disabled ?? []);
@@ -211,10 +216,16 @@ export function threadMcpRows(thread: Thread, settings: Settings | undefined): T
     // Only turning off can wait: a server off in the agent's own settings is reported
     // off too, and that is not the thread's doing.
     pending: off.has(status.name) && status.state !== "disabled",
+    pendingOn: !off.has(status.name) && status.state === "disabled",
   }));
+  const listed = (name: string) => rows.some((row) => row.name === name);
   for (const name of [...off].sort()) {
-    if (reported.some((status) => status.name === name)) continue;
-    rows.push({ name, status: undefined, off: true, ours: name in ours, pending: false });
+    if (!listed(name)) rows.push({ name, status: undefined, off: true, ours: name in ours, pending: false, pendingOn: false });
+  }
+  for (const [name, server] of mcpServersOf(settings)) {
+    if (!server.disabled && !listed(name)) {
+      rows.push({ name, status: undefined, off: false, ours: true, pending: false, pendingOn: false });
+    }
   }
   return rows;
 }

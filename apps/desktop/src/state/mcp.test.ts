@@ -125,10 +125,13 @@ describe("a thread's servers", () => {
       },
       settings,
     );
-    expect(rows.map(({ name, off, ours, pending }) => ({ name, off, ours, pending }))).toEqual([
-      { name: "playwright", off: true, ours: false, pending: true },
-      { name: "blender", off: false, ours: false, pending: false },
-      { name: "docs", off: true, ours: true, pending: false },
+    expect(rows.map(({ name, off, ours, pending, pendingOn }) => ({ name, off, ours, pending, pendingOn }))).toEqual([
+      { name: "playwright", off: true, ours: false, pending: true, pendingOn: false },
+      { name: "blender", off: false, ours: false, pending: false, pendingOn: true },
+      { name: "docs", off: true, ours: true, pending: false, pendingOn: false },
     ]);
+    // Turned back on before a session took it: still listed, as qcc's.
+    const again = threadMcpRows({ ...thread("b", "codex", []), mcp_disabled: [] }, settings);
+    expect(again.map((row) => [row.name, row.off, row.status])).toEqual([["docs", false, undefined]]);
   });
 });

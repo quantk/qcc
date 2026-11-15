@@ -179,18 +179,20 @@ impl ThreadEngine {
         self.emit(vec![EventPayload::PermissionModeChanged { permission_mode }], now)
     }
 
-    /// Go on with another agent or model. The caller releases a live session first:
-    /// the agent and model are fixed when a session is constructed.
+    /// Go on with another agent, model or effort. The caller releases a live session
+    /// first: all three are fixed when a session is constructed.
     pub fn set_agent(
         &mut self,
         provider: ProviderId,
         model: Option<String>,
+        effort: Option<String>,
         now: u64,
     ) -> Vec<ThreadEvent> {
-        if self.thread.provider == provider && self.thread.model == model {
+        let thread = &self.thread;
+        if thread.provider == provider && thread.model == model && thread.effort == effort {
             return Vec::new();
         }
-        self.emit(vec![EventPayload::AgentChanged { provider, model }], now)
+        self.emit(vec![EventPayload::AgentChanged { provider, model, effort }], now)
     }
 
     pub fn set_title(&mut self, title: String, now: u64) -> Vec<ThreadEvent> {

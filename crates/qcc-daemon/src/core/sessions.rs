@@ -66,6 +66,7 @@ impl Core {
                 thread: id.clone(),
                 cwd: thread.cwd,
                 model: thread.model,
+                effort: thread.effort,
                 resume,
                 prompt,
                 permission_mode: thread.permission_mode,

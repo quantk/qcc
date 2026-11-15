@@ -11,7 +11,11 @@ export function withProvider(settings: Settings, provider: ProviderId, patch: Pa
   const next: ProviderSettings = { ...providerSettings(settings, provider), ...patch };
   const providers = { ...settings.providers };
   const empty =
-    !next.model && !next.permission_mode && !next.hidden && Object.keys(next.env ?? {}).length === 0;
+    !next.model &&
+    !next.effort &&
+    !next.permission_mode &&
+    !next.hidden &&
+    Object.keys(next.env ?? {}).length === 0;
   if (empty) delete providers[provider];
   else providers[provider] = next;
   return { ...settings, providers };

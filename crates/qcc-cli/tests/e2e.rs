@@ -1348,6 +1348,37 @@ fn the_model_changes_between_turns_and_the_session_resumes() {
 }
 
 #[test]
+fn the_effort_reaches_the_session_and_changes_between_turns() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    // The user's default for the agent fills in a spawn that names none.
+    assert!(daemon.qcc(&["settings", "provider", "echo", "--effort", "high"]).ok);
+    let id = daemon.spawn("/agent");
+    daemon.wait_for(&id, "turn/completed");
+    assert_eq!(daemon.thread(&id)["effort"], "high");
+    assert_eq!(messages(&daemon.events(&id)), ["model default, effort high"]);
+
+    // Another level for the same model resumes the session the new way.
+    assert!(daemon.qcc(&["thread", "agent", &id, "echo", "--effort", "low"]).ok);
+    assert_eq!(daemon.thread(&id)["effort"], "low");
+    assert!(daemon.qcc(&["thread", "send", &id, "/agent"]).ok);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while messages(&daemon.events(&id)).len() < 2 {
+        assert!(Instant::now() < deadline, "the second turn never ran");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let events = daemon.events(&id);
+    assert_eq!(messages(&events)[1], "model default, effort low");
+    let changed = events.iter().position(|event| event["type"] == "thread/agent").unwrap();
+    let resumed = events[changed..].iter().find(|event| event["type"] == "session/started");
+    assert_eq!(resumed.unwrap()["resumed"], true);
+
+    // The models say which levels they take.
+    let models = daemon.qcc(&["provider", "models", "echo"]).stdout;
+    assert!(models.contains("effort: low (default), high"), "{models}");
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

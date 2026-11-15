@@ -69,6 +69,11 @@ pub struct ThreadSpawnParams {
     pub prompt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// How hard the model thinks: a level the provider lists for the model.
+    /// Absent: the parent's (with the same agent), the user's default for the
+    /// agent, or else the agent's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// The thread that spawned this one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
@@ -183,10 +188,10 @@ pub struct ThreadSetMcpParams {
 }
 
 method!(
-    /// Go on with another agent or another model. Refused while a turn runs. An
+    /// Go on with another agent, model or effort. Refused while a turn runs. An
     /// attached session is released; with the same provider the next message resumes
-    /// it with the new model, with another provider a new session starts and is told
-    /// the conversation so far. A permission mode the new provider cannot enforce is
+    /// it the new way, with another provider a new session starts and is told the
+    /// conversation so far. A permission mode the new provider cannot enforce is
     /// dropped.
     ThreadSetAgent, "thread.set_agent", ThreadSetAgentParams => ThreadResult
 );
@@ -198,6 +203,9 @@ pub struct ThreadSetAgentParams {
     /// Absent: the agent's default model.
     #[serde(default)]
     pub model: Option<String>,
+    /// Absent: the agent's default effort.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 method!(
@@ -632,6 +640,9 @@ pub struct ProviderSettings {
     /// The model a new thread gets when none is named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// The effort a new thread gets when none is named.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// The permission mode a new thread gets when none is named.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<PermissionMode>,

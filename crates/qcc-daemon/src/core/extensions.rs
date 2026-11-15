@@ -137,6 +137,7 @@ impl Core {
                         base: spawn.base,
                         prompt: spawn.prompt,
                         model: spawn.model,
+                        effort: spawn.effort,
                         parent: spawn.parent,
                         project: None,
                         permission_mode: spawn.permission_mode,

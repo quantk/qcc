@@ -7,6 +7,7 @@ export { StatusMark } from "./StatusMark";
 export { Choice, type ChoiceOption } from "./Choice";
 export { InteractionOutcome, InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";
+export { EffortPicker } from "./EffortPicker";
 export { ModelPicker } from "./ModelPicker";
 export { ThreadMenu } from "./ThreadMenu";
 export { EnvEditor } from "./EnvEditor";

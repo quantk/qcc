@@ -127,6 +127,13 @@ pub struct ModelInfo {
     /// The model the agent uses when none is chosen.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_default: bool,
+    /// The effort levels the model takes, from the least to the most thinking, as
+    /// the provider names them. Empty: effort cannot be chosen for it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    /// The level the model runs at when none is chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_effort: Option<String>,
 }
 
 /// How the work of an environment goes back to the directory it was made from.

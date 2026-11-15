@@ -334,6 +334,8 @@ interface types {
     parent: option<thread-id>,
     title: option<string>,
     model: option<string>,
+    /// How hard the model thinks, as the provider names it.
+    effort: option<string>,
     /// The contributed environment the thread works in, if any.
     environment: option<string>,
     state: thread-state,
@@ -389,6 +391,9 @@ interface types {
     /// Working directory of the thread.
     cwd: string,
     model: option<string>,
+    /// How hard the model thinks: one of the levels its `model-info` lists.
+    /// Absent: the agent's own default.
+    effort: option<string>,
     /// A `provider-session` handle returned by an earlier start of this thread.
     resume: option<string>,
     /// The first user message, if the session starts with one.
@@ -628,6 +633,11 @@ interface types {
     description: option<string>,
     /// The model the agent uses when none is chosen.
     is-default: bool,
+    /// The effort levels the model takes, from the least to the most thinking.
+    /// Empty: effort cannot be chosen for it.
+    efforts: list<string>,
+    /// The level the model runs at when none is chosen.
+    default-effort: option<string>,
   }
 
   variant outcome {
@@ -715,6 +725,7 @@ interface threads {
     cwd: string,
     prompt: option<string>,
     model: option<string>,
+    effort: option<string>,
     parent: option<thread-id>,
     environment: option<string>,
     base: option<string>,

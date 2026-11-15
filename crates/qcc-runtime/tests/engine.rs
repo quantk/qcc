@@ -15,6 +15,7 @@ fn new_thread(id: &str) -> NewThread {
         cwd: "/work".into(),
         environment: None,
         model: None,
+        effort: None,
         parent: None,
         project: None,
         permission_mode: None,

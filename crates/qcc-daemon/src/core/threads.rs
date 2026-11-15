@@ -44,13 +44,14 @@ impl Core {
         };
         let defaults = self.settings.providers.get(&p.provider).cloned().unwrap_or_default();
         // A child takes after its parent; what the user set for the agent fills in the rest.
-        // A model name means something only to the provider it was chosen for.
+        // A model name and an effort level mean something only to the provider they
+        // were chosen for.
+        let same_agent = parent.as_ref().filter(|parent| parent.provider == p.provider);
         if p.model.is_none() {
-            p.model = parent
-                .as_ref()
-                .filter(|parent| parent.provider == p.provider)
-                .and_then(|parent| parent.model.clone())
-                .or(defaults.model);
+            p.model = same_agent.and_then(|parent| parent.model.clone()).or(defaults.model);
+        }
+        if p.effort.is_none() {
+            p.effort = same_agent.and_then(|parent| parent.effort.clone()).or(defaults.effort);
         }
         p.permission_mode = match (&parent, p.permission_mode) {
             (_, Some(mode)) => Some(mode),
@@ -141,6 +142,7 @@ impl Core {
                     cwd: p.cwd,
                     environment,
                     model: p.model,
+                    effort: p.effort,
                     parent: p.parent,
                     project,
                     permission_mode: p.permission_mode,
@@ -601,9 +603,10 @@ impl Core {
         &mut self,
         p: ThreadSetAgentParams,
     ) -> Result<ThreadResult, RpcError> {
-        let ThreadSetAgentParams { thread_id, provider, model } = p;
+        let ThreadSetAgentParams { thread_id, provider, model, effort } = p;
         let supported = self.permission_modes(&provider)?;
         let model = model.filter(|model| !model.trim().is_empty());
+        let effort = effort.filter(|effort| !effort.trim().is_empty());
         self.reconfigure(&thread_id, "the agent", |engine, now| {
             let mut events = Vec::new();
             // A mode the new agent cannot enforce would fail every start. The nearest
@@ -614,7 +617,7 @@ impl Core {
             {
                 events.extend(engine.set_permission_mode(mode.fit(&supported), now));
             }
-            events.extend(engine.set_agent(provider, model, now));
+            events.extend(engine.set_agent(provider, model, effort, now));
             events
         })
     }

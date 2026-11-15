@@ -16,6 +16,7 @@
 //! | `/fail <message>`    | the turn fails                                               |
 //! | `/skills`            | says what the session was told (skills, project folders)     |
 //! | `/mcp`               | lists the MCP servers the session was given                  |
+//! | `/agent`             | says the model and effort the session was started with       |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -69,6 +70,8 @@ struct Session {
     mode: Option<PermissionMode>,
     /// What a real bridge would hand its agent: skills and the project's folders.
     skills: Option<String>,
+    /// The model and effort it was started with, in a line.
+    agent: String,
     /// The MCP servers it was given, one line each.
     mcp_servers: Vec<String>,
     /// How each of them is doing while on.
@@ -310,6 +313,13 @@ impl Echo {
                 out.push(completed());
             }
             "/crash" => panic!("echo provider was asked to crash"),
+            "/agent" => {
+                let reply = session.agent.clone();
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/skills" => {
                 let reply = session.skills.clone().unwrap_or_else(|| "no skills".into());
                 out.push(text(reply.clone()));
@@ -379,6 +389,11 @@ impl Provider for Echo {
         let session = Session {
             mode: start.permission_mode,
             skills: session_context(&start),
+            agent: format!(
+                "model {}, effort {}",
+                start.model.as_deref().unwrap_or("default"),
+                start.effort.as_deref().unwrap_or("default")
+            ),
             mcp_servers: start
                 .mcp_servers
                 .iter()
@@ -499,6 +514,8 @@ impl Provider for Echo {
             name: name.into(),
             description: None,
             is_default,
+            efforts: vec!["low".into(), "high".into()],
+            default_effort: Some("low".into()),
         };
         Ok(Reply::Now(vec![model("echo-1", "Echo 1", true), model("echo-2", "Echo 2", false)]))
     }

@@ -115,10 +115,10 @@ export type EventPayload =
 /**  The provider named its session after it had started. */
 { type: "session/identified"; provider_session: string } | { type: "session/ended"; reason?: string | null } | { type: "thread/permission-mode"; permission_mode?: PermissionMode | null } | 
 /**
- *  The thread goes on with another agent or model. A different provider cannot
- *  resume the previous one's session: the next session starts afresh.
+ *  The thread goes on with another agent, model or effort. A different provider
+ *  cannot resume the previous one's session: the next session starts afresh.
  */
-{ type: "thread/agent"; provider: ProviderId; model?: string | null } | 
+{ type: "thread/agent"; provider: ProviderId; model?: string | null; effort?: string | null } | 
 /**  The user named the thread. */
 { type: "thread/title"; title: string } | 
 /**  The thread was put into a project, moved to another or taken out of one. */
@@ -240,6 +240,13 @@ export type ModelInfo = {
 	description?: string | null,
 	/**  The model the agent uses when none is chosen. */
 	is_default?: boolean,
+	/**
+	 *  The effort levels the model takes, from the least to the most thinking, as
+	 *  the provider names them. Empty: effort cannot be chosen for it.
+	 */
+	efforts?: string[],
+	/**  The level the model runs at when none is chosen. */
+	default_effort?: string | null,
 };
 
 export type OptionKind = "allow" | "deny" | "other";
@@ -398,6 +405,8 @@ export type ProviderModelsResult = {
 export type ProviderSettings = {
 	/**  The model a new thread gets when none is named. */
 	model?: string | null,
+	/**  The effort a new thread gets when none is named. */
+	effort?: string | null,
 	/**  The permission mode a new thread gets when none is named. */
 	permission_mode?: PermissionMode | null,
 	/**  Variables every session of this agent sees (an API key, a config path). */
@@ -473,6 +482,11 @@ export type Thread = {
 	/**  Absent: the thread works directly in `cwd`. */
 	environment?: ThreadEnvironment | null,
 	model?: string | null,
+	/**
+	 *  How hard the model thinks, as its provider names the level. Absent: the
+	 *  agent's own default.
+	 */
+	effort?: string | null,
 	parent?: ThreadId | null,
 	/**  The project the thread is grouped under. */
 	project?: ProjectId | null,
@@ -657,6 +671,8 @@ export type ThreadSetAgentParams = {
 	provider: ProviderId,
 	/**  Absent: the agent's default model. */
 	model?: string | null,
+	/**  Absent: the agent's default effort. */
+	effort?: string | null,
 };
 
 export type ThreadSetMcpParams = {
@@ -694,6 +710,12 @@ export type ThreadSpawnParams = {
 	base?: string | null,
 	prompt?: string | null,
 	model?: string | null,
+	/**
+	 *  How hard the model thinks: a level the provider lists for the model.
+	 *  Absent: the parent's (with the same agent), the user's default for the
+	 *  agent, or else the agent's own.
+	 */
+	effort?: string | null,
 	/**  The thread that spawned this one. */
 	parent?: ThreadId | null,
 	/**

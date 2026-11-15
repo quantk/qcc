@@ -255,6 +255,7 @@ pub(crate) fn spawn_options(options: wit_threads::SpawnOptions) -> SpawnThread {
         cwd: options.cwd,
         prompt: options.prompt,
         model: options.model,
+        effort: options.effort,
         parent: options.parent.map(ThreadId),
         environment: options.environment,
         base: options.base,
@@ -271,6 +272,7 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
         parent: thread.parent.map(|parent| parent.0),
         title: thread.title,
         model: thread.model,
+        effort: thread.effort,
         environment: thread.environment.map(|environment| environment.id),
         state: match state {
             ThreadState::Working => wit::ThreadState::Working,
@@ -314,6 +316,8 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                     name: m.name,
                     description: m.description,
                     is_default: m.is_default,
+                    efforts: m.efforts,
+                    default_effort: m.default_effort,
                 })
                 .collect(),
         ),
@@ -357,6 +361,7 @@ fn session_start(start: SessionStart) -> wit::SessionStart {
         thread: start.thread.0,
         cwd: start.cwd,
         model: start.model,
+        effort: start.effort,
         resume: start.resume,
         prompt: start.prompt,
         permission_mode: start.permission_mode.map(mode_to_wit),

@@ -153,13 +153,17 @@ impl Orchestration {
         settled(&source)?;
         let messages = threads::transcript(&source.id)?;
         let provider = arg(call, "to").unwrap_or(&source.provider).to_owned();
-        // A model name means something only to the provider it was given for.
-        let model = if provider == source.provider { source.model.clone() } else { None };
+        // A model name and an effort level mean something only to the provider they
+        // were given for.
+        let same = provider == source.provider;
+        let model = if same { source.model.clone() } else { None };
+        let effort = if same { source.effort.clone() } else { None };
         let child = threads::spawn(&SpawnOptions {
             provider: provider.clone(),
             cwd: source.cwd.clone(),
             prompt: Some(handoff_prompt(&source, &messages, arg(call, "note"))),
             model,
+            effort,
             parent: Some(source.id.clone()),
             environment: None,
             base: None,
@@ -185,6 +189,7 @@ impl Orchestration {
             cwd: source.cwd.clone(),
             prompt: Some(review_prompt(&source, task, arg(call, "focus"))),
             model: None,
+            effort: None,
             parent: Some(source.id.clone()),
             environment: None,
             base: None,
@@ -333,6 +338,7 @@ mod tests {
             parent: None,
             title: None,
             model: None,
+            effort: None,
             environment: Some("git-worktree".into()),
             state: ThreadState::Idle,
             last_turn: Some(TurnStatus::Completed),

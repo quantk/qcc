@@ -473,10 +473,15 @@ export class AppStore {
     return result !== null;
   }
 
-  /** Resolves to whether the thread now has that agent and model. */
-  async setAgent(threadId: ThreadId, provider: ProviderId, model: string | null): Promise<boolean> {
+  /** Resolves to whether the thread now has that agent, model and effort. */
+  async setAgent(
+    threadId: ThreadId,
+    provider: ProviderId,
+    model: string | null,
+    effort: string | null,
+  ): Promise<boolean> {
     const result = await this.attempt(() =>
-      this.api.call("thread.set_agent", { thread_id: threadId, provider, model }),
+      this.api.call("thread.set_agent", { thread_id: threadId, provider, model, effort }),
     );
     if (result) this.mergeThreads([result.thread]);
     return result !== null;

@@ -94,6 +94,7 @@ impl HarnessBuilder {
             provider: provider.clone(),
             cwd: "/work".into(),
             model: None,
+            effort: None,
             parent: None,
             project: None,
             permission_mode: None,
@@ -128,6 +129,7 @@ impl HarnessBuilder {
             crash,
             foreign_deltas: 0,
             model: None,
+            effort: None,
             permission_mode: None,
         }
     }
@@ -147,6 +149,7 @@ pub struct Harness {
     crash: Arc<Mutex<Option<String>>>,
     foreign_deltas: usize,
     model: Option<String>,
+    effort: Option<String>,
     permission_mode: Option<PermissionMode>,
 }
 
@@ -197,6 +200,11 @@ impl Harness {
         self.model = model.map(str::to_owned);
     }
 
+    /// The effort the next session start asks for.
+    pub fn set_effort(&mut self, effort: Option<&str>) {
+        self.effort = effort.map(str::to_owned);
+    }
+
     /// The permission mode the next session start asks for.
     pub fn set_permission_mode(&mut self, mode: Option<PermissionMode>) {
         self.permission_mode = mode;
@@ -227,6 +235,7 @@ impl Harness {
             thread: self.thread_id.clone(),
             cwd: "/work".into(),
             model: self.model.clone(),
+            effort: self.effort.clone(),
             resume,
             prompt: prompt.map(str::to_owned),
             permission_mode: self.permission_mode,

@@ -263,6 +263,17 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     let default = if model.is_default { "  (default)" } else { "" };
                     let name = if model.name == model.id { "" } else { model.name.as_str() };
                     out(format!("{:<32} {name}{default}", model.id).trim_end());
+                    if !model.efforts.is_empty() {
+                        let levels: Vec<String> = model
+                            .efforts
+                            .iter()
+                            .map(|level| match &model.default_effort {
+                                Some(default) if default == level => format!("{level} (default)"),
+                                _ => level.clone(),
+                            })
+                            .collect();
+                        out(format!("{:<32} effort: {}", "", levels.join(", ")));
+                    }
                 }
             }
         }

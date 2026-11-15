@@ -167,6 +167,10 @@ pub struct Thread {
     pub environment: Option<ThreadEnvironment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// How hard the model thinks, as its provider names the level. Absent: the
+    /// agent's own default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<ThreadId>,
     /// The project the thread is grouped under.
@@ -264,13 +268,14 @@ impl Thread {
             EventPayload::ProjectChanged { project } => self.project.clone_from(project),
             EventPayload::ParentChanged { parent } => self.parent.clone_from(parent),
             EventPayload::TitleChanged { title } => self.title = Some(title.clone()),
-            EventPayload::AgentChanged { provider, model } => {
+            EventPayload::AgentChanged { provider, model, effort } => {
                 if *provider != self.provider {
                     self.provider = provider.clone();
                     self.provider_session = None;
                     self.handover = true;
                 }
                 self.model.clone_from(model);
+                self.effort.clone_from(effort);
             }
             EventPayload::SessionIdentified { provider_session } => {
                 self.provider_session = Some(provider_session.clone());
@@ -349,6 +354,7 @@ mod tests {
             cwd: "/work".into(),
             environment: None,
             model: None,
+            effort: None,
             parent: None,
             project: None,
             permission_mode: None,
@@ -463,19 +469,26 @@ mod tests {
         let model = |model: &str| EventPayload::AgentChanged {
             provider: ProviderId::new("echo"),
             model: Some(model.into()),
+            effort: Some("high".into()),
         };
         apply(&mut thread, vec![model("big")]);
         // Another model of the same agent resumes the same session.
         assert_eq!(thread.model.as_deref(), Some("big"));
+        assert_eq!(thread.effort.as_deref(), Some("high"));
         assert_eq!(thread.provider_session.as_deref(), Some("s"));
         assert!(!thread.handover);
 
         apply(
             &mut thread,
-            vec![EventPayload::AgentChanged { provider: ProviderId::new("other"), model: None }],
+            vec![EventPayload::AgentChanged {
+                provider: ProviderId::new("other"),
+                model: None,
+                effort: None,
+            }],
         );
         assert_eq!(thread.provider, ProviderId::new("other"));
         assert_eq!(thread.model, None);
+        assert_eq!(thread.effort, None);
         assert_eq!(thread.provider_session, None);
         assert!(thread.handover);
 

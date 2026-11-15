@@ -4,7 +4,8 @@ import { useMemo, useRef, useState } from "react";
 import type { PermissionMode, ProjectId } from "../../api/protocol.gen";
 import { environmentsOf, modeLabel, pickableProviders } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
-import { Choice, ModelPicker } from "../../ui/kit";
+import { effortFor } from "../../state/models";
+import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
 import { tailPath } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -21,6 +22,7 @@ type Remembered = {
   cwd?: string;
   mode?: string;
   model?: string;
+  effort?: string;
   project?: string;
 };
 
@@ -55,11 +57,13 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
   const [base, setBase] = useState("");
   // A model means something only to the agent it was chosen for.
   const [model, setModel] = useState<string | null>(last.model || null);
+  const [effort, setEffort] = useState<string | null>(last.effort || null);
   const [mode, setMode] = useState(last.mode ?? "");
   const [prompt, setPrompt] = useState("");
   const [starting, setStarting] = useState(false);
 
   const provider = providers.find((candidate) => candidate.id === providerId) ?? providers[0];
+  const modelList = useApp((state) => (provider ? state.models[provider.id] : undefined));
   const modes = provider?.capabilities.permission_modes ?? [];
   const chosenMode = modes.includes(mode as PermissionMode) ? (mode as PermissionMode) : null;
   const chosenEnvironment = environments.some((candidate) => candidate.id === environment) ? environment : "";
@@ -83,6 +87,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
       environment: chosenEnvironment || null,
       base: chosenEnvironment && base.trim() ? base.trim() : null,
       model,
+      effort,
       permission_mode: chosenMode,
       prompt: prompt.trim() || null,
     });
@@ -93,6 +98,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
       cwd: cwd.trim(),
       mode,
       model: model ?? undefined,
+      effort: effort ?? undefined,
       project: project?.id,
     };
     localStorage.setItem(REMEMBERED, JSON.stringify(next));
@@ -132,6 +138,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
                     // What the user set for that agent, if anything.
                     const defaults = value ? settings?.providers?.[value] : undefined;
                     setModel(defaults?.model ?? null);
+                    setEffort(defaults?.effort ?? null);
                     setMode(defaults?.permission_mode ?? "");
                   }
                   setProviderId(value ?? "");
@@ -239,7 +246,25 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
             <div className="grid grid-cols-2 gap-3">
               <Field>
                 <FieldLabel htmlFor="new-thread-model">Model</FieldLabel>
-                <ModelPicker id="new-thread-model" provider={provider?.id} value={model} onChange={setModel} />
+                <ModelPicker
+                  id="new-thread-model"
+                  provider={provider?.id}
+                  value={model}
+                  onChange={(next) => {
+                    setModel(next);
+                    setEffort((level) => effortFor(modelList?.models ?? [], next, level));
+                  }}
+                />
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="new-thread-effort">Effort</FieldLabel>
+                <EffortPicker
+                  id="new-thread-effort"
+                  provider={provider?.id}
+                  model={model}
+                  value={effort}
+                  onChange={setEffort}
+                />
               </Field>
               <Field>
                 <FieldLabel>Permissions</FieldLabel>

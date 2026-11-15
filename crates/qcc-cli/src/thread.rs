@@ -50,6 +50,10 @@ pub(crate) enum ThreadCommand {
         base: Option<String>,
         #[arg(long)]
         model: Option<String>,
+        /// How hard the model thinks: a level `qcc provider models` lists for it
+        /// [default: the parent's, the one set for the agent, or the agent's own].
+        #[arg(long, value_name = "LEVEL")]
+        effort: Option<String>,
         /// Parent thread [default: $QCC_THREAD_ID, set inside agent sessions].
         #[arg(long, env = paths::THREAD_ID_ENV)]
         parent: Option<String>,
@@ -119,14 +123,18 @@ pub(crate) enum ThreadCommand {
     /// Take a queued message back before it is delivered and print it. The id is the
     /// `queue_id` that `thread send --json` printed.
     Unqueue { thread: String, queue_id: String },
-    /// Go on with another agent or model. Another agent starts a new session and is
-    /// told the conversation so far; `qcc provider models` lists the models.
+    /// Go on with another agent, model or effort. Another agent starts a new session
+    /// and is told the conversation so far; `qcc provider models` lists the models
+    /// and their effort levels.
     Agent {
         thread: String,
         provider: String,
         /// Absent: the agent's default model.
         #[arg(long)]
         model: Option<String>,
+        /// Absent: the agent's default effort.
+        #[arg(long, value_name = "LEVEL")]
+        effort: Option<String>,
     },
     /// Interrupt the running turn of a thread.
     Stop {
@@ -199,6 +207,7 @@ pub(crate) async fn run(
             env,
             base,
             model,
+            effort,
             parent,
             project,
             permission_mode,
@@ -243,6 +252,7 @@ pub(crate) async fn run(
                     base,
                     prompt,
                     model,
+                    effort,
                     parent,
                     project,
                     permission_mode,
@@ -408,12 +418,13 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Agent { thread, provider, model } => {
+        ThreadCommand::Agent { thread, provider, model, effort } => {
             let result = client
                 .call::<ThreadSetAgent>(ThreadSetAgentParams {
                     thread_id: ThreadId::new(thread),
                     provider: ProviderId::new(provider),
                     model,
+                    effort,
                 })
                 .await?;
             if json {

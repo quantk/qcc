@@ -102,6 +102,12 @@ pub fn thread_details(thread: &Thread) -> String {
         format!("provider  {}", thread.provider),
         format!("cwd       {}", thread.cwd),
     ];
+    if let Some(model) = &thread.model {
+        lines.push(format!("model     {model}"));
+    }
+    if let Some(effort) = &thread.effort {
+        lines.push(format!("effort    {effort}"));
+    }
     if thread.archived {
         lines[2] = "status    archived".into();
     }
@@ -311,10 +317,16 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::PermissionModeChanged { permission_mode } => {
             format!("permission mode: {}", permission_mode.map_or("default", |mode| mode.as_str()))
         }
-        EventPayload::AgentChanged { provider, model } => match model {
-            Some(model) => format!("agent: {provider}, model {model}"),
-            None => format!("agent: {provider}"),
-        },
+        EventPayload::AgentChanged { provider, model, effort } => {
+            let mut line = format!("agent: {provider}");
+            if let Some(model) = model {
+                line.push_str(&format!(", model {model}"));
+            }
+            if let Some(effort) = effort {
+                line.push_str(&format!(", effort {effort}"));
+            }
+            line
+        }
         EventPayload::ItemCompleted { item: completed, .. } => item(completed)?,
         EventPayload::TurnCompleted { status, error, .. } => match (status, error) {
             (TurnStatus::Completed, _) => return None,

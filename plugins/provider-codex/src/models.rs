@@ -51,9 +51,17 @@ fn parse(models: &Value) -> Vec<ModelInfo> {
                 name: entry["displayName"].as_str().unwrap_or(id).to_owned(),
                 description: entry["description"].as_str().map(str::to_owned),
                 is_default: entry["isDefault"] == true,
+                efforts: efforts(&entry["supportedReasoningEfforts"]),
+                default_effort: entry["defaultReasoningEffort"].as_str().map(str::to_owned),
             })
         })
         .collect()
+}
+
+/// The levels, each listed as `{"reasoningEffort": "low", "description": …}`.
+fn efforts(list: &Value) -> Vec<String> {
+    let items = list.as_array().map(Vec::as_slice).unwrap_or_default();
+    items.iter().filter_map(|item| item["reasoningEffort"].as_str().map(str::to_owned)).collect()
 }
 
 #[cfg(test)]
@@ -63,7 +71,9 @@ mod tests {
     #[test]
     fn reads_the_listed_models() {
         let line = json!({"id": LIST_ID, "result": {"data": [
-            {"id": "a", "model": "a", "displayName": "A", "description": "First", "isDefault": true},
+            {"id": "a", "model": "a", "displayName": "A", "description": "First", "isDefault": true,
+             "supportedReasoningEfforts": [{"reasoningEffort": "low"}, {"reasoningEffort": "high"}],
+             "defaultReasoningEffort": "low"},
             {"id": "b", "model": "b", "hidden": true},
             {"id": "c"},
         ]}});
@@ -73,6 +83,9 @@ mod tests {
         let summary: Vec<_> =
             models.iter().map(|m| (m.id.as_str(), m.name.as_str(), m.is_default)).collect();
         assert_eq!(summary, [("a", "A", true), ("c", "c", false)]);
+        assert_eq!(models[0].efforts, ["low", "high"]);
+        assert_eq!(models[0].default_effort.as_deref(), Some("low"));
+        assert!(models[1].efforts.is_empty());
     }
 
     #[test]

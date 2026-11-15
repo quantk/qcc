@@ -64,9 +64,17 @@ fn parse(models: &Value) -> Vec<ModelInfo> {
                 name: entry["displayName"].as_str().unwrap_or(id).to_owned(),
                 description: entry["description"].as_str().map(str::to_owned),
                 is_default,
+                efforts: strings(&entry["supportedEffortLevels"]),
+                // Claude Code does not say which level a model runs at unasked.
+                default_effort: None,
             })
         })
         .collect()
+}
+
+fn strings(list: &Value) -> Vec<String> {
+    let items = list.as_array().map(Vec::as_slice).unwrap_or_default();
+    items.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect()
 }
 
 #[cfg(test)]
@@ -86,7 +94,8 @@ mod tests {
                 "request_id": REQUEST_ID,
                 "response": {"models": [
                     {"value": "default", "resolvedModel": "claude-x-1", "displayName": "Default"},
-                    {"value": "x", "resolvedModel": "claude-x-1", "displayName": "X 1", "description": "Big"},
+                    {"value": "x", "resolvedModel": "claude-x-1", "displayName": "X 1", "description": "Big",
+                     "supportedEffortLevels": ["low", "high"]},
                     {"value": "claude-x-1", "resolvedModel": "claude-x-1", "displayName": "X 1 (pinned)"},
                     {"value": "y", "resolvedModel": "claude-y-1"},
                 ]},
@@ -102,6 +111,8 @@ mod tests {
             [("x", "X 1", true), ("claude-x-1", "X 1 (pinned)", false), ("y", "y", false)]
         );
         assert_eq!(models[0].description.as_deref(), Some("Big"));
+        assert_eq!(models[0].efforts, ["low", "high"]);
+        assert!(models[1].efforts.is_empty());
     }
 
     #[test]

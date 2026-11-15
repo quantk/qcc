@@ -23,6 +23,7 @@ pub struct SessionStart {
     pub thread: ThreadId,
     pub cwd: String,
     pub model: Option<String>,
+    pub effort: Option<String>,
     /// Provider session handle from an earlier start of this thread.
     pub resume: Option<String>,
     pub prompt: Option<String>,
@@ -174,6 +175,7 @@ pub struct SpawnThread {
     pub cwd: String,
     pub prompt: Option<String>,
     pub model: Option<String>,
+    pub effort: Option<String>,
     pub parent: Option<ThreadId>,
     pub environment: Option<String>,
     pub base: Option<String>,

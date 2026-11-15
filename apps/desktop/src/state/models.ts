@@ -37,3 +37,39 @@ export function modelOptions(
   }
   return options;
 }
+
+/** The model a choice stands for: the one named, or the agent's default. */
+function chosenModel(models: readonly ModelInfo[], model: string | null): ModelInfo | undefined {
+  return model ? models.find((candidate) => candidate.id === model) : models.find((candidate) => candidate.is_default);
+}
+
+/**
+ * The effort levels a model takes, the agent's default first. Empty when effort
+ * cannot be chosen for it. A level chosen earlier stays on the list, so that what
+ * the thread has is always shown, even for a model the agent no longer lists.
+ */
+export function effortOptions(
+  models: readonly ModelInfo[],
+  model: string | null,
+  current: string | null,
+): ModelOption[] {
+  const info = chosenModel(models, model);
+  const levels = info?.efforts ?? [];
+  if (levels.length === 0 && !current) return [];
+  const fallback = info?.default_effort;
+  const options: ModelOption[] = [{ value: null, label: fallback ? `Agent default (${fallback})` : "Agent default" }];
+  for (const level of levels) options.push({ value: level, label: level });
+  if (current && !levels.includes(current)) options.push({ value: current, label: current });
+  return options;
+}
+
+/**
+ * What becomes of a chosen effort when the model changes: kept if the new model
+ * takes it (or the levels are not known yet), otherwise back to the default.
+ */
+export function effortFor(models: readonly ModelInfo[], model: string | null, effort: string | null): string | null {
+  if (!effort) return null;
+  const info = chosenModel(models, model);
+  if (!info) return effort;
+  return info.efforts?.includes(effort) ? effort : null;
+}

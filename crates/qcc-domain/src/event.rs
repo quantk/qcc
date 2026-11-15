@@ -54,13 +54,15 @@ pub enum EventPayload {
         permission_mode: Option<PermissionMode>,
     },
 
-    /// The thread goes on with another agent or model. A different provider cannot
-    /// resume the previous one's session: the next session starts afresh.
+    /// The thread goes on with another agent, model or effort. A different provider
+    /// cannot resume the previous one's session: the next session starts afresh.
     #[serde(rename = "thread/agent")]
     AgentChanged {
         provider: ProviderId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effort: Option<String>,
     },
 
     /// The user named the thread.

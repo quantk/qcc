@@ -2,15 +2,15 @@ import { BotIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
-import { modelLabel } from "../../state/models";
+import { effortFor, modelLabel } from "../../state/models";
 import { findProvider, pickableProviders } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
-import { Choice, ModelPicker } from "../../ui/kit";
+import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 
-/** Go on with another agent or model, between turns. */
+/** Go on with another agent, model or effort, between turns. */
 export function AgentSwitch({ thread }: { thread: Thread }) {
   const plugins = useApp((state) => state.plugins);
   const allPlugins = useApp((state) => state.allPlugins);
@@ -27,16 +27,19 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
   const [open, setOpen] = useState(false);
   const [provider, setProvider] = useState(thread.provider);
   const [model, setModel] = useState<string | null>(thread.model ?? null);
+  const [effort, setEffort] = useState<string | null>(thread.effort ?? null);
   const [saving, setSaving] = useState(false);
+  // The levels of the provider being chosen, which need not be the thread's own.
+  const chosenList = useApp((state) => state.models[provider]);
   const active = thread.status === "active";
   const locked = active || thread.archived;
   const current = findProvider(allPlugins, thread.provider)?.name ?? thread.provider;
   const switching = provider !== thread.provider;
-  const changed = switching || model !== (thread.model ?? null);
+  const changed = switching || model !== (thread.model ?? null) || effort !== (thread.effort ?? null);
 
   const apply = async () => {
     setSaving(true);
-    const done = await store().setAgent(thread.id, provider, model);
+    const done = await store().setAgent(thread.id, provider, model, effort);
     setSaving(false);
     if (done) setOpen(false);
   };
@@ -49,6 +52,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
         if (next) {
           setProvider(thread.provider);
           setModel(thread.model ?? null);
+          setEffort(thread.effort ?? null);
         }
         setOpen(next);
       }}
@@ -64,7 +68,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
                 ? "The agent of this archived thread"
                 : active
                   ? "Changes once the running turn ends"
-                  : "Go on with another agent or model"
+                  : "Go on with another agent, model or effort"
             }
           />
         }
@@ -72,6 +76,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
         <BotIcon />
         <span className="max-w-48 truncate">
           {current} · {thread.model ? modelLabel(models, thread.model) : "default model"}
+          {thread.effort ? ` · ${thread.effort}` : ""}
         </span>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96">
@@ -83,11 +88,11 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
           }}
         >
           <PopoverHeader>
-            <PopoverTitle>Agent and model</PopoverTitle>
+            <PopoverTitle>Agent, model and effort</PopoverTitle>
             <PopoverDescription>
               {switching
                 ? "The new agent starts its own session in the same directory and is given the conversation so far."
-                : "The session resumes with the new model on the next message."}
+                : "The session resumes the new way on the next message."}
             </PopoverDescription>
           </PopoverHeader>
           <FieldGroup className="gap-3">
@@ -102,12 +107,31 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
                   if (!value || value === provider) return;
                   setProvider(value);
                   setModel(null);
+                  setEffort(null);
                 }}
               />
             </Field>
             <Field>
               <FieldLabel htmlFor={`agent-model-${thread.id}`}>Model</FieldLabel>
-              <ModelPicker id={`agent-model-${thread.id}`} provider={provider} value={model} onChange={setModel} />
+              <ModelPicker
+                id={`agent-model-${thread.id}`}
+                provider={provider}
+                value={model}
+                onChange={(next) => {
+                  setModel(next);
+                  setEffort((level) => effortFor(chosenList?.models ?? [], next, level));
+                }}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor={`agent-effort-${thread.id}`}>Effort</FieldLabel>
+              <EffortPicker
+                id={`agent-effort-${thread.id}`}
+                provider={provider}
+                model={model}
+                value={effort}
+                onChange={setEffort}
+              />
             </Field>
           </FieldGroup>
           <div className="flex justify-end gap-2">
@@ -115,7 +139,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
               Cancel
             </Button>
             <Button type="submit" size="sm" disabled={!changed || saving || locked}>
-              {saving ? "Switching…" : switching ? "Switch agent" : "Change model"}
+              {saving ? "Switching…" : switching ? "Switch agent" : "Apply"}
             </Button>
           </div>
         </form>

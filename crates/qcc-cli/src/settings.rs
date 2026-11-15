@@ -28,6 +28,9 @@ pub(crate) enum SettingsCommand {
         /// The model new threads get; `default` to unset.
         #[arg(long)]
         model: Option<String>,
+        /// The effort new threads get; `default` to unset.
+        #[arg(long, value_name = "LEVEL")]
+        effort: Option<String>,
         /// The permission mode new threads get; `default` to unset.
         #[arg(long, value_name = "MODE")]
         permission_mode: Option<String>,
@@ -73,6 +76,9 @@ pub(crate) async fn run(
                 if let Some(model) = &defaults.model {
                     out(format!("  model            {model}"));
                 }
+                if let Some(effort) = &defaults.effort {
+                    out(format!("  effort           {effort}"));
+                }
                 if let Some(mode) = defaults.permission_mode {
                     out(format!("  permission mode  {}", mode.as_str()));
                 }
@@ -96,10 +102,21 @@ pub(crate) async fn run(
         SettingsCommand::DefaultProvider { provider } => {
             settings.default_provider = (provider != "none").then(|| ProviderId::new(provider));
         }
-        SettingsCommand::Provider { provider, model, permission_mode, env, unset_env, hidden } => {
+        SettingsCommand::Provider {
+            provider,
+            model,
+            effort,
+            permission_mode,
+            env,
+            unset_env,
+            hidden,
+        } => {
             let defaults = settings.providers.entry(ProviderId::new(provider)).or_default();
             if let Some(model) = model {
                 defaults.model = (model != "default").then_some(model);
+            }
+            if let Some(effort) = effort {
+                defaults.effort = (effort != "default").then_some(effort);
             }
             if let Some(mode) = permission_mode {
                 defaults.permission_mode = match mode.as_str() {

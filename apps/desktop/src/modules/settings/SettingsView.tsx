@@ -13,7 +13,7 @@ import { modeLabel, providersOf, visiblePlugins } from "../../state/selectors";
 import { envOf, envRows, providerSettings, withProgram, withProvider } from "../../state/settings";
 import { store, useApp } from "../../state/store";
 import { MAX_ZOOM, MIN_ZOOM, formatZoom, zoomIn, zoomOut } from "../../state/zoom";
-import { Choice, EnvEditor, ModelPicker } from "../../ui/kit";
+import { Choice, EffortPicker, EnvEditor, ModelPicker } from "../../ui/kit";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -208,6 +208,15 @@ function AgentSettings(props: {
         <Field>
           <FieldLabel>Model of new threads</FieldLabel>
           <ModelPicker provider={provider.id} value={own.model ?? null} onChange={(model) => update({ model })} />
+        </Field>
+        <Field>
+          <FieldLabel>Effort of new threads</FieldLabel>
+          <EffortPicker
+            provider={provider.id}
+            model={own.model ?? null}
+            value={own.effort ?? null}
+            onChange={(effort) => update({ effort })}
+          />
         </Field>
         <Field>
           <FieldLabel>Permissions</FieldLabel>

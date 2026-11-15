@@ -58,6 +58,9 @@ impl Provider for ClaudeCode {
         if let Some(model) = &start.model {
             args.extend(["--model".to_owned(), model.clone()]);
         }
+        if let Some(effort) = &start.effort {
+            args.extend(["--effort".to_owned(), effort.clone()]);
+        }
         if let Some(mode) = start.permission_mode {
             // Without the flag the user's own Claude Code settings decide.
             let mode = match mode {

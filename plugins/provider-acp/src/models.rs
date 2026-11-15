@@ -26,6 +26,8 @@ impl ProbeParser for ModelsProbe {
                 name: id.to_owned(),
                 description: None,
                 is_default: false,
+                efforts: Vec::new(),
+                default_effort: None,
             });
         }
         None

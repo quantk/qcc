@@ -61,6 +61,7 @@ pub struct Bridge {
     interrupted: HashSet<String>,
     approvals: HashMap<String, Approval>,
     instructions: Option<String>,
+    effort: Option<String>,
     writable_roots: Vec<String>,
     mcp_servers: Vec<McpServer>,
 }
@@ -163,6 +164,7 @@ impl Bridge {
             interrupted: HashSet::new(),
             approvals: HashMap::new(),
             instructions: None,
+            effort: None,
             writable_roots: Vec::new(),
             mcp_servers: Vec::new(),
         };
@@ -185,6 +187,12 @@ impl Bridge {
     /// `thread/start` and `thread/resume`.
     pub fn set_instructions(&mut self, instructions: Option<String>) {
         self.instructions = instructions;
+    }
+
+    /// How hard the model reasons. Sent as a config override with `thread/start` and
+    /// `thread/resume`, so it holds for every turn of the session.
+    pub fn set_effort(&mut self, effort: Option<String>) {
+        self.effort = effort;
     }
 
     /// MCP servers to add to those of the user's Codex configuration. Sent as a
@@ -443,6 +451,9 @@ impl Bridge {
             params["model"] = json!(model);
         }
         let mut config = serde_json::Map::new();
+        if let Some(effort) = &self.effort {
+            config.insert("model_reasoning_effort".into(), json!(effort));
+        }
         if !self.writable_roots.is_empty() {
             config.insert(
                 "sandbox_workspace_write".into(),
@@ -713,11 +724,21 @@ mod tests {
         assert_eq!(methods(&initialized), ["initialized", "thread/start"]);
         assert!(initialized.writes[1].contains("\"model\":\"gpt-x\""));
         assert!(!initialized.writes[1].contains("writable_roots"));
+        assert!(!initialized.writes[1].contains("model_reasoning_effort"));
 
         let ready = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(methods(&ready), ["turn/start"]);
         assert_eq!(ready.deltas, [Delta::SessionIdentity("th".into()), Delta::TurnOpen]);
         assert!(ready.writes[0].contains("\"threadId\":\"th\""));
+    }
+
+    #[test]
+    fn the_effort_holds_for_the_session() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        bridge.set_effort(Some("high".into()));
+        let resume = bridge.on_line(r#"{"id":1,"result":{}}"#);
+        assert_eq!(methods(&resume), ["initialized", "thread/resume"]);
+        assert!(resume.writes[1].contains("\"model_reasoning_effort\":\"high\""));
     }
 
     #[test]

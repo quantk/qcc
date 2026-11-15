@@ -46,7 +46,7 @@ WASM-плагинами.
 | `crates/qcc-plugins-bundle` | собирает `plugins/*` в wasm и встраивает в демон |
 | `crates/qcc-protocol` | методы JSON-RPC, пути и переменные окружения (`paths.rs`) |
 | `crates/qcc-client` | клиент протокола |
-| `crates/qcc-daemon` | `qccd`: `core.rs` (состояние, треды, ожидания), `plugins.rs`, `server.rs` |
+| `crates/qcc-daemon` | `qccd`: `core/` (состояние и реакции ядра: треды, сессии, окружения, ожидания), `plugins.rs`, `server.rs` |
 | `crates/qcc-cli` | `qcc`; e2e-тесты в `tests/e2e.rs` |
 | `plugins/provider-*` | мосты к агентам: `claude-code`, `codex`, `acp` (opencode), `echo` (тестовый) |
 | `plugins/env-git-worktree` | окружение треда в отдельном git worktree |
@@ -125,7 +125,7 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - **Вы сами можете быть внутри треда qcc.** Тогда в окружении есть `QCC_THREAD_ID`, `QCC_SOCKET`,
   `QCC_BIN`, и `qcc thread spawn` создаст потомка вашего треда. Для тестов снимайте
   `QCC_THREAD_ID` и задавайте свой `QCC_SOCKET` (так делает `./dev`).
-- Глубина делегирования ограничена (`MAX_SPAWN_DEPTH` в `crates/qcc-daemon/src/core.rs`).
+- Глубина делегирования ограничена (`MAX_SPAWN_DEPTH` в `crates/qcc-daemon/src/core/mod.rs`).
 
 ## Стиль
 

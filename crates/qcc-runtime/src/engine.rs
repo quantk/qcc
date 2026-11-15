@@ -1,6 +1,6 @@
 use qcc_domain::{
-    Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, Thread, ThreadEvent,
-    ThreadStatus, TurnStatus,
+    Delta, EventPayload, InteractionId, InteractionResolution, PermissionMode, ProviderId, Thread,
+    ThreadEvent, ThreadStatus, TurnStatus,
 };
 
 use crate::assembler::{DeltaAssembler, GrammarViolation};
@@ -168,6 +168,20 @@ impl ThreadEngine {
             return Vec::new();
         }
         self.emit(vec![EventPayload::PermissionModeChanged { permission_mode }], now)
+    }
+
+    /// Go on with another agent or model. The caller releases a live session first:
+    /// the agent and model are fixed when a session is constructed.
+    pub fn set_agent(
+        &mut self,
+        provider: ProviderId,
+        model: Option<String>,
+        now: u64,
+    ) -> Vec<ThreadEvent> {
+        if self.thread.provider == provider && self.thread.model == model {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::AgentChanged { provider, model }], now)
     }
 
     /// Record a step in the life of the thread's environment or of the thread

@@ -38,8 +38,6 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
             {thread.title ?? "New thread"}
           </h1>
           <div className="thread-facts">
-            <span>{provider?.name ?? thread.provider}</span>
-            {thread.model && <span>{thread.model}</span>}
             <span className="path" title={thread.cwd}>
               {tailPath(thread.cwd, 70)}
             </span>

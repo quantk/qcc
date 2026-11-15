@@ -197,6 +197,10 @@ pub struct Thread {
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
+    /// The provider changed since the last session started. The next session has
+    /// nothing to resume and is told the conversation so far instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub handover: bool,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -226,6 +230,15 @@ impl Thread {
                 if provider_session.is_some() {
                     self.provider_session.clone_from(provider_session);
                 }
+                self.handover = false;
+            }
+            EventPayload::AgentChanged { provider, model } => {
+                if *provider != self.provider {
+                    self.provider = provider.clone();
+                    self.provider_session = None;
+                    self.handover = true;
+                }
+                self.model.clone_from(model);
             }
             EventPayload::SessionIdentified { provider_session } => {
                 self.provider_session = Some(provider_session.clone());
@@ -306,6 +319,7 @@ mod tests {
             turn_started_at: None,
             last_turn_status: None,
             archived: false,
+            handover: false,
         }
     }
 
@@ -391,6 +405,36 @@ mod tests {
         );
         assert_eq!(thread.turn_started_at, None);
         assert_eq!(thread.last_turn_status, Some(TurnStatus::Failed));
+    }
+
+    #[test]
+    fn another_agent_starts_afresh_and_is_handed_the_conversation() {
+        let mut thread = thread();
+        thread.provider_session = Some("s".into());
+        let model = |model: &str| EventPayload::AgentChanged {
+            provider: ProviderId::new("echo"),
+            model: Some(model.into()),
+        };
+        apply(&mut thread, vec![model("big")]);
+        // Another model of the same agent resumes the same session.
+        assert_eq!(thread.model.as_deref(), Some("big"));
+        assert_eq!(thread.provider_session.as_deref(), Some("s"));
+        assert!(!thread.handover);
+
+        apply(
+            &mut thread,
+            vec![EventPayload::AgentChanged { provider: ProviderId::new("other"), model: None }],
+        );
+        assert_eq!(thread.provider, ProviderId::new("other"));
+        assert_eq!(thread.model, None);
+        assert_eq!(thread.provider_session, None);
+        assert!(thread.handover);
+
+        apply(
+            &mut thread,
+            vec![EventPayload::SessionStarted { provider_session: None, resumed: false }],
+        );
+        assert!(!thread.handover);
     }
 
     #[test]

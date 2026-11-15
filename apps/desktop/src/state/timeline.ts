@@ -139,6 +139,9 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     case "thread/permission-mode":
       notice("info", `Permission mode: ${event.permission_mode ?? "agent default"}`);
       break;
+    case "thread/agent":
+      notice("info", `Agent: ${event.provider}${event.model ? `, model ${event.model}` : ", default model"}`);
+      break;
     case "thread/archived":
       notice("info", "Thread archived");
       break;

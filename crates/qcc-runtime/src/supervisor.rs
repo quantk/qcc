@@ -66,6 +66,7 @@ impl Supervisor {
             turn_started_at: None,
             last_turn_status: None,
             archived: false,
+            handover: false,
         };
         let (engine, events) = ThreadEngine::create(thread, (self.mint)(), now);
         self.engines.insert(new.id, engine);

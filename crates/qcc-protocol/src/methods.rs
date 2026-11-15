@@ -145,6 +145,24 @@ pub struct ThreadSetModeParams {
 }
 
 method!(
+    /// Go on with another agent or another model. Refused while a turn runs. An
+    /// attached session is released; with the same provider the next message resumes
+    /// it with the new model, with another provider a new session starts and is told
+    /// the conversation so far. A permission mode the new provider cannot enforce is
+    /// dropped.
+    ThreadSetAgent, "thread.set_agent", ThreadSetAgentParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadSetAgentParams {
+    pub thread_id: ThreadId,
+    pub provider: ProviderId,
+    /// Absent: the agent's default model.
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+method!(
     /// Interrupt the running turn or release the session. Returns once the provider
     /// answered and everything open is settled.
     ThreadStop, "thread.stop", ThreadStopParams => Empty

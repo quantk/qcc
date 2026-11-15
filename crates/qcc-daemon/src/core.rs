@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use base64::Engine as _;
 use qcc_domain::{
-    Delta, EnvironmentState, EventPayload, ModelInfo, PermissionMode, ProviderId, SkillRef,
+    Delta, EnvironmentState, EventPayload, ModelInfo, PermissionMode, ProviderId, Role, SkillRef,
     ThreadEnvironment, ThreadEvent, ThreadId, ThreadState, ThreadStatus,
 };
 use qcc_plugin_host::{
@@ -24,13 +24,13 @@ use qcc_protocol::methods::{
     THREAD_UPDATED, ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesResult,
     ThreadDiff, ThreadDiffResult, ThreadEventNotification, ThreadEvents, ThreadEventsParams,
     ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadListResult,
-    ThreadResult, ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetMode,
-    ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
-    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait,
-    ThreadWaitParams, ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult,
-    UiItemContribution, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult,
-    UiViewContribution, WaitedThread,
+    ThreadResult, ThreadSend, ThreadSendParams, ThreadSendResult, ThreadSetAgent,
+    ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
+    ThreadUpdatedNotification, ThreadWait, ThreadWaitParams, ThreadWaitResult, ThreadWatch,
+    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
+    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution, WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -39,7 +39,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use crate::{Config, plugins};
+use crate::{Config, handover, plugins};
 
 /// Answers one request on the connection it came from.
 pub(crate) struct Responder {
@@ -421,6 +421,10 @@ impl Core {
                 let result = params::<ThreadSetMode>(raw).and_then(|p| self.thread_set_mode(p));
                 responder.reply(result);
             }
+            ThreadSetAgent::NAME => {
+                let result = params::<ThreadSetAgent>(raw).and_then(|p| self.thread_set_agent(p));
+                responder.reply(result);
+            }
             ThreadStop::NAME => match params::<ThreadStop>(raw) {
                 Ok(p) => self.thread_stop(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
@@ -788,30 +792,63 @@ impl Core {
             .map(|thread| thread.provider.clone())
             .ok_or_else(|| thread_not_found(&thread_id))?;
         self.check_mode(&provider, permission_mode)?;
-        self.check_open(&thread_id)?;
-        let held = self.in_transition(&thread_id);
-        let engine =
-            self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
+        self.reconfigure(&thread_id, "the permission mode", |engine, now| {
+            engine.set_permission_mode(permission_mode, now)
+        })
+    }
+
+    fn thread_set_agent(&mut self, p: ThreadSetAgentParams) -> Result<ThreadResult, RpcError> {
+        let ThreadSetAgentParams { thread_id, provider, model } = p;
+        self.check_mode(&provider, None)?;
+        let supported = self
+            .host
+            .provider(&provider)
+            .map(|(_, info)| info.capabilities.permission_modes.clone())
+            .unwrap_or_default();
+        let model = model.filter(|model| !model.trim().is_empty());
+        self.reconfigure(&thread_id, "the agent", |engine, now| {
+            let mut events = Vec::new();
+            // A mode the new agent cannot enforce would fail every start.
+            if engine.thread().permission_mode.is_some_and(|mode| !supported.contains(&mode)) {
+                events.extend(engine.set_permission_mode(None, now));
+            }
+            events.extend(engine.set_agent(provider, model, now));
+            events
+        })
+    }
+
+    /// Change what a session is constructed with. Refused while a turn runs or the
+    /// session is starting or stopping. A live session is released, so the next
+    /// message starts one the new way.
+    fn reconfigure(
+        &mut self,
+        thread_id: &ThreadId,
+        what: &str,
+        change: impl FnOnce(&mut qcc_runtime::ThreadEngine, u64) -> Vec<ThreadEvent>,
+    ) -> Result<ThreadResult, RpcError> {
+        self.check_open(thread_id)?;
+        let held = self.in_transition(thread_id);
+        let engine = self.supervisor.engine(thread_id).map_err(|_| thread_not_found(thread_id))?;
         if engine.busy() || held {
             return Err(RpcError::new(
                 codes::THREAD_BUSY,
-                "a turn is running; stop it before changing the permission mode",
+                format!("a turn is running; stop it before changing {what}"),
             ));
         }
         let live = engine.session_live();
-        let events = engine.set_permission_mode(permission_mode, now_ms());
+        // The session belongs to the provider the thread had before the change.
+        let provider = engine.thread().provider.clone();
+        let events = change(engine, now_ms());
         let changed = !events.is_empty();
         self.commit(events);
         if changed && live {
-            // A mode is fixed when a session is constructed. Release this one; the
-            // next message resumes the conversation in the new mode.
             self.sessions.entry(thread_id.clone()).or_default().stopping = true;
-            self.call_provider(&thread_id, Action::Release, None, |thread| ProviderRequest::Stop {
-                thread,
+            self.call_provider_of(thread_id, Some(provider), Action::Release, None, |thread| {
+                ProviderRequest::Stop { thread }
             });
         }
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        let thread = self.supervisor.thread(thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(thread_id))
     }
 
     fn thread_stop(&mut self, p: ThreadStopParams, responder: Responder) {
@@ -1350,6 +1387,10 @@ impl Core {
         };
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
+        let prompt = match prompt {
+            Some(message) if thread.handover => Some(self.handover_prompt(id, message)),
+            prompt => prompt,
+        };
         let request = PluginRequest::Provider {
             provider: thread.provider,
             request: ProviderRequest::Start(SessionStart {
@@ -1369,6 +1410,38 @@ impl Core {
             let result = plugin.call(request).await;
             let _ = commands.send(Command::SessionStartFinished { thread, resumed, result });
         });
+    }
+
+    /// The first message for an agent that takes over from another one.
+    fn handover_prompt(&self, id: &ThreadId, message: String) -> String {
+        let events = self.store.events(id, 0).unwrap_or_default();
+        // The agent that had the thread before the latest change.
+        let mut providers = events.iter().filter_map(|event| match &event.payload {
+            EventPayload::ThreadCreated { thread } => Some(thread.provider.clone()),
+            EventPayload::AgentChanged { provider, .. } => Some(provider.clone()),
+            _ => None,
+        });
+        let mut previous = None;
+        let mut current = providers.next();
+        for provider in providers {
+            if Some(&provider) != current.as_ref() {
+                previous = current.replace(provider);
+            }
+        }
+        let previous = previous.map_or_else(
+            || "another agent".to_owned(),
+            |provider| {
+                self.host
+                    .provider(&provider)
+                    .map_or(provider.to_string(), |(_, info)| info.name.clone())
+            },
+        );
+        let mut history = self.store.transcript(id, false).unwrap_or_default();
+        // The message itself was journaled before the session was asked to start.
+        if history.last().is_some_and(|last| last.role == Role::User && last.text == message) {
+            history.pop();
+        }
+        handover::prompt(&previous, &history, &message)
     }
 
     fn session_start_finished(
@@ -1637,7 +1710,20 @@ impl Core {
         responder: Option<Responder>,
         request: impl FnOnce(ThreadId) -> ProviderRequest,
     ) {
-        let provider = self.supervisor.thread(id).map(|thread| thread.provider.clone());
+        self.call_provider_of(id, None, action, responder, request);
+    }
+
+    /// Like [`Core::call_provider`], to `provider` instead of the thread's own.
+    fn call_provider_of(
+        &mut self,
+        id: &ThreadId,
+        provider: Option<ProviderId>,
+        action: Action,
+        responder: Option<Responder>,
+        request: impl FnOnce(ThreadId) -> ProviderRequest,
+    ) {
+        let provider =
+            provider.or_else(|| self.supervisor.thread(id).map(|thread| thread.provider.clone()));
         let plugin = provider.as_ref().and_then(|p| self.host.provider(p)).map(|(p, _)| p.clone());
         let (Some(provider), Some(plugin)) = (provider, plugin) else {
             let _ = self.commands.send(Command::CallFinished {

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::ids::{InteractionId, ItemId, ThreadId, TurnId};
+use crate::ids::{InteractionId, ItemId, ProviderId, ThreadId, TurnId};
 use crate::interaction::{InteractionRequest, InteractionResolution};
 use crate::item::Item;
 use crate::provider::PermissionMode;
@@ -52,6 +52,15 @@ pub enum EventPayload {
     PermissionModeChanged {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         permission_mode: Option<PermissionMode>,
+    },
+
+    /// The thread goes on with another agent or model. A different provider cannot
+    /// resume the previous one's session: the next session starts afresh.
+    #[serde(rename = "thread/agent")]
+    AgentChanged {
+        provider: ProviderId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
     },
 
     /// The thread was put away. Always its last state change.

@@ -288,6 +288,15 @@ export class AppStore {
     if (result) this.mergeThreads([result.thread]);
   }
 
+  /** Resolves to whether the thread now has that agent and model. */
+  async setAgent(threadId: ThreadId, provider: ProviderId, model: string | null): Promise<boolean> {
+    const result = await this.attempt(() =>
+      this.api.call("thread.set_agent", { thread_id: threadId, provider, model }),
+    );
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
   /**
    * Archive a thread. When its environment holds work that would be lost, nothing
    * is archived and the reason comes back, for the user to confirm with `force`.

@@ -16,8 +16,9 @@ use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Delivery, Empty, InteractionResolve,
     InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, SendMode, StopMode,
     ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadDiff, ThreadGet, ThreadGetParams,
-    ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetMode, ThreadSetModeParams,
-    ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
+    ThreadList, ThreadListParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
+    ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -131,6 +132,15 @@ enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// Go on with another agent or model. Another agent starts a new session and is
+    /// told the conversation so far; `qcc provider models` lists the models.
+    Agent {
+        thread: String,
+        provider: String,
+        /// Absent: the agent's default model.
+        #[arg(long)]
+        model: Option<String>,
+    },
     /// Interrupt the running turn of a thread.
     Stop {
         thread: String,
@@ -379,6 +389,19 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 .call::<ThreadSetMode>(ThreadSetModeParams {
                     thread_id: ThreadId::new(thread),
                     permission_mode,
+                })
+                .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::Agent { thread, provider, model }) => {
+            let result = client
+                .call::<ThreadSetAgent>(ThreadSetAgentParams {
+                    thread_id: ThreadId::new(thread),
+                    provider: ProviderId::new(provider),
+                    model,
                 })
                 .await?;
             if json {

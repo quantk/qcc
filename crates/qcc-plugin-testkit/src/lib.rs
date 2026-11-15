@@ -109,6 +109,7 @@ impl HarnessBuilder {
             last_turn_status: None,
             environment: None,
             archived: false,
+            handover: false,
         };
         let (engine, events) = ThreadEngine::create(thread, Box::new(SequentialMint::default()), 0);
         Harness {

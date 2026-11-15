@@ -107,6 +107,11 @@ export type EventPayload =
 { type: "thread/created"; thread: Thread } | { type: "thread/status"; status: ThreadStatus } | { type: "session/started"; provider_session?: string | null; resumed: boolean } | 
 /**  The provider named its session after it had started. */
 { type: "session/identified"; provider_session: string } | { type: "session/ended"; reason?: string | null } | { type: "thread/permission-mode"; permission_mode?: PermissionMode | null } | 
+/**
+ *  The thread goes on with another agent or model. A different provider cannot
+ *  resume the previous one's session: the next session starts afresh.
+ */
+{ type: "thread/agent"; provider: ProviderId; model?: string | null } | 
 /**  The thread was put away. Always its last state change. */
 { type: "thread/archived" } | 
 /**  The environment plugin was asked (again) to make the working directory. */
@@ -322,6 +327,11 @@ export type Thread = {
 	last_turn_status?: TurnStatus | null,
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
+	/**
+	 *  The provider changed since the last session started. The next session has
+	 *  nothing to resume and is told the conversation so far instead.
+	 */
+	handover?: boolean,
 };
 
 /**
@@ -426,6 +436,13 @@ export type ThreadSendResult = {
 	delivery: Delivery,
 	/**  Set when queued: the `queue_id` its `input/submitted` event will carry. */
 	queue_id?: string | null,
+};
+
+export type ThreadSetAgentParams = {
+	thread_id: ThreadId,
+	provider: ProviderId,
+	/**  Absent: the agent's default model. */
+	model?: string | null,
 };
 
 export type ThreadSetModeParams = {
@@ -629,6 +646,7 @@ export type Methods = {
 	"thread.spawn": { params: ThreadSpawnParams; result: ThreadResult },
 	"thread.send": { params: ThreadSendParams; result: ThreadSendResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
+	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.stop": { params: ThreadStopParams; result: Empty },
 	"thread.list": { params: ThreadListParams; result: ThreadListResult },
 	"thread.watch": { params: ThreadWatchParams; result: ThreadListResult },

@@ -1,4 +1,5 @@
-// The controls in a thread's header: its permission mode and putting it away.
+// The controls in a thread's header: its agent and model, its permission mode and
+// putting it away.
 
 import { useState } from "react";
 
@@ -18,6 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { AgentSwitch } from "./AgentSwitch";
 
 function ModeSelect({ thread, provider }: ThreadContext) {
   const modes = provider?.capabilities.permission_modes ?? [];
@@ -80,6 +82,11 @@ function ArchiveButton({ thread }: { thread: Thread }) {
 export const threadControlsModule: UiModule = {
   id: "core.thread-controls",
   activate(ui) {
+    ui.threadAction({
+      id: "agent",
+      order: -10,
+      render: ({ thread }) => <AgentSwitch thread={thread} />,
+    });
     ui.threadAction({
       id: "permission-mode",
       order: 0,

@@ -258,6 +258,10 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         EventPayload::PermissionModeChanged { permission_mode } => {
             format!("permission mode: {}", permission_mode.map_or("default", |mode| mode.as_str()))
         }
+        EventPayload::AgentChanged { provider, model } => match model {
+            Some(model) => format!("agent: {provider}, model {model}"),
+            None => format!("agent: {provider}"),
+        },
         EventPayload::ItemCompleted { item: completed, .. } => item(completed)?,
         EventPayload::TurnCompleted { status, error, .. } => match (status, error) {
             (TurnStatus::Completed, _) => return None,

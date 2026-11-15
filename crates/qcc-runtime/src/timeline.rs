@@ -189,6 +189,7 @@ impl Timeline {
             | EventPayload::EnvironmentFailed { .. }
             | EventPayload::EnvironmentRemoved
             | EventPayload::PermissionModeChanged { .. }
+            | EventPayload::AgentChanged { .. }
             | EventPayload::ThreadStatusChanged { .. }
             | EventPayload::SessionStarted { .. }
             | EventPayload::SessionIdentified { .. }

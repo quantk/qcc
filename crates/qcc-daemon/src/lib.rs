@@ -6,6 +6,7 @@
 //! to it through a channel.
 
 mod core;
+mod handover;
 mod plugins;
 mod server;
 

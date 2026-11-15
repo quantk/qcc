@@ -944,6 +944,37 @@ fn a_watching_client_sees_threads_appear_and_change() {
 /// A message sent while the session is being released waits for the release, then
 /// starts a fresh session, instead of reaching the one going away.
 #[test]
+fn the_model_changes_between_turns_and_the_session_resumes() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("hello");
+    daemon.wait_for(&id, "turn/completed");
+
+    assert!(daemon.qcc(&["thread", "agent", &id, "echo", "--model", "echo-2"]).ok);
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["model"], "echo-2");
+    assert!(thread.get("handover").is_none(), "the same agent resumes: {thread}");
+
+    assert!(daemon.qcc(&["thread", "send", &id, "again"]).ok);
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let events = loop {
+        let events = daemon.events(&id);
+        if types(&events).iter().filter(|kind| **kind == "turn/completed").count() == 2 {
+            break events;
+        }
+        assert!(Instant::now() < deadline, "the second turn never ran: {events:#?}");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let changed = events.iter().position(|event| event["type"] == "thread/agent").unwrap();
+    let resumed = events[changed..].iter().find(|event| event["type"] == "session/started");
+    assert_eq!(resumed.unwrap()["resumed"], true);
+
+    let unknown = daemon.qcc(&["thread", "agent", &id, "nobody"]);
+    assert!(!unknown.ok);
+    assert!(unknown.stderr.contains("no plugin provides"), "{}", unknown.stderr);
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

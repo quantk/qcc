@@ -114,7 +114,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-lg" initialFocus={last.cwd ? message : directory}>
+      <DialogContent className="sm:max-w-2xl" initialFocus={last.cwd ? message : directory}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {
@@ -243,7 +243,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
                 />
               </Field>
             )}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3">
               <Field>
                 <FieldLabel htmlFor="new-thread-model">Model</FieldLabel>
                 <ModelPicker

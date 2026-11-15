@@ -56,7 +56,10 @@ export type ItemRenderer = ComponentType<ItemRendererProps>;
 export type Command = {
   id: string;
   title: string;
-  /** `Ctrl+N`, `Ctrl+Shift+P`: modifiers then one key. Ctrl also matches Cmd. */
+  /**
+   * `Ctrl+N`, `Ctrl+Shift+P`: modifiers then one key. Ctrl also matches Cmd. `Plus`
+   * and `Minus` name those keys, with or without Shift.
+   */
   shortcut?: string;
   /** Absent: always available. */
   enabled?: () => boolean;
@@ -192,14 +195,25 @@ export function useUi<T>(select: (snapshot: Snapshot) => T): T {
   return useSyncExternalStore(ui.subscribe, () => select(ui.getSnapshot()));
 }
 
+/**
+ * Keys named in a shortcut rather than typed: `+` would split it, and both share a
+ * physical key with another character, so Shift is not part of them.
+ */
+const NAMED_KEYS: Record<string, readonly string[]> = {
+  plus: ["+", "="],
+  minus: ["-", "_"],
+};
+
 /** Whether a keyboard event is the shortcut a command asks for. */
 export function matchesShortcut(event: KeyboardEvent, shortcut: string): boolean {
   const parts = shortcut.toLowerCase().split("+");
-  const key = parts.pop();
+  const key = parts.pop() ?? "";
+  const named = NAMED_KEYS[key];
+  const pressed = event.key.toLowerCase();
   return (
-    event.key.toLowerCase() === key &&
+    (named ? named.includes(pressed) : pressed === key) &&
     (event.ctrlKey || event.metaKey) === parts.includes("ctrl") &&
-    event.shiftKey === parts.includes("shift") &&
+    (named !== undefined || event.shiftKey === parts.includes("shift")) &&
     event.altKey === parts.includes("alt")
   );
 }

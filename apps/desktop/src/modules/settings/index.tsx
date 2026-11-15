@@ -1,0 +1,21 @@
+// Preferences of this window: for now the interface scale.
+
+import { zoomIn, zoomOut } from "../../state/zoom";
+import type { UiModule } from "../../ui/registry";
+import { SettingsView } from "./SettingsView";
+import { getZoom, restoreZoom, setZoom } from "./zoom";
+
+export const SETTINGS = "settings";
+
+export const settingsModule: UiModule = {
+  id: "core.settings",
+  activate(ui) {
+    restoreZoom();
+    ui.appView({ id: SETTINGS, title: "Settings", order: 100, render: SettingsView });
+    // The shortcuts a browser uses. Ctrl+0 already opens the overview, so resetting
+    // the scale is left to the palette and the settings screen.
+    ui.command({ id: "zoom.in", title: "Zoom in", shortcut: "Ctrl+Plus", run: () => setZoom(zoomIn(getZoom())) });
+    ui.command({ id: "zoom.out", title: "Zoom out", shortcut: "Ctrl+Minus", run: () => setZoom(zoomOut(getZoom())) });
+    ui.command({ id: "zoom.reset", title: "Reset zoom to 100%", run: () => setZoom(1) });
+  },
+};

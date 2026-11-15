@@ -58,5 +58,9 @@ describe("UiRegistry", () => {
     expect(matchesShortcut(event({ key: "N", metaKey: true }), "Ctrl+N")).toBe(true);
     expect(matchesShortcut(event({ key: "n", ctrlKey: true, shiftKey: true }), "Ctrl+N")).toBe(false);
     expect(matchesShortcut(event({ key: "n" }), "Ctrl+N")).toBe(false);
+    expect(matchesShortcut(event({ key: "=", ctrlKey: true }), "Ctrl+Plus")).toBe(true);
+    expect(matchesShortcut(event({ key: "+", ctrlKey: true, shiftKey: true }), "Ctrl+Plus")).toBe(true);
+    expect(matchesShortcut(event({ key: "-", ctrlKey: true }), "Ctrl+Minus")).toBe(true);
+    expect(matchesShortcut(event({ key: "-" }), "Ctrl+Minus")).toBe(false);
   });
 });

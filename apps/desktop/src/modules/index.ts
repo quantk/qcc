@@ -8,6 +8,7 @@ import { newThreadModule } from "./new-thread";
 import { overviewModule } from "./overview";
 import { pluginCommandsModule } from "./plugin-commands";
 import { pluginUiModule } from "./plugin-ui";
+import { settingsModule } from "./settings";
 import { threadControlsModule } from "./thread-controls";
 import { timelineModule } from "./timeline";
 
@@ -20,4 +21,5 @@ export const builtinModules: UiModule[] = [
   newThreadModule,
   pluginUiModule,
   pluginCommandsModule,
+  settingsModule,
 ];

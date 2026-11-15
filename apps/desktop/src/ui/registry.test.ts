@@ -64,3 +64,25 @@ describe("UiRegistry", () => {
     expect(matchesShortcut(event({ key: "-" }), "Ctrl+Minus")).toBe(false);
   });
 });
+
+describe("thread menu", () => {
+  it("keeps entries in order and lets a module take its own out", () => {
+    const registry = new UiRegistry();
+    registry.activate({
+      id: "a",
+      activate(ui) {
+        ui.threadMenuItem({ id: "archive", title: "Archive", order: 60, run: () => {} });
+        ui.threadMenuItem({ id: "open", title: "Open", order: 0, run: () => {} });
+      },
+    });
+    registry.activate({
+      id: "b",
+      activate(ui) {
+        ui.threadMenuItem({ id: "move", title: "Move", order: 20, run: () => {} });
+      },
+    });
+    expect(registry.getSnapshot().menu.map((item) => item.id)).toEqual(["open", "move", "archive"]);
+    registry.deactivate("b");
+    expect(registry.getSnapshot().menu.map((item) => item.id)).toEqual(["open", "archive"]);
+  });
+});

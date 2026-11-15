@@ -365,6 +365,17 @@ pub struct ThreadEventNotification {
 }
 
 method!(
+    /// Give a thread a name of the user's choosing instead of its first message.
+    ThreadRename, "thread.rename", ThreadRenameParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadRenameParams {
+    pub thread_id: ThreadId,
+    pub title: String,
+}
+
+method!(
     /// Put a thread into a project, move it to another or take it out (`None`).
     ThreadSetProject, "thread.set_project", ThreadSetProjectParams => ThreadResult
 );

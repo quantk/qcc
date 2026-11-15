@@ -219,8 +219,11 @@ const TITLE_MAX_CHARS: usize = 80;
 impl Thread {
     /// Fold one event into the projection.
     pub fn apply(&mut self, event: &ThreadEvent) {
-        // Filing a thread under a project is not something it did.
-        if !matches!(event.payload, EventPayload::ProjectChanged { .. }) {
+        // Filing or naming a thread is not something it did.
+        if !matches!(
+            event.payload,
+            EventPayload::ProjectChanged { .. } | EventPayload::TitleChanged { .. }
+        ) {
             self.updated_at = event.ts;
         }
         self.last_seq = event.seq;
@@ -243,6 +246,7 @@ impl Thread {
                 self.handover = false;
             }
             EventPayload::ProjectChanged { project } => self.project.clone_from(project),
+            EventPayload::TitleChanged { title } => self.title = Some(title.clone()),
             EventPayload::AgentChanged { provider, model } => {
                 if *provider != self.provider {
                     self.provider = provider.clone();

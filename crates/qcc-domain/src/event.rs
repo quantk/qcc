@@ -63,6 +63,10 @@ pub enum EventPayload {
         model: Option<String>,
     },
 
+    /// The user named the thread.
+    #[serde(rename = "thread/title")]
+    TitleChanged { title: String },
+
     /// The thread was put into a project, moved to another or taken out of one.
     #[serde(rename = "thread/project")]
     ProjectChanged {

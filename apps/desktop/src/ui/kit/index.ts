@@ -8,3 +8,4 @@ export { Choice, type ChoiceOption } from "./Choice";
 export { InteractionOutcome, InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";
 export { ModelPicker } from "./ModelPicker";
+export { ThreadMenu } from "./ThreadMenu";

@@ -43,6 +43,7 @@ fn generate() -> String {
         .method::<ThreadSetMode>()
         .method::<ThreadSetAgent>()
         .method::<ThreadSetProject>()
+        .method::<ThreadRename>()
         .method::<ProjectList>()
         .method::<ProjectCreate>()
         .method::<ProjectUpdate>()

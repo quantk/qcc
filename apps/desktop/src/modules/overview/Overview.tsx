@@ -11,7 +11,7 @@ import {
 } from "../../state/selectors";
 import { isUnread } from "../../state/reads";
 import { store, useApp } from "../../state/store";
-import { InteractionPrompt } from "../../ui/kit";
+import { InteractionPrompt, ThreadMenu } from "../../ui/kit";
 import { baseName, elapsed, plural, relativeTime } from "../../util/format";
 import { useNow } from "../../util/useNow";
 
@@ -42,14 +42,19 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const open = () => store().select(thread.id);
 
   return (
-    <article
-      className={`agent-card ${attention}`}
-      role="button"
-      tabIndex={0}
-      onClick={open}
-      onKeyDown={(event) => {
-        if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) open();
-      }}
+    <ThreadMenu
+      thread={thread}
+      render={
+        <article
+          className={`agent-card ${attention}`}
+          role="button"
+          tabIndex={0}
+          onClick={open}
+          onKeyDown={(event) => {
+            if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) open();
+          }}
+        />
+      }
     >
       <header>
         <span className={`dot ${attention}`} title={attentionLabel[attention]} />
@@ -78,7 +83,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
       {(thread.pending_interactions ?? []).map((pending) => (
         <InteractionPrompt key={pending.id} threadId={thread.id} id={pending.id} request={pending.request} />
       ))}
-    </article>
+    </ThreadMenu>
   );
 }
 

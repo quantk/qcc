@@ -18,10 +18,11 @@ use qcc_client::protocol::methods::{
     ProjectDeleteParams, ProjectList, ProjectListResult, ProjectUpdate, ProjectUpdateParams,
     ProviderModels, ProviderModelsParams, ProviderSettings, SendMode, SettingsGet, SettingsResult,
     SettingsSet, SettingsSetParams, StopMode, ThreadArchive, ThreadArchiveParams, ThreadChanges,
-    ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadSend,
-    ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams,
-    ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
-    ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
+    ThreadDiff, ThreadGet, ThreadGetParams, ThreadList, ThreadListParams, ThreadRename,
+    ThreadRenameParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
+    ThreadSetMode, ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn,
+    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams,
+    ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -146,6 +147,8 @@ enum ThreadCommand {
     /// Change a thread's permission mode: ask, accept-edits, auto, full, or
     /// `default` for the agent's own configuration.
     Mode { thread: String, mode: String },
+    /// Name a thread.
+    Rename { thread: String, title: String },
     /// Put a thread into a project (id or name), or take it out with `none`.
     Project { thread: String, project: String },
     /// Take a queued message back before it is delivered and print it. The id is the
@@ -485,6 +488,14 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     permission_mode,
                 })
                 .await?;
+            if json {
+                print_json(&result)?;
+            }
+        }
+
+        Command::Thread(ThreadCommand::Rename { thread, title }) => {
+            let params = ThreadRenameParams { thread_id: ThreadId::new(thread), title };
+            let result = client.call::<ThreadRename>(params).await?;
             if json {
                 print_json(&result)?;
             }

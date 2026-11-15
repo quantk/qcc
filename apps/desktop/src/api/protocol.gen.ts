@@ -112,6 +112,8 @@ export type EventPayload =
  *  resume the previous one's session: the next session starts afresh.
  */
 { type: "thread/agent"; provider: ProviderId; model?: string | null } | 
+/**  The user named the thread. */
+{ type: "thread/title"; title: string } | 
 /**  The thread was put into a project, moved to another or taken out of one. */
 { type: "thread/project"; project?: ProjectId | null } | 
 /**  The thread was put away. Always its last state change. */
@@ -531,6 +533,11 @@ export type ThreadListResult = {
 	threads: Thread[],
 };
 
+export type ThreadRenameParams = {
+	thread_id: ThreadId,
+	title: string,
+};
+
 export type ThreadResult = {
 	thread: Thread,
 };
@@ -778,6 +785,7 @@ export type Methods = {
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },
 	"thread.set_project": { params: ThreadSetProjectParams; result: ThreadResult },
+	"thread.rename": { params: ThreadRenameParams; result: ThreadResult },
 	"project.list": { params: Empty; result: ProjectListResult },
 	"project.create": { params: ProjectCreateParams; result: ProjectResult },
 	"project.update": { params: ProjectUpdateParams; result: ProjectResult },

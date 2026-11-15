@@ -22,6 +22,14 @@ export const projectsModule: UiModule = {
   activate(registry) {
     const connected = () => store().getState().daemon.status === "connected";
     registry.command({ id: "project.new", title: "New project", enabled: connected, run: () => openProject() });
+    registry.threadMenuItem({
+      id: "move-to-project",
+      title: "Move to project…",
+      order: 20,
+      group: "edit",
+      when: () => store().getState().projects.length > 0,
+      run: (thread) => openMoveThread(thread.id),
+    });
     registry.command({
       id: "project.move-thread",
       title: "Move this thread to a project…",

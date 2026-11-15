@@ -404,6 +404,13 @@ export class AppStore {
     if (result) this.mergeThreads([result.thread]);
   }
 
+  /** Resolves to whether the daemon took the name. */
+  async rename(threadId: ThreadId, title: string): Promise<boolean> {
+    const result = await this.attempt(() => this.api.call("thread.rename", { thread_id: threadId, title }));
+    if (result) this.mergeThreads([result.thread]);
+    return result !== null;
+  }
+
   /** Resolves to whether the thread now has that agent and model. */
   async setAgent(threadId: ThreadId, provider: ProviderId, model: string | null): Promise<boolean> {
     const result = await this.attempt(() =>

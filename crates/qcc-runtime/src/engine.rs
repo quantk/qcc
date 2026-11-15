@@ -193,6 +193,13 @@ impl ThreadEngine {
         self.emit(vec![EventPayload::AgentChanged { provider, model }], now)
     }
 
+    pub fn set_title(&mut self, title: String, now: u64) -> Vec<ThreadEvent> {
+        if self.thread.title.as_deref() == Some(title.as_str()) {
+            return Vec::new();
+        }
+        self.emit(vec![EventPayload::TitleChanged { title }], now)
+    }
+
     pub fn set_project(&mut self, project: Option<ProjectId>, now: u64) -> Vec<ThreadEvent> {
         if self.thread.project == project {
             return Vec::new();

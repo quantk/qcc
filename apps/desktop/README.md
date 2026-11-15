@@ -43,6 +43,7 @@ plugin's UI does:
 | A screen in the sidebar | `ui.appView` | `modules/overview` |
 | A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
+| An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
 | A command (palette, shortcut) | `ui.command` | `modules/new-thread`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |

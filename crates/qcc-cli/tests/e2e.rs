@@ -283,6 +283,10 @@ fn projects_group_threads_by_their_folders() {
     assert!(daemon.qcc(&["thread", "project", &outside, "none"]).ok);
     assert!(daemon.thread(&outside).get("project").is_none());
 
+    assert!(daemon.qcc(&["thread", "rename", &outside, "  Billing  "]).ok);
+    assert_eq!(daemon.thread(&outside)["title"], "Billing");
+    assert!(!daemon.qcc(&["thread", "rename", &outside, " "]).ok);
+
     assert!(daemon.qcc(&["project", "rename", "Shop", "Store"]).ok);
     assert!(daemon.qcc(&["project", "remove-folder", "Store", api]).ok);
     let listed = daemon.qcc(&["project", "list", "--json"]).json();

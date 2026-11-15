@@ -11,6 +11,7 @@ import { pluginUiModule } from "./plugin-ui";
 import { projectsModule } from "./projects";
 import { settingsModule } from "./settings";
 import { threadControlsModule } from "./thread-controls";
+import { threadMenuModule } from "./thread-menu";
 import { timelineModule } from "./timeline";
 
 export const builtinModules: UiModule[] = [
@@ -19,6 +20,7 @@ export const builtinModules: UiModule[] = [
   changesModule,
   lineageModule,
   threadControlsModule,
+  threadMenuModule,
   newThreadModule,
   projectsModule,
   pluginUiModule,

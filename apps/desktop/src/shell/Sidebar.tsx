@@ -7,6 +7,7 @@ import { store, useApp } from "../state/store";
 import { NEW_THREAD, openNewThread } from "../modules/new-thread";
 import { openProject } from "../modules/projects";
 import { useUi } from "../ui/registry";
+import { ThreadMenu } from "../ui/kit";
 import { baseName, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
 import { Button } from "@/components/ui/button";
@@ -116,12 +117,17 @@ export function Sidebar() {
               const unread = isUnread(thread, seen);
               const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
               return (
-                <button
+                <ThreadMenu
                   key={thread.id}
-                  className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
-                  style={depth > 0 ? { paddingLeft: `${8 + Math.min(depth, 4) * 14}px` } : undefined}
-                  title={children > 0 ? `Started ${children} other thread${children === 1 ? "" : "s"}` : undefined}
-                  onClick={() => store().select(thread.id)}
+                  thread={thread}
+                  render={
+                    <button
+                      className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
+                      style={depth > 0 ? { paddingLeft: `${8 + Math.min(depth, 4) * 14}px` } : undefined}
+                      title={children > 0 ? `Started ${children} other thread${children === 1 ? "" : "s"}` : undefined}
+                      onClick={() => store().select(thread.id)}
+                    />
+                  }
                 >
                   <span className={`dot ${attention}`} title={attentionLabel[attention]} />
                   <span className={`thread-title${unread ? " font-semibold" : ""}`}>{thread.title ?? "New thread"}</span>
@@ -137,7 +143,7 @@ export function Sidebar() {
                           ? activityText(thread)
                           : `${provider}${thread.environment ? " · worktree" : ""}`}
                   </span>
-                </button>
+                </ThreadMenu>
               );
             })}
           </section>

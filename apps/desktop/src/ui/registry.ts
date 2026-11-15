@@ -66,6 +66,21 @@ export type Command = {
   run: () => void;
 };
 
+/**
+ * An entry of a thread's context menu (right click on the thread in the sidebar
+ * or the overview). Entries with the same `group` stand together, groups apart.
+ */
+export type ThreadMenuItem = {
+  id: string;
+  title: string | ((thread: Thread) => string);
+  order: number;
+  group?: string;
+  destructive?: boolean;
+  /** Absent: offered for every thread. */
+  when?: (thread: Thread) => boolean;
+  run: (thread: Thread) => void;
+};
+
 /** A modal the shell shows on a contribution's behalf. */
 export type DialogRenderer = ComponentType<{ close: () => void }>;
 
@@ -86,6 +101,7 @@ type Snapshot = {
   tabs: readonly ThreadTab[];
   actions: readonly ThreadAction[];
   commands: readonly Command[];
+  menu: readonly ThreadMenuItem[];
   items: ReadonlyMap<string, ItemRenderer>;
   dialog: DialogRenderer | null;
 };
@@ -94,7 +110,15 @@ const byOrder = <T extends { order: number; id: string }>(a: T, b: T) =>
   a.order - b.order || a.id.localeCompare(b.id);
 
 export class UiRegistry {
-  private snapshot: Snapshot = { views: [], tabs: [], actions: [], commands: [], items: new Map(), dialog: null };
+  private snapshot: Snapshot = {
+    views: [],
+    tabs: [],
+    actions: [],
+    commands: [],
+    menu: [],
+    items: new Map(),
+    dialog: null,
+  };
   private listeners = new Set<() => void>();
   private active = new Map<string, () => void>();
   private collecting: (() => void)[] | null = null;
@@ -149,6 +173,11 @@ export class UiRegistry {
   threadTab(tab: ThreadTab): () => void {
     this.update({ tabs: [...this.snapshot.tabs.filter((other) => other.id !== tab.id), tab].sort(byOrder) });
     return this.track(() => this.update({ tabs: this.snapshot.tabs.filter((other) => other !== tab) }));
+  }
+
+  threadMenuItem(item: ThreadMenuItem): () => void {
+    this.update({ menu: [...this.snapshot.menu.filter((other) => other.id !== item.id), item].sort(byOrder) });
+    return this.track(() => this.update({ menu: this.snapshot.menu.filter((other) => other !== item) }));
   }
 
   threadAction(action: ThreadAction): () => void {

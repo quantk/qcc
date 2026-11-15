@@ -28,15 +28,15 @@ use qcc_protocol::methods::{
     SettingsSetParams, StopMode, THREAD_EVENT, THREAD_UPDATED, ThreadArchive, ThreadArchiveParams,
     ThreadChanges, ThreadChangesResult, ThreadDiff, ThreadDiffResult, ThreadEventNotification,
     ThreadEvents, ThreadEventsParams, ThreadEventsResult, ThreadGet, ThreadGetParams, ThreadList,
-    ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
-    ThreadSendResult, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode, ThreadSetModeParams,
-    ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
-    ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadUnqueueResult, ThreadUnsubscribe,
-    ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait, ThreadWaitParams,
-    ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams, UiAsset,
-    UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult, UiItemContribution,
-    UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
-    WaitedThread,
+    ThreadListParams, ThreadListResult, ThreadRename, ThreadRenameParams, ThreadResult, ThreadSend,
+    ThreadSendParams, ThreadSendResult, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSetProject, ThreadSetProjectParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadUnqueueResult,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadUpdatedNotification, ThreadWait,
+    ThreadWaitParams, ThreadWaitResult, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult,
+    UiItemContribution, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult,
+    UiViewContribution, WaitedThread,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -445,6 +445,10 @@ impl Core {
                 let result = params::<SettingsSet>(raw).and_then(|p| self.settings_set(p));
                 responder.reply(result);
             }
+            ThreadRename::NAME => {
+                let result = params::<ThreadRename>(raw).and_then(|p| self.thread_rename(p));
+                responder.reply(result);
+            }
             ThreadSetProject::NAME => {
                 let result =
                     params::<ThreadSetProject>(raw).and_then(|p| self.thread_set_project(p));
@@ -844,6 +848,19 @@ impl Core {
         self.projects.iter().find(|project| &project.id == id).ok_or_else(|| {
             RpcError::new(codes::INVALID_PARAMS, format!("project {id} does not exist"))
         })
+    }
+
+    fn thread_rename(&mut self, p: ThreadRenameParams) -> Result<ThreadResult, RpcError> {
+        let title: String = p.title.trim().chars().take(200).collect();
+        if title.is_empty() {
+            return Err(RpcError::new(codes::INVALID_PARAMS, "a thread needs a non-empty name"));
+        }
+        let engine =
+            self.supervisor.engine(&p.thread_id).map_err(|_| thread_not_found(&p.thread_id))?;
+        let events = engine.set_title(title, now_ms());
+        self.commit(events);
+        let thread = self.supervisor.thread(&p.thread_id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&p.thread_id))
     }
 
     fn thread_set_project(&mut self, p: ThreadSetProjectParams) -> Result<ThreadResult, RpcError> {

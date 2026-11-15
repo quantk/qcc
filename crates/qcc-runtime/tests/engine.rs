@@ -1,6 +1,6 @@
 use qcc_domain::{
     Delta, EventPayload, InteractionRequest, InteractionResolution, ItemKey, ItemShape,
-    TextChannel, Thread, ThreadEvent, ThreadStatus, TurnStatus,
+    McpServerStatus, McpState, TextChannel, Thread, ThreadEvent, ThreadStatus, TurnStatus,
 };
 use qcc_runtime::{EngineError, NewThread, SequentialMint, Supervisor, SupervisorError, Timeline};
 
@@ -92,6 +92,45 @@ fn a_turn_drives_status_and_projection() {
     assert_eq!(thread.provider_session.as_deref(), Some("sess-1"));
     assert_eq!((thread.created_at, thread.updated_at), (100, 140));
     assert_projection(&journal, &thread);
+}
+
+#[test]
+fn mcp_servers_are_kept_whole_and_forgotten_with_the_session() {
+    let mut supervisor = supervisor();
+    let mut journal = supervisor.create(new_thread("t1"), 1).unwrap();
+    let engine = supervisor.engine(&"t1".into()).unwrap();
+    journal.extend(engine.session_started(None, false, 2));
+    let status = |name: &str, state: McpState| Delta::McpStatus {
+        server: McpServerStatus { name: name.into(), state, error: None },
+    };
+
+    let events = engine.apply_deltas(
+        [
+            status("docs", McpState::Starting),
+            status("web", McpState::Starting),
+            status("docs", McpState::Ready),
+            // Said again: nothing changed, nothing recorded.
+            status("docs", McpState::Ready),
+        ],
+        3,
+    );
+    assert_eq!(types(&events), ["mcp/servers", "mcp/servers", "mcp/servers"]);
+    journal.extend(events);
+    let states: Vec<_> =
+        engine.thread().mcp_servers.iter().map(|s| (s.name.as_str(), s.state)).collect();
+    assert_eq!(states, [("docs", McpState::Ready), ("web", McpState::Starting)]);
+    // Connecting is not something the thread did.
+    assert_eq!(engine.thread().updated_at, 2);
+
+    let events = engine.apply_deltas([Delta::SessionReset, status("web", McpState::Failed)], 4);
+    assert_eq!(types(&events), ["mcp/servers", "mcp/servers"]);
+    journal.extend(events);
+    assert_eq!(engine.thread().mcp_servers.len(), 1);
+    let events = engine.apply_deltas([Delta::SessionReset, Delta::SessionReset], 5);
+    assert_eq!(types(&events), ["mcp/servers"]);
+    journal.extend(events);
+    assert!(engine.thread().mcp_servers.is_empty());
+    assert_projection(&journal, &engine.thread().clone());
 }
 
 #[test]

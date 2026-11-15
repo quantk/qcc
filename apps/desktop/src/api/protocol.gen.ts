@@ -151,7 +151,12 @@ queue_id?: string | null } |
 /**  Every item's first event. */
 { type: "item/started"; turn_id: TurnId; item: Item } | { type: "item/text/delta"; item_id: ItemId; text: string } | 
 /**  Carries the full terminal item. */
-{ type: "item/completed"; turn_id: TurnId; item: Item } | { type: "usage/updated"; usage: UsageSnapshot } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
+{ type: "item/completed"; turn_id: TurnId; item: Item } | { type: "usage/updated"; usage: UsageSnapshot } | 
+/**
+ *  The MCP servers of the session and how each is doing: the whole list, which
+ *  replaces the one before. Empty when a new session starts.
+ */
+{ type: "mcp/servers"; servers: McpServerStatus[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
 
 /**  Minted by the delta assembler for every `interaction.request`. */
 export type InteractionId = string;
@@ -199,6 +204,23 @@ export type McpServerSettings = {
 	/**  Kept in the settings but given to no session. */
 	disabled?: boolean,
 };
+
+/**
+ *  How an MCP server of a session is doing, as its agent reports it. Covers the
+ *  servers of the agent's own configuration too.
+ */
+export type McpServerStatus = {
+	name: string,
+	state: McpState,
+	/**  Why it failed, in the agent's words. */
+	error?: string | null,
+};
+
+export type McpState = 
+/**  The agent is still connecting. */
+"starting" | "ready" | "failed" | 
+/**  The server wants the user to sign in, in the agent itself. */
+"needs-auth";
 
 /**  How an agent reaches an MCP server. */
 export type McpTransport = 
@@ -471,6 +493,11 @@ export type Thread = {
 	 *  client compares with what the user has seen.
 	 */
 	last_turn_at?: number | null,
+	/**
+	 *  The MCP servers of the current session as its agent reports them, in the
+	 *  order they were first reported. Empty until it says and for agents that do not.
+	 */
+	mcp_servers?: McpServerStatus[],
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**

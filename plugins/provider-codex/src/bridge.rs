@@ -474,6 +474,25 @@ impl Bridge {
     }
 
     fn notification(&mut self, method: &str, params: &Value, output: &mut Output) {
+        // MCP servers start with the thread, before any turn, and report one by one.
+        if method == "mcpServer/startupStatus/updated" {
+            let state = match str_field(params, "status") {
+                "starting" => McpState::Starting,
+                "ready" => McpState::Ready,
+                "failed" | "cancelled" => McpState::Failed,
+                _ => return,
+            };
+            let error = match params.get("error").and_then(Value::as_str) {
+                Some(error) => Some(error.to_owned()),
+                None if str_field(params, "status") == "cancelled" => {
+                    Some("its startup was cancelled".to_owned())
+                }
+                None => None,
+            };
+            let name = str_field(params, "name").to_owned();
+            output.deltas.push(Delta::McpStatus(McpStatus { name, state, error }));
+            return;
+        }
         let turn = match params.get("turnId").and_then(Value::as_str) {
             Some(turn) => turn,
             None => str_field(&params["turn"], "id"),
@@ -711,6 +730,35 @@ mod tests {
             start["params"]["config"],
             json!({"sandbox_workspace_write": {"writable_roots": ["/api", "/web"]}})
         );
+    }
+
+    #[test]
+    fn mcp_startup_is_reported_between_turns() {
+        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        bridge.on_line(r#"{"id":1,"result":{}}"#);
+        let status = |name: &str, status: &str, error: Value| {
+            notify(
+                "mcpServer/startupStatus/updated",
+                json!({"threadId": "th", "name": name, "status": status, "error": error}),
+            )
+        };
+        assert_eq!(
+            bridge.on_line(&status("docs", "starting", Value::Null)).deltas,
+            [Delta::McpStatus(McpStatus {
+                name: "docs".into(),
+                state: McpState::Starting,
+                error: None
+            })]
+        );
+        assert_eq!(
+            bridge.on_line(&status("docs", "failed", json!("MCP startup failed"))).deltas,
+            [Delta::McpStatus(McpStatus {
+                name: "docs".into(),
+                state: McpState::Failed,
+                error: Some("MCP startup failed".into())
+            })]
+        );
+        assert!(bridge.on_line(&status("docs", "brand-new", Value::Null)).deltas.is_empty());
     }
 
     #[test]

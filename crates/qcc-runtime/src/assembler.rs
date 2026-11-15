@@ -282,6 +282,8 @@ impl DeltaAssembler {
                 out.push(EventPayload::ProviderWarning { message });
             }
             Delta::Unhandled { payload } => out.push(EventPayload::ProviderUnhandled { payload }),
+            // The engine keeps the MCP servers: they belong to the thread, not a turn.
+            Delta::McpStatus { .. } => {}
         }
         out
     }

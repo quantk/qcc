@@ -201,6 +201,7 @@ impl Timeline {
             | EventPayload::SessionEnded { .. }
             | EventPayload::InputSubmitted { .. }
             | EventPayload::UsageUpdated { .. }
+            | EventPayload::McpServersChanged { .. }
             | EventPayload::ProviderError { .. }
             | EventPayload::ProviderWarning { .. }
             | EventPayload::ProviderUnhandled { .. } => Ok(()),

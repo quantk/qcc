@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 use crate::interaction::{InteractionRequest, InteractionResolution};
 use crate::item::Item;
-use crate::provider::PermissionMode;
+use crate::provider::{McpServerStatus, PermissionMode};
 use crate::thread::{Thread, ThreadStatus, TurnStatus};
 use crate::usage::UsageSnapshot;
 
@@ -152,6 +152,11 @@ pub enum EventPayload {
 
     #[serde(rename = "usage/updated")]
     UsageUpdated { usage: UsageSnapshot },
+
+    /// The MCP servers of the session and how each is doing: the whole list, which
+    /// replaces the one before. Empty when a new session starts.
+    #[serde(rename = "mcp/servers")]
+    McpServersChanged { servers: Vec<McpServerStatus> },
 
     #[serde(rename = "interaction/requested")]
     InteractionRequested {

@@ -21,6 +21,9 @@
 //!
 //! A message steered into a running `/slow` turn is appended to what it streams.
 //!
+//! Each MCP server it is given is reported ready at once, or failed when its
+//! command or URL contains `fail`.
+//!
 //! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
 //! `/card` items, both built from the fixed set of UI nodes.
 
@@ -371,7 +374,22 @@ impl Provider for Echo {
             ..Session::default()
         };
         self.sessions.insert(start.thread.clone(), session);
-        deltas::emit(&start.thread, &[Delta::SessionReset])?;
+        // Every server it is given connects at once, but one whose command or URL
+        // says `fail` fails: what a test needs to see both.
+        let mut reset = vec![Delta::SessionReset];
+        reset.extend(start.mcp_servers.iter().map(|server| {
+            let target = match &server.transport {
+                McpTransport::Stdio(stdio) => &stdio.command,
+                McpTransport::Http(http) => &http.url,
+            };
+            let failed = target.contains("fail");
+            Delta::McpStatus(McpStatus {
+                name: server.name.clone(),
+                state: if failed { McpState::Failed } else { McpState::Ready },
+                error: failed.then(|| format!("echo was told to fail {target}")),
+            })
+        }));
+        deltas::emit(&start.thread, &reset)?;
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt)?;
         }

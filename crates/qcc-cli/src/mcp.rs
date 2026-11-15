@@ -61,9 +61,11 @@ pub(crate) async fn run(
             }
             for (name, server) in &settings.mcp_servers {
                 let what = match &server.transport {
-                    McpTransport::Stdio { command, args, .. } => {
-                        std::iter::once(command).chain(args).cloned().collect::<Vec<_>>().join(" ")
-                    }
+                    McpTransport::Stdio { command, args, .. } => std::iter::once(command)
+                        .chain(args)
+                        .map(|word| shell_word(word))
+                        .collect::<Vec<_>>()
+                        .join(" "),
                     McpTransport::Http { url, .. } => url.clone(),
                 };
                 let off = if server.disabled { "  (off)" } else { "" };
@@ -101,6 +103,13 @@ pub(crate) async fn run(
         print_json(&result.settings.mcp_servers)?;
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// A word as a shell would need it typed: quoted when it holds anything special.
+fn shell_word(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c));
+    if plain { word.to_owned() } else { format!("'{}'", word.replace('\'', "'\\''")) }
 }
 
 fn switch(

@@ -4,7 +4,7 @@ use crate::event::{EventPayload, ThreadEvent};
 use crate::ids::{InteractionId, ProjectId, ProviderId, ThreadId};
 use crate::interaction::InteractionRequest;
 use crate::item::{Item, ItemShape, ItemStatus};
-use crate::provider::PermissionMode;
+use crate::provider::{McpServerStatus, PermissionMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -205,6 +205,10 @@ pub struct Thread {
     /// client compares with what the user has seen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_at: Option<u64>,
+    /// The MCP servers of the current session as its agent reports them, in the
+    /// order they were first reported. Empty until it says and for agents that do not.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<McpServerStatus>,
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
@@ -223,12 +227,14 @@ const TITLE_MAX_CHARS: usize = 80;
 impl Thread {
     /// Fold one event into the projection.
     pub fn apply(&mut self, event: &ThreadEvent) {
-        // Filing or naming a thread is not something it did.
+        // Filing or naming a thread is not something it did, nor is its MCP
+        // servers connecting.
         if !matches!(
             event.payload,
             EventPayload::ProjectChanged { .. }
                 | EventPayload::TitleChanged { .. }
                 | EventPayload::ParentChanged { .. }
+                | EventPayload::McpServersChanged { .. }
         ) {
             self.updated_at = event.ts;
         }
@@ -312,6 +318,7 @@ impl Thread {
                 self.set_environment(EnvironmentState::Failed);
             }
             EventPayload::EnvironmentRemoved => self.set_environment(EnvironmentState::Removed),
+            EventPayload::McpServersChanged { servers } => self.mcp_servers.clone_from(servers),
             EventPayload::ThreadArchived => self.archived = true,
             _ => {}
         }
@@ -348,6 +355,7 @@ mod tests {
             last_seq: 0,
             queued_inputs: 0,
             pending_interactions: Vec::new(),
+            mcp_servers: Vec::new(),
             activity: None,
             turn_started_at: None,
             last_turn_status: None,

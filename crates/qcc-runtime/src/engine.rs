@@ -252,8 +252,28 @@ impl ThreadEngine {
         now: u64,
     ) -> Vec<ThreadEvent> {
         let mut payloads = Vec::new();
+        // What the batch has made of the MCP servers so far; reported whole.
+        let mut mcp = self.thread.mcp_servers.clone();
         for delta in deltas {
-            payloads.extend(self.assembler.apply(delta));
+            match delta {
+                Delta::McpStatus { server } => {
+                    match mcp.iter_mut().find(|known| known.name == server.name) {
+                        Some(known) if *known == server => continue,
+                        Some(known) => *known = server,
+                        None => mcp.push(server),
+                    }
+                    payloads.push(EventPayload::McpServersChanged { servers: mcp.clone() });
+                }
+                Delta::SessionReset => {
+                    // The servers of the old session say nothing about the new one.
+                    if !mcp.is_empty() {
+                        mcp.clear();
+                        payloads.push(EventPayload::McpServersChanged { servers: Vec::new() });
+                    }
+                    payloads.extend(self.assembler.apply(Delta::SessionReset));
+                }
+                delta => payloads.extend(self.assembler.apply(delta)),
+            }
         }
         if payloads.iter().any(|p| matches!(p, EventPayload::SessionEnded { .. })) {
             self.session_live = false;

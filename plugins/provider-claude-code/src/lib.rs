@@ -95,6 +95,14 @@ impl Provider for ClaudeCode {
             let output = self.sessions.bridge(&start.thread)?.prompt(prompt);
             self.sessions.apply(&start.thread, output)?;
         }
+        // After the prompt, which must not wait on it; the agent answers either way.
+        // Only a status: an agent already gone is reported by its exit, not here.
+        if let Ok(bridge) = self.sessions.bridge(&start.thread) {
+            let query = bridge.query_mcp();
+            if let Err(error) = self.sessions.apply(&start.thread, query) {
+                log::debug(format!("thread {}: cannot ask for MCP status: {error}", start.thread));
+            }
+        }
         // A new session is named by the agent's first message; the bridge reports it
         // with `session-identity` when it arrives.
         Ok(SessionStarted { provider_session: start.resume })
@@ -158,7 +166,9 @@ impl Plugin for ClaudeCode {
     }
 
     fn on_timer(&mut self, timer: u64) {
-        self.probes.on_timer(timer);
+        if !self.probes.on_timer(timer) {
+            self.sessions.on_timer(timer);
+        }
     }
 }
 

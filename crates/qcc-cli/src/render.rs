@@ -3,7 +3,8 @@
 use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
     ChangeKind, EnvironmentChanges, EnvironmentState, EventPayload, InteractionRequest, Item,
-    ItemShape, ItemStatus, Thread, ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
+    ItemShape, ItemStatus, McpState, Thread, ThreadEvent, ThreadId, ThreadState, ThreadStatus,
+    TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -122,8 +123,33 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(parent) = &thread.parent {
         lines.push(format!("parent    {parent}"));
     }
+    for (index, server) in thread.mcp_servers.iter().enumerate() {
+        let label = if index == 0 { "mcp" } else { "" };
+        let state = match server.state {
+            McpState::Starting => "starting",
+            McpState::Ready => "ready",
+            McpState::Failed => "failed",
+            McpState::NeedsAuth => "needs auth",
+        };
+        // Agents put whole transport dumps here; the first words say enough.
+        let error = server
+            .error
+            .as_deref()
+            .map(|error| format!(": {}", clip(error, 160)))
+            .unwrap_or_default();
+        lines.push(format!("{label:<9} {} {state}{error}", server.name));
+    }
     lines.push(String::new());
     lines.join("\n")
+}
+
+/// The first line of `text`, cut to `max` characters.
+fn clip(text: &str, max: usize) -> String {
+    let line = text.lines().next().unwrap_or("");
+    match line.char_indices().nth(max) {
+        Some((at, _)) => format!("{}…", &line[..at]),
+        None => line.to_owned(),
+    }
 }
 
 pub fn changes(changes: &EnvironmentChanges) -> String {
@@ -327,6 +353,8 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         | EventPayload::ItemStarted { .. }
         | EventPayload::ItemTextDelta { .. }
         | EventPayload::UsageUpdated { .. }
+        // `thread show` lists the servers; every change of one is not news.
+        | EventPayload::McpServersChanged { .. }
         | EventPayload::InteractionResolved { .. }
         | EventPayload::ProviderUnhandled { .. } => return None,
     })

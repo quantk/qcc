@@ -394,6 +394,22 @@ fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
     assert!(daemon.qcc(&["mcp", "remove", "web"]).ok);
     assert_eq!(told(&daemon.spawn("/mcp")), "docs stdio npx -y docs");
 
+    // The agent says how each server is doing; the thread shows it.
+    assert!(daemon.qcc(&["mcp", "add", "broken", "--", "/bin/fail-mcp"]).ok);
+    let probe = daemon.spawn("/mcp");
+    told(&probe);
+    let thread = daemon.thread(&probe);
+    let servers = &thread["mcp_servers"];
+    assert_eq!(
+        servers[0],
+        serde_json::json!({"name": "broken", "state": "failed",
+        "error": "echo was told to fail /bin/fail-mcp"})
+    );
+    assert_eq!(servers[1], serde_json::json!({"name": "docs", "state": "ready"}));
+    let shown = daemon.qcc(&["thread", "show", &probe]).stdout;
+    assert!(shown.contains("docs ready"), "{shown}");
+    assert!(shown.contains("broken failed: echo was told to fail"), "{shown}");
+
     // What could not work is refused.
     let refused = daemon.qcc(&["mcp", "add", "my docs", "--", "npx"]);
     assert!(!refused.ok);

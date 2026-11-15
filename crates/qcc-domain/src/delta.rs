@@ -9,6 +9,7 @@ use serde_json::Value;
 
 use crate::interaction::InteractionRequest;
 use crate::item::{ItemShape, ItemStatus};
+use crate::provider::McpServerStatus;
 use crate::thread::TurnStatus;
 use crate::usage::UsageSnapshot;
 
@@ -113,6 +114,11 @@ pub enum Delta {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+
+    /// How one MCP server of the session is doing now. A fresh session starts with
+    /// none known.
+    #[serde(rename = "mcp.status")]
+    McpStatus { server: McpServerStatus },
 
     #[serde(rename = "provider.error")]
     ProviderError { message: String },

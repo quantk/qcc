@@ -157,6 +157,22 @@ interface types {
     request: interaction-request,
   }
 
+  enum mcp-state {
+    /// The agent is still connecting.
+    starting,
+    ready,
+    failed,
+    /// The server wants the user to sign in, in the agent itself.
+    needs-auth,
+  }
+
+  record mcp-status {
+    name: string,
+    state: mcp-state,
+    /// Why it failed, in the agent's words.
+    error: option<string>,
+  }
+
   variant delta {
     /// The provider took a prompt. Items never open a turn; only this does.
     turn-open,
@@ -175,6 +191,9 @@ interface types {
     session-reset,
     /// The provider session is gone, with an optional reason.
     session-ended(option<string>),
+    /// How one MCP server of the session is doing now, the agent's own servers
+    /// included. A fresh session (`session-reset`) starts with none known.
+    mcp-status(mcp-status),
     provider-error(string),
     provider-warning(string),
     /// Provider traffic the bridge did not recognise, kept for diagnostics.

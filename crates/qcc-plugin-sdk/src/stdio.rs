@@ -23,6 +23,9 @@ pub struct Output {
     pub deltas: Vec<Delta>,
     /// The session cannot go on; the process should be killed.
     pub fatal: bool,
+    /// Call [`LineBridge::on_wake`] after this many milliseconds: for a bridge that
+    /// has to ask the agent again later. Needs the `timers` permission.
+    pub wake_after_ms: Option<u64>,
 }
 
 /// The dialect of one agent, as [`Sessions`] drives it.
@@ -33,6 +36,11 @@ pub trait LineBridge {
     /// The process went away by itself, after all its output. `stderr` is the last
     /// line it wrote there, which usually says why.
     fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta>;
+
+    /// The time asked for with [`Output::wake_after_ms`] has passed.
+    fn on_wake(&mut self) -> Output {
+        Output::default()
+    }
 }
 
 /// How an agent process ended, in words for the timeline.
@@ -57,11 +65,13 @@ struct Session<B> {
 /// The running sessions of a provider, one agent process per thread.
 pub struct Sessions<B> {
     sessions: HashMap<String, Session<B>>,
+    /// Timers of bridges waiting to be woken, and the thread of each.
+    wakes: HashMap<u64, String>,
 }
 
 impl<B> Default for Sessions<B> {
     fn default() -> Self {
-        Self { sessions: HashMap::new() }
+        Self { sessions: HashMap::new(), wakes: HashMap::new() }
     }
 }
 
@@ -130,8 +140,27 @@ impl<B: LineBridge> Sessions<B> {
         }
         if output.fatal {
             self.kill(thread);
+        } else if let Some(delay) = output.wake_after_ms {
+            match timers::start(delay) {
+                Ok(timer) => {
+                    self.wakes.insert(timer, thread.to_owned());
+                }
+                Err(error) => result = result.and(Err(error)),
+            }
         }
         result
+    }
+
+    /// Wake the bridge a timer was started for. Returns whether the timer was one of
+    /// these sessions'; a session that ended meanwhile is not woken.
+    pub fn on_timer(&mut self, timer: u64) -> bool {
+        let Some(thread) = self.wakes.remove(&timer) else { return false };
+        let Ok(bridge) = self.bridge(&thread) else { return true };
+        let output = bridge.on_wake();
+        if let Err(error) = self.apply(&thread, output) {
+            log::error(format!("thread {thread}: {error}"));
+        }
+        true
     }
 
     /// Hand a process event to the session it belongs to. Errors are logged: nobody

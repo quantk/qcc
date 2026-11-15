@@ -21,6 +21,12 @@ use qcc_plugin_sdk::stdio::{LineBridge, exit_reason};
 use qcc_plugin_sdk::types::*;
 use serde_json::{Value, json};
 
+/// The prefix of our MCP status requests' ids.
+const MCP_QUERY: &str = "qcc-mcp-";
+/// How often, and for how long, servers still connecting are asked after.
+const MCP_POLL_MS: u64 = 1000;
+const MCP_POLLS: u32 = 30;
+
 struct Approval {
     tool_use_id: String,
     input: Value,
@@ -40,6 +46,10 @@ pub struct Bridge {
     denied: HashSet<String>,
     total: TokenUsage,
     interrupts: u32,
+    /// MCP status requests sent, which names them.
+    mcp_queries: u32,
+    /// How many times in a row the agent said a server was still connecting.
+    mcp_polls: u32,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -146,6 +156,8 @@ impl Bridge {
             denied: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             interrupts: 0,
+            mcp_queries: 0,
+            mcp_polls: 0,
         }
     }
 
@@ -268,6 +280,11 @@ impl Bridge {
             }
             return output;
         }
+        // Answers to our own requests come whatever the turn is doing.
+        if kind == "control_response" {
+            self.control_response(&message["response"], &mut output);
+            return output;
+        }
         if self.draining > 0 {
             match kind {
                 "result" => self.draining -= 1,
@@ -301,10 +318,15 @@ impl Bridge {
                 }
             }
             "control_request" => self.control_request(&message, &mut output),
-            "result" => self.result(&message, &mut output.deltas),
+            "result" => {
+                self.result(&message, &mut output.deltas);
+                // A turn may have started, lost or signed in to a server.
+                self.mcp_polls = 0;
+                output.writes.push(self.mcp_status_request());
+            }
             // Answers to our own control requests and bookkeeping the timeline has
             // no use for.
-            "control_response" | "rate_limit_event" | "keep_alive" => {}
+            "rate_limit_event" | "keep_alive" => {}
             _ => output.deltas.push(Delta::Unhandled(message.to_string())),
         }
         output
@@ -421,6 +443,53 @@ impl Bridge {
         self.approvals.insert(request_id, Approval { tool_use_id, input });
     }
 
+    /// Ask the agent how its MCP servers are doing. It answers before any turn, so
+    /// the status is known from the start without spending one.
+    pub fn query_mcp(&mut self) -> Output {
+        Output { writes: vec![self.mcp_status_request()], ..Output::default() }
+    }
+
+    fn mcp_status_request(&mut self) -> String {
+        self.mcp_queries += 1;
+        let request_id = format!("{MCP_QUERY}{}", self.mcp_queries);
+        json!({"type": "control_request", "request_id": request_id,
+               "request": {"subtype": "mcp_status"}})
+        .to_string()
+    }
+
+    fn control_response(&mut self, response: &Value, output: &mut Output) {
+        // An agent too old to tell answers with an error; it is not asked again.
+        if !str_field(response, "request_id").starts_with(MCP_QUERY)
+            || str_field(response, "subtype") != "success"
+        {
+            return;
+        }
+        let servers = response["response"]["mcpServers"].as_array().into_iter().flatten();
+        let mut connecting = false;
+        for server in servers {
+            let state = match str_field(server, "status") {
+                "pending" => McpState::Starting,
+                "connected" => McpState::Ready,
+                "failed" => McpState::Failed,
+                "needs-auth" => McpState::NeedsAuth,
+                // Turned off in the agent's own settings: not part of the session.
+                _ => continue,
+            };
+            connecting |= state == McpState::Starting;
+            let error = server.get("error").and_then(Value::as_str).map(str::to_owned);
+            output.deltas.push(Delta::McpStatus(McpStatus {
+                name: str_field(server, "name").to_owned(),
+                state,
+                error,
+            }));
+        }
+        // Servers connect in the background and nothing says when they are done.
+        if connecting && self.mcp_polls < MCP_POLLS {
+            self.mcp_polls += 1;
+            output.wake_after_ms = Some(MCP_POLL_MS);
+        }
+    }
+
     /// The end of a turn.
     fn result(&mut self, message: &Value, deltas: &mut Vec<Delta>) {
         let usage = &message["usage"];
@@ -512,6 +581,10 @@ impl LineBridge for Bridge {
 
     fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
         Bridge::exited(self, code, stderr)
+    }
+
+    fn on_wake(&mut self) -> Output {
+        self.query_mcp()
     }
 }
 
@@ -777,5 +850,58 @@ mod tests {
                         "headers": {"Authorization": "Bearer x"}},
             }})
         );
+    }
+
+    #[test]
+    fn mcp_status_is_asked_for_until_the_servers_settle() {
+        let mut bridge = Bridge::new(None);
+        let query = bridge.query_mcp();
+        let request: Value = serde_json::from_str(&query.writes[0]).unwrap();
+        assert_eq!(request["request"]["subtype"], "mcp_status");
+        let id = request["request_id"].as_str().unwrap().to_owned();
+
+        let answer = |id: &str, servers: Value| {
+            json!({"type": "control_response", "response": {"subtype": "success",
+                   "request_id": id, "response": {"mcpServers": servers}}})
+            .to_string()
+        };
+        let pending = bridge.on_line(&answer(
+            &id,
+            json!([{"name": "docs", "status": "pending"},
+                   {"name": "off", "status": "disabled"},
+                   {"name": "web", "status": "failed", "error": "ENOENT"}]),
+        ));
+        assert_eq!(
+            pending.deltas,
+            [
+                Delta::McpStatus(McpStatus {
+                    name: "docs".into(),
+                    state: McpState::Starting,
+                    error: None
+                }),
+                Delta::McpStatus(McpStatus {
+                    name: "web".into(),
+                    state: McpState::Failed,
+                    error: Some("ENOENT".into())
+                }),
+            ]
+        );
+        assert_eq!(pending.wake_after_ms, Some(MCP_POLL_MS));
+        assert_eq!(LineBridge::on_wake(&mut bridge).writes.len(), 1);
+
+        let ready = bridge.on_line(&answer(&id, json!([{"name": "docs", "status": "connected"}])));
+        assert_eq!(ready.wake_after_ms, None);
+        // Not ours, or an agent that cannot tell: nothing to report.
+        assert_eq!(
+            bridge.on_line(&answer("r9", json!([{"name": "x", "status": "connected"}]))),
+            Output::default()
+        );
+        let refused = r#"{"type":"control_response","response":{"subtype":"error","request_id":"qcc-mcp-3","error":"unknown"}}"#;
+        assert_eq!(bridge.on_line(refused), Output::default());
+
+        // After every turn it is asked again.
+        bridge.prompt("x");
+        let done = bridge.on_line(&result(json!({})));
+        assert!(done.writes.iter().any(|line| line.contains("mcp_status")));
     }
 }

@@ -3,9 +3,10 @@
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
-    ItemShape, ItemStatus, McpServer, McpTransport, ModelInfo, OptionKind, PermissionMode,
-    ProviderCapabilities, ProviderInfo, Role, SkillInfo, TextChannel, ThreadId, ThreadState,
-    TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot,
+    ItemShape, ItemStatus, McpServer, McpServerStatus, McpState, McpTransport, ModelInfo,
+    OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, Role, SkillInfo, TextChannel,
+    ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
+    UiViewInfo, UsageSnapshot,
 };
 
 use crate::api::{
@@ -152,6 +153,18 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
         }
         wit::Delta::SessionReset => Delta::SessionReset,
         wit::Delta::SessionEnded(reason) => Delta::SessionEnded { reason },
+        wit::Delta::McpStatus(status) => Delta::McpStatus {
+            server: McpServerStatus {
+                name: status.name,
+                state: match status.state {
+                    wit::McpState::Starting => McpState::Starting,
+                    wit::McpState::Ready => McpState::Ready,
+                    wit::McpState::Failed => McpState::Failed,
+                    wit::McpState::NeedsAuth => McpState::NeedsAuth,
+                },
+                error: status.error,
+            },
+        },
         wit::Delta::ProviderError(message) => Delta::ProviderError { message },
         wit::Delta::ProviderWarning(message) => Delta::ProviderWarning { message },
         wit::Delta::Unhandled(payload) => Delta::Unhandled { payload: json(&payload)? },

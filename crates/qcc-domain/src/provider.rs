@@ -238,6 +238,28 @@ pub enum McpTransport {
     },
 }
 
+/// How an MCP server of a session is doing, as its agent reports it. Covers the
+/// servers of the agent's own configuration too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct McpServerStatus {
+    pub name: String,
+    pub state: McpState,
+    /// Why it failed, in the agent's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum McpState {
+    /// The agent is still connecting.
+    Starting,
+    Ready,
+    Failed,
+    /// The server wants the user to sign in, in the agent itself.
+    NeedsAuth,
+}
+
 #[cfg(test)]
 mod tests {
     use super::PermissionMode::{AcceptEdits, Ask, Auto, Full};

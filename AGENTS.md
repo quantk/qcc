@@ -12,7 +12,7 @@ WASM-плагинами.
 
 - `qccd` — демон: ядро, журнал SQLite, хост плагинов, JSON-RPC по unix-сокету.
 - `qcc` — CLI, клиент демона.
-- `apps/desktop` — Tauri + React, «пульт управления» агентами.
+- `apps/desktop` — Tauri + React + shadcn/ui, «пульт управления» агентами.
 - Провайдеры агентов, git worktree, оркестрация — это **плагины** (`wasm32-wasip2`-компоненты по
   контракту `wit/plugin.wit`).
 
@@ -96,6 +96,24 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
   `scripts/fixtures/redact.py` перед коммитом (пути, домашний каталог, идентификаторы).
 - **Desktop.** Новый модуль в `src/modules/<имя>/`, регистрация в `modules/index.ts`. Логику
   состояния держите в `src/state/` с vitest-тестами рядом (`*.test.ts`).
+- **UI-компоненты — shadcn/ui** (стиль `base-nova` на Base UI, Tailwind v4, иконки `lucide-react`).
+  Не пишите свои кнопки, поля, диалоги, меню и select'ы и не тащите другую UI-библиотеку: берите
+  компонент из `src/components/ui/` или добавьте новый (`pnpm dlx shadcn@latest add <имя>` в
+  `apps/desktop`). Добавленный компонент — наш код, его можно править. Если CLI висит (бывает),
+  возьмите `https://ui.shadcn.com/r/styles/base-nova/<имя>.json`, перепишите импорты
+  `@/registry/base-nova/ui/` на `@/components/ui/`, а `<IconPlaceholder lucide="X" …/>` замените на
+  `<X …/>`, сохранив остальные пропсы.
+- **Паттерны AI Elements** (Tool, Terminal, Reasoning, Confirmation, Chat, Prompt Input, Context) —
+  это композиции компонентов shadcn, а не пакет. Они собраны в `src/ui/kit` (`AgentTrace.tsx`,
+  `InteractionPrompt.tsx`) и питаются элементами нашей ленты; Vercel AI SDK (`ai`, `useChat`)
+  не подключаем. Новый вид элемента ленты рисуйте через `ItemTrace` из kit.
+- **Цвета и стили.** Токены shadcn (`--primary`, `--muted`, …) в `src/theme.css` указывают на
+  палитру приложения (`--brand`, `--text-muted`, `--panel`, … в `src/styles.css`); не заводите
+  цвета мимо них. Старый CSS лежит в `@layer base`, чтобы утилиты Tailwind его перебивали; новые
+  стили пишите классами Tailwind, а не правилами в `styles.css`. Подробнее — раздел «Styling» в
+  `apps/desktop/README.md`.
+- Dev-сервер Vite иногда отдаёт устаревший CSS после пересоздания файла компонента: перед тем как
+  верить скриншоту, перезапустите `./dev desktop`.
 
 ## Тестирование
 

@@ -439,6 +439,18 @@ export type UiActionParams = {
 	value?: string | null,
 };
 
+export type UiAssetParams = {
+	plugin: string,
+	/**  Relative to the bundle: `index.html`, `assets/app.js`. */
+	path: string,
+};
+
+export type UiAssetResult = {
+	/**  The file, base64-encoded. */
+	data: string,
+	content_type: string,
+};
+
 export type UiContributionsResult = {
 	views: UiViewContribution[],
 	items: UiItemContribution[],
@@ -495,6 +507,8 @@ export type UiViewInfo = {
 	title: string,
 	placement: UiPlacement,
 	scope: UiScope,
+	/**  A page of the plugin's web bundle shown instead of UI nodes. */
+	web?: string | null,
 };
 
 /**  The one usage dialect: cumulative session total plus the last request. */
@@ -527,6 +541,7 @@ export type Methods = {
 	"ui.render": { params: UiRenderParams; result: UiTreeResult },
 	"ui.action": { params: UiActionParams; result: UiTreeResult },
 	"ui.render_item": { params: UiRenderItemParams; result: UiTreeResult },
+	"ui.asset": { params: UiAssetParams; result: UiAssetResult },
 };
 
 /** Notifications the daemon pushes, by method name. */

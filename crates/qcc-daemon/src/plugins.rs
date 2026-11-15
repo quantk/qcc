@@ -105,3 +105,58 @@ fn plugin_id(dir: &Path) -> Option<String> {
         }
     }
 }
+
+/// The largest file of a web bundle the daemon will serve.
+const MAX_ASSET_BYTES: u64 = 16 * 1024 * 1024;
+
+fn content_type(path: &Path) -> &'static str {
+    match path.extension().and_then(|extension| extension.to_str()).unwrap_or_default() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "js" | "mjs" => "text/javascript; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "json" => "application/json",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "woff2" => "font/woff2",
+        "wasm" => "application/wasm",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Read one file of a plugin's web bundle. The path may not leave the bundle, by
+/// its spelling or through a symlink.
+pub(crate) fn read_asset(
+    config: &Config,
+    manifest: &qcc_plugin_host::Manifest,
+    path: &str,
+) -> Result<(Vec<u8>, &'static str), String> {
+    let web = manifest.web.as_ref().ok_or("the plugin has no web bundle")?;
+    let relative = Path::new(path);
+    let inside = !path.is_empty()
+        && relative.components().all(|part| matches!(part, std::path::Component::Normal(_)));
+    if !inside {
+        return Err(format!("{path:?} is not a path inside the bundle"));
+    }
+    let plugins_dir = config.plugins_dir();
+    let dir = std::fs::read_dir(&plugins_dir)
+        .map_err(|error| error.to_string())?
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .find(|dir| plugin_id(dir).as_deref() == Some(manifest.id.as_str()))
+        .ok_or("the plugin's directory is gone")?;
+    let root = dir.join(web).canonicalize().map_err(|_| "the plugin's web bundle is missing")?;
+    let file =
+        root.join(relative).canonicalize().map_err(|_| format!("no {path:?} in the bundle"))?;
+    if !file.starts_with(&root) || !file.is_file() {
+        return Err(format!("no {path:?} in the bundle"));
+    }
+    let size = file.metadata().map_err(|error| error.to_string())?.len();
+    if size > MAX_ASSET_BYTES {
+        return Err(format!("{path:?} is too large to serve"));
+    }
+    let data = std::fs::read(&file).map_err(|error| error.to_string())?;
+    Ok((data, content_type(&file)))
+}

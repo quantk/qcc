@@ -9,6 +9,7 @@ const contributions: UiContributionsResult = {
     { plugin: "notes", id: "all", title: "Notes", placement: "app", scope: "allThreads", providers: [] },
     { plugin: "provider-echo", id: "playground", title: "Echo", placement: "threadTab", scope: "ownThreads", providers: ["echo"] },
     { plugin: "notes", id: "thread", title: "Thread notes", placement: "threadTab", scope: "allThreads", providers: [] },
+    { plugin: "notes", id: "board", title: "Board", placement: "app", scope: "allThreads", web: "index.html", providers: [] },
   ],
   items: [{ plugin: "provider-echo", kind: "provider-echo/card" }],
 };
@@ -20,15 +21,15 @@ describe("plugin contributions", () => {
     const ui = new UiRegistry();
     ui.activate(contributionsModule(contributions));
     const { views, tabs, items } = ui.getSnapshot();
-    expect(views.map((view) => view.id)).toEqual(["notes/all"]);
-    expect(tabs.map((tab) => tab.id)).toEqual(["notes/thread", "provider-echo/playground"]);
+    expect(views.map((view) => view.id)).toEqual(["notes/all", "notes/board"]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["provider-echo/playground", "notes/thread"]);
     expect([...items.keys()]).toEqual(["extension:provider-echo/card"]);
 
     const shown = (provider: string) =>
       tabs
         .filter((tab) => tab.when?.({ thread: thread(provider), timeline: undefined, provider: undefined }) ?? true)
         .map((tab) => tab.id);
-    expect(shown("echo")).toEqual(["notes/thread", "provider-echo/playground"]);
+    expect(shown("echo")).toEqual(["provider-echo/playground", "notes/thread"]);
     expect(shown("codex")).toEqual(["notes/thread"]);
   });
 

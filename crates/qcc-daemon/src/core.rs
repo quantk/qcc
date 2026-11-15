@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
+use base64::Engine as _;
 use qcc_domain::{
     Delta, EnvironmentState, EventPayload, PermissionMode, ProviderId, ThreadEnvironment,
     ThreadEvent, ThreadId, ThreadStatus,
@@ -22,9 +23,9 @@ use qcc_protocol::methods::{
     ThreadListParams, ThreadListResult, ThreadResult, ThreadSend, ThreadSendParams,
     ThreadSendResult, ThreadSetMode, ThreadSetModeParams, ThreadSpawn, ThreadSpawnParams,
     ThreadStop, ThreadStopParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
-    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiContributions, UiContributionsResult, UiItemContribution, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
+    ThreadUpdatedNotification, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams, UiAsset,
+    UiAssetParams, UiAssetResult, UiContributions, UiContributionsResult, UiItemContribution,
+    UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UiTreeResult, UiViewContribution,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION, paths};
 use qcc_runtime::{NewThread, Supervisor, UuidMint};
@@ -422,6 +423,23 @@ impl Core {
                 }
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
+            UiAsset::NAME => {
+                let result = params::<UiAsset>(raw).and_then(|UiAssetParams { plugin, path }| {
+                    let error = |message: String| RpcError::new(codes::PLUGIN_ERROR, message);
+                    let handle = self
+                        .host
+                        .plugin(&plugin)
+                        .ok_or_else(|| error(format!("no plugin {plugin:?} is loaded")))?;
+                    let (data, content_type) =
+                        plugins::read_asset(&self.config, handle.manifest(), &path)
+                            .map_err(error)?;
+                    Ok(UiAssetResult {
+                        data: base64::engine::general_purpose::STANDARD.encode(data),
+                        content_type: content_type.to_owned(),
+                    })
+                });
+                responder.reply(result);
+            }
             UiRenderItem::NAME => match params::<UiRenderItem>(raw) {
                 Ok(UiRenderItemParams { plugin, kind, payload }) => {
                     let request =

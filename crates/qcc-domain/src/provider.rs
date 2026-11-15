@@ -94,6 +94,9 @@ pub struct UiViewInfo {
     pub title: String,
     pub placement: UiPlacement,
     pub scope: UiScope,
+    /// A page of the plugin's web bundle shown instead of UI nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

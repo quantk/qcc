@@ -1453,3 +1453,16 @@ select.small {
 .pn-input button {
   flex: none;
 }
+
+.plugin-screen {
+  display: flex;
+  flex-direction: column;
+}
+
+.plugin-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  border: none;
+  background: var(--bg);
+}

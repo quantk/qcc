@@ -12,12 +12,14 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use qcc_client::{Client, ClientError};
 use qcc_protocol::jsonrpc::RpcError;
 use qcc_protocol::paths;
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Emitter, State};
+use tauri::http::{Response, StatusCode, header};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Code of the errors the app itself reports: the daemon cannot be reached.
 const NOT_CONNECTED: i32 = -1;
@@ -73,6 +75,50 @@ async fn rpc(
 #[tauri::command]
 fn daemon_state(daemon: State<'_, Arc<Daemon>>) -> DaemonState {
     daemon.state.lock().unwrap().clone()
+}
+
+/// The scheme plugin web bundles are served under: `qcc-plugin://<plugin>/<path>`.
+/// The plugin id is the host, so every plugin is an origin of its own: apart from
+/// the app and apart from every other plugin.
+const PLUGIN_SCHEME: &str = "qcc-plugin";
+/// What a page of a web bundle may load: its own files and nothing from the network.
+/// The page runs in a sandboxed frame; its only way out is the message bridge.
+const BUNDLE_CSP: &str =
+    "default-src 'self' 'unsafe-inline' data: blob:; frame-src 'none'; form-action 'none'";
+
+fn plain(status: StatusCode, message: String) -> Response<Vec<u8>> {
+    Response::builder()
+        .status(status)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .body(message.into_bytes())
+        .expect("a static response is valid")
+}
+
+/// Fetch one file of a plugin's web bundle from the daemon.
+async fn serve_asset(daemon: &Daemon, plugin: &str, path: &str) -> Response<Vec<u8>> {
+    let file = path.trim_start_matches('/');
+    let client = daemon.client.lock().unwrap().clone();
+    let Some(client) = client else {
+        return plain(StatusCode::SERVICE_UNAVAILABLE, "not connected to qccd".into());
+    };
+    let params = serde_json::json!({ "plugin": plugin, "path": file });
+    let asset = match client.call_raw("ui.asset", params).await {
+        Ok(asset) => asset,
+        Err(error) => return plain(StatusCode::NOT_FOUND, error.to_string()),
+    };
+    let data = asset["data"].as_str().unwrap_or_default();
+    let Ok(body) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        return plain(StatusCode::BAD_GATEWAY, "qccd sent an unreadable file".into());
+    };
+    Response::builder()
+        .header(
+            header::CONTENT_TYPE,
+            asset["content_type"].as_str().unwrap_or("application/octet-stream"),
+        )
+        .header(header::CONTENT_SECURITY_POLICY, BUNDLE_CSP)
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(body)
+        .unwrap_or_else(|error| plain(StatusCode::BAD_GATEWAY, error.to_string()))
 }
 
 /// Start `qccd` detached: it keeps the threads running after the app is closed.
@@ -152,6 +198,14 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .manage(daemon.clone())
+        .register_asynchronous_uri_scheme_protocol(PLUGIN_SCHEME, |context, request, responder| {
+            let daemon = context.app_handle().state::<Arc<Daemon>>().inner().clone();
+            let plugin = request.uri().host().unwrap_or_default().to_owned();
+            let path = request.uri().path().to_owned();
+            tauri::async_runtime::spawn(async move {
+                responder.respond(serve_asset(&daemon, &plugin, &path).await);
+            });
+        })
         .setup(move |app| {
             tauri::async_runtime::spawn(keep_connected(app.handle().clone(), daemon));
             Ok(())

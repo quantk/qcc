@@ -23,12 +23,17 @@ fn golden(name: &str) -> PathBuf {
 #[test]
 fn declares_its_provider_and_its_ui() {
     let harness = echo();
-    let [Contribution::Provider(info), Contribution::UiView(view), Contribution::UiItem(kind)] =
-        harness.handle().contributions()
+    let [
+        Contribution::Provider(info),
+        Contribution::UiView(view),
+        Contribution::UiView(canvas),
+        Contribution::UiItem(kind),
+    ] = harness.handle().contributions()
     else {
         panic!("unexpected contributions: {:?}", harness.handle().contributions());
     };
     assert_eq!((view.id.as_str(), view.title.as_str()), ("playground", "Echo"));
+    assert_eq!(canvas.web.as_deref(), Some("index.html"));
     assert_eq!(kind, "provider-echo/card");
     assert_eq!(info.id.as_str(), "echo");
     assert_eq!(

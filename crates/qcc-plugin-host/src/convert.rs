@@ -192,6 +192,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 wit::UiScope::AllThreads => UiScope::AllThreads,
                 wit::UiScope::OwnThreads => UiScope::OwnThreads,
             },
+            web: view.web,
         }),
         wit::Contribution::UiItem(kind) => Contribution::UiItem(kind),
     }

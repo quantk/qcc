@@ -14,6 +14,7 @@ name = "qccd"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 qcc-domain.workspace = true
 qcc-plugin-host.workspace = true
 qcc-plugins-bundle.workspace = true

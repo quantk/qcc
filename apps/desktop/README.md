@@ -65,6 +65,13 @@ the renderer of the plugin's extension items. What a plugin draws is a tree of U
 `ui/kit/NodeView.tsx` draws the closed set of node types with the app's own components
 and ignores everything else, so a plugin's view is data and never code.
 
+A view can also be a page of the plugin's web bundle (`web` in the contribution).
+`modules/plugin-ui/PluginWebView.tsx` shows it in a sandboxed frame served by the
+backend under `qcc-plugin://<plugin-id>/`: an origin of its own, a response policy
+without network access, no Tauri IPC. The page reaches its plugin through
+`postMessage({ qcc: 1, id, action, value })`; the app forwards it as `ui.action` for
+that plugin only and posts the answer back.
+
 Adding a node type means adding a case to `NodeView` and a builder to
 `crates/qcc-plugin-sdk/src/ui.rs`.
 

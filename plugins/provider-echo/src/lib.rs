@@ -29,6 +29,8 @@ use qcc_plugin_sdk::ui;
 /// The extension item `/card` makes. A kind is always `<plugin-id>/<name>`.
 const CARD_KIND: &str = "provider-echo/card";
 const PLAYGROUND_VIEW: &str = "playground";
+/// A view that is a page of the plugin's web bundle instead of UI nodes.
+const CANVAS_VIEW: &str = "canvas";
 
 const SLOW_TICK_MS: u64 = 10;
 
@@ -395,12 +397,22 @@ fn stored(key: &str) -> Result<String, String> {
 
 impl Ui for Echo {
     fn views(&self) -> Vec<UiViewInfo> {
-        vec![UiViewInfo {
-            id: PLAYGROUND_VIEW.into(),
-            title: "Echo".into(),
-            placement: UiPlacement::ThreadTab,
-            scope: UiScope::OwnThreads,
-        }]
+        vec![
+            UiViewInfo {
+                id: PLAYGROUND_VIEW.into(),
+                title: "Echo".into(),
+                placement: UiPlacement::ThreadTab,
+                scope: UiScope::OwnThreads,
+                web: None,
+            },
+            UiViewInfo {
+                id: CANVAS_VIEW.into(),
+                title: "Echo canvas".into(),
+                placement: UiPlacement::ThreadTab,
+                scope: UiScope::OwnThreads,
+                web: Some("index.html".into()),
+            },
+        ]
     }
 
     fn item_kinds(&self) -> Vec<String> {
@@ -456,6 +468,19 @@ impl Ui for Echo {
     fn action(&mut self, action: UiAction) -> Result<String, String> {
         let thread = action.thread.clone().ok_or("this view belongs to a thread")?;
         let presses = format!("ui/presses/{thread}");
+        // The web page keeps its drawing in the plugin's store and reads it back.
+        if action.view == CANVAS_VIEW {
+            let strokes = format!("ui/strokes/{thread}");
+            match action.action.as_str() {
+                "load" => {}
+                "save" => kv::put(&strokes, action.value.unwrap_or_default().as_bytes())?,
+                "clear" => kv::remove(&strokes)?,
+                other => return Err(format!("unknown action {other:?}")),
+            }
+            let saved = stored(&strokes)?;
+            let strokes: serde_json::Value = serde_json::from_str(&saved).unwrap_or_default();
+            return Ok(serde_json::json!({ "strokes": strokes }).to_string());
+        }
         let note = format!("ui/note/{thread}");
         match action.action.as_str() {
             "press" => {

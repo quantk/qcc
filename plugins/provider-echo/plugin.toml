@@ -3,6 +3,7 @@ name = "Echo provider"
 version = "0.1.0"
 api = "0.1"
 wasm = "plugin.wasm"
+web = "web"
 
 [permissions]
 deltas = true

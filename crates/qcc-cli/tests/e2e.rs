@@ -961,6 +961,14 @@ fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
                     "placement": "threadTab",
                     "scope": "ownThreads",
                     "providers": ["echo"],
+                }, {
+                    "plugin": "provider-echo",
+                    "id": "canvas",
+                    "title": "Echo canvas",
+                    "placement": "threadTab",
+                    "scope": "ownThreads",
+                    "web": "index.html",
+                    "providers": ["echo"],
                 }],
                 "items": [{ "plugin": "provider-echo", "kind": "provider-echo/card" }],
             })
@@ -993,6 +1001,40 @@ fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
         .await
         .unwrap();
         assert_eq!(drawn["tree"]["children"][1], json!({ "type": "text", "text": "hello there" }));
+
+        // The web bundle is served file by file, and only from inside the bundle.
+        let asset = |path: &'static str| {
+            call("ui.asset", json!({ "plugin": "provider-echo", "path": path }))
+        };
+        let page = asset("index.html").await.unwrap();
+        assert_eq!(page["content_type"], "text/html; charset=utf-8");
+        assert!(page["data"].as_str().unwrap().len() > 100);
+        assert_eq!(
+            asset("app.js").await.unwrap()["content_type"],
+            "text/javascript; charset=utf-8"
+        );
+        for path in ["../plugin.toml", "/etc/passwd", "missing.js", "", "./index.html"] {
+            let error = asset(path).await.unwrap_err().to_string();
+            assert!(error.contains("-32008"), "{path}: {error}");
+        }
+        let error = call("ui.asset", json!({ "plugin": "env-git-worktree", "path": "index.html" }))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("has no web bundle"), "{error}");
+
+        // The page keeps its state in the plugin through actions.
+        let canvas = json!({ "plugin": "provider-echo", "view": "canvas", "thread_id": id });
+        let mut save = canvas.clone();
+        save["action"] = "save".into();
+        save["value"] = "[[[1,2],[3,4]]]".into();
+        assert_eq!(
+            call("ui.action", save).await.unwrap()["tree"],
+            json!({ "strokes": [[[1, 2], [3, 4]]] })
+        );
+        let mut load = canvas;
+        load["action"] = "load".into();
+        assert_eq!(call("ui.action", load).await.unwrap()["tree"]["strokes"][0][1], json!([3, 4]));
 
         // What a plugin does not contribute cannot be asked of it.
         for (method, params) in [

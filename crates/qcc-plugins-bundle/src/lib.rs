@@ -11,6 +11,8 @@ pub struct BundledPlugin {
     /// Contents of the plugin's `plugin.toml`.
     pub manifest: &'static str,
     pub wasm: &'static [u8],
+    /// Other files of the plugin (its web bundle), by path inside its directory.
+    pub files: &'static [(&'static str, &'static [u8])],
 }
 
 /// File name of the manifest in an installed plugin directory.
@@ -32,6 +34,13 @@ pub fn install(plugins_dir: &Path) -> io::Result<()> {
         std::fs::create_dir_all(&dir)?;
         write_if_changed(&dir.join(WASM_FILE), plugin.wasm)?;
         write_if_changed(&dir.join(MANIFEST_FILE), plugin.manifest.as_bytes())?;
+        for (path, contents) in plugin.files {
+            let path = dir.join(path);
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            write_if_changed(&path, contents)?;
+        }
     }
     Ok(())
 }

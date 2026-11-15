@@ -2,11 +2,12 @@
 // UI nodes; this module turns each contribution into the same registrations the
 // built-in modules make, so a plugin's tab sits next to the timeline like any other.
 
-import type { PluginInfo, UiContributionsResult } from "../../api/protocol.gen";
+import type { PluginInfo, Thread, UiContributionsResult } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import type { UiModule, UiRegistry } from "../../ui/registry";
 import { pluginItemRenderer } from "./PluginItem";
 import { PluginView } from "./PluginView";
+import { PluginWebView } from "./PluginWebView";
 
 const CONTRIBUTIONS = "plugins.contributions";
 
@@ -15,29 +16,28 @@ export function contributionsModule(contributions: UiContributionsResult): UiMod
   return {
     id: CONTRIBUTIONS,
     activate(ui) {
-      for (const view of contributions.views) {
+      // After the built-in contributions, in the order the plugins declared them.
+      contributions.views.forEach((view, index) => {
         const id = `${view.plugin}/${view.id}`;
+        const order = 100 + index;
+        const draw = (thread?: Thread) =>
+          view.web ? (
+            <PluginWebView plugin={view.plugin} view={view.id} entry={view.web} title={view.title} thread={thread} />
+          ) : (
+            <PluginView plugin={view.plugin} view={view.id} thread={thread} />
+          );
         if (view.placement === "app") {
-          ui.appView({
-            id,
-            title: view.title,
-            order: 100,
-            render: () => (
-              <div className="plugin-screen">
-                <PluginView plugin={view.plugin} view={view.id} />
-              </div>
-            ),
-          });
+          ui.appView({ id, title: view.title, order, render: () => <div className="plugin-screen">{draw()}</div> });
         } else {
           ui.threadTab({
             id,
             title: view.title,
-            order: 100,
+            order,
             when: ({ thread }) => view.scope === "allThreads" || view.providers.includes(thread.provider),
-            render: ({ thread }) => <PluginView plugin={view.plugin} view={view.id} thread={thread} />,
+            render: ({ thread }) => draw(thread),
           });
         }
-      }
+      });
       for (const item of contributions.items) {
         ui.itemRenderer(`extension:${item.kind}`, pluginItemRenderer(item.plugin));
       }

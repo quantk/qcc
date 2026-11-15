@@ -410,3 +410,22 @@ pub struct UiRenderItemParams {
     #[serde(default)]
     pub payload: Value,
 }
+
+method!(
+    /// Read one file of a plugin's web bundle.
+    UiAsset, "ui.asset", UiAssetParams => UiAssetResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiAssetParams {
+    pub plugin: String,
+    /// Relative to the bundle: `index.html`, `assets/app.js`.
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiAssetResult {
+    /// The file, base64-encoded.
+    pub data: String,
+    pub content_type: String,
+}

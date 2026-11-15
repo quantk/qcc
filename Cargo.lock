@@ -3447,6 +3447,7 @@ name = "qcc-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "clap",
  "qcc-domain",
  "qcc-plugin-host",
@@ -3467,6 +3468,7 @@ dependencies = [
 name = "qcc-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "qcc-client",
  "qcc-protocol",
  "serde",

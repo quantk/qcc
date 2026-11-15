@@ -10,6 +10,24 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TARGET: &str = "wasm32-wasip2";
+/// Where a bundled plugin keeps its web bundle; its manifest says `web = "web"`.
+const WEB_DIR: &str = "web";
+
+/// Every file under `dir`, as (path relative to the plugin, absolute path).
+fn collect_files(dir: &Path, relative: &Path, out: &mut Vec<(String, PathBuf)>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let relative = relative.join(entry.file_name());
+        if path.is_dir() {
+            collect_files(&path, &relative, out);
+        } else {
+            out.push((relative.to_str().expect("utf-8 file names").to_owned(), path));
+        }
+    }
+}
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
@@ -71,10 +89,18 @@ fn main() {
         let embedded = out_dir.join(format!("{plugin}.wasm"));
         fs::copy(&wasm, &embedded).unwrap_or_else(|error| panic!("{}: {error}", wasm.display()));
         let manifest = plugins_dir.join(plugin).join("plugin.toml");
+        // The web bundle, if the plugin has one, ships as the files it is made of.
+        let mut web = String::new();
+        let mut files = Vec::new();
+        collect_files(&plugins_dir.join(plugin).join(WEB_DIR), Path::new(WEB_DIR), &mut files);
+        files.sort();
+        for (relative, absolute) in files {
+            write!(web, "({relative:?}, include_bytes!({absolute:?})), ").unwrap();
+        }
         writeln!(
             generated,
             "    BundledPlugin {{ id: {plugin:?}, manifest: include_str!({manifest:?}), \
-             wasm: include_bytes!({embedded:?}) }},"
+             wasm: include_bytes!({embedded:?}), files: &[{web}] }},"
         )
         .unwrap();
     }

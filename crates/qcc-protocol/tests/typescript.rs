@@ -54,7 +54,8 @@ fn generate() -> String {
         .method::<UiContributions>()
         .method::<UiRender>()
         .method::<UiAction>()
-        .method::<UiRenderItem>();
+        .method::<UiRenderItem>()
+        .method::<UiAsset>();
     let types = api
         .types
         .register::<ThreadEventNotification>()

@@ -239,6 +239,10 @@ interface types {
     placement: ui-placement,
     /// Ignored for app views.
     scope: ui-scope,
+    /// A page of the plugin's web bundle (the manifest's `web` directory) to show
+    /// instead of UI nodes: `index.html`. It runs in a sandboxed frame with no
+    /// network and reaches the plugin only by sending actions.
+    web: option<string>,
   }
 
   variant contribution {

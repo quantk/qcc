@@ -2,10 +2,11 @@
 // items instead of AI SDK message parts. Each is one line of a trace that unfolds into
 // what the agent saw or thought.
 import { BracesIcon, BrainIcon, TerminalIcon } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { ItemStatus } from "../../api/protocol.gen";
 import { Markdown } from "./Markdown";
+import { useRemembered } from "./Remembered";
 import { CodeBlock, CodeBlockContent, CodeBlockLine } from "@/components/ui/code-block";
 import {
   Trace,
@@ -57,7 +58,8 @@ export function ItemTrace(props: {
   titleClassName?: string;
   children?: ReactNode;
 }) {
-  const [chosen, setChosen] = useState<boolean | null>(null);
+  // Kept while the item is scrolled out of the timeline.
+  const [chosen, setChosen] = useRemembered<boolean | null>("trace-open", null);
   const end = outcome(props.status);
   const line = (
     <TraceLine status={lineStatus(props.status, props.failed)}>

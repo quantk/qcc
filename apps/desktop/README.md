@@ -131,3 +131,7 @@ Rules that keep modules independent:
   environment a thread has.
 - A timeline item without a renderer is shown as its data, so a new item kind is
   visible before anyone draws it.
+- The timeline is virtualized (`@tanstack/react-virtual`): only entries near the view
+  are mounted, so a renderer is unmounted when its item scrolls away. State that should
+  survive that, like whether something is unfolded, goes through `useRemembered` from
+  `src/ui/kit` instead of `useState`; `ItemTrace` already does this.

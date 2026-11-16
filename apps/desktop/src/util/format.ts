@@ -44,3 +44,8 @@ export function elapsed(ms: number): string {
 export function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
+
+/** What went wrong, in words, whatever was thrown. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

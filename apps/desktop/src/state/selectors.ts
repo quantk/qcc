@@ -1,4 +1,4 @@
-import { relativePath, tailPath } from "../util/format";
+import { elapsed, relativePath, relativeTime, tailPath } from "../util/format";
 import type { PermissionMode, PluginInfo, Project, ProviderInfo, Settings, Thread } from "../api/protocol.gen";
 
 /** Example plugins are left out unless asked for. */
@@ -21,6 +21,16 @@ export function environmentsOf(plugins: readonly PluginInfo[]) {
 
 export function findProvider(plugins: readonly PluginInfo[], id: string): ProviderInfo | undefined {
   return providersOf(plugins).find((provider) => provider.id === id);
+}
+
+/** The name an agent goes by: its id when no loaded plugin provides it. */
+export function providerName(plugins: readonly PluginInfo[], id: string): string {
+  return findProvider(plugins, id)?.name ?? id;
+}
+
+/** What a thread is called, before its agent names it too. */
+export function threadTitle(thread: Pick<Thread, "title"> | undefined): string {
+  return thread?.title ?? "New thread";
 }
 
 /** The directory a thread is about: where it was asked to work. */
@@ -74,6 +84,18 @@ export function attentionOf(thread: Thread): Attention {
   if (thread.status === "active") return "active";
   if (thread.status === "failed" || thread.last_turn_status === "failed") return "failed";
   return "idle";
+}
+
+/** Why a failed thread is shown as failed: its session ended, or only its last turn. */
+export function failureText(thread: Thread): string {
+  return thread.status === "failed" ? "The session failed" : "The last turn failed";
+}
+
+/** The time a card shows: how long the running turn has gone, or since the thread last changed. */
+export function cardTime(thread: Thread, now: number): string {
+  return attentionOf(thread) === "active" && thread.turn_started_at
+    ? elapsed(now - thread.turn_started_at)
+    : relativeTime(thread.updated_at, now);
 }
 
 export const attentionLabel: Record<Attention, string> = {
@@ -256,7 +278,7 @@ export function dropOf(
   const { modes, agentDefault } = allowedModes(MODE_ORDER, newParent);
   const fits = thread.permission_mode ? modes.includes(thread.permission_mode) : agentDefault;
   if (!fits) {
-    return { refused: `Runs looser than “${newParent?.title ?? "New thread"}” allows` };
+    return { refused: `Runs looser than “${threadTitle(newParent)}” allows` };
   }
   return { parent };
 }

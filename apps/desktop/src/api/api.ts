@@ -18,7 +18,6 @@ export type Notification = {
 /** Error codes of the daemon API that the app reacts to. */
 export const codes = {
   notConnected: -1,
-  threadBusy: -32005,
   environmentError: -32006,
 } as const;
 

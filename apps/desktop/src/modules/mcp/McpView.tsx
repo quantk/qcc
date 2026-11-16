@@ -10,7 +10,7 @@ import {
   transportSummary,
   withMcpServer,
 } from "../../state/mcp";
-import { findProvider } from "../../state/selectors";
+import { providerName } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { plural } from "../../util/format";
 import { Badge } from "@/components/ui/badge";
@@ -84,7 +84,7 @@ export function McpView() {
 }
 
 function ProviderBadge({ provider }: { provider: string }) {
-  const name = useApp((state) => findProvider(state.allPlugins, provider)?.name ?? provider);
+  const name = useApp((state) => providerName(state.allPlugins, provider));
   return <Badge variant="outline">{name}</Badge>;
 }
 

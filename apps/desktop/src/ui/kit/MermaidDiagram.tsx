@@ -1,6 +1,7 @@
 import { CodeIcon, NetworkIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
+import { errorMessage } from "../../util/format";
 import { Button } from "@/components/ui/button";
 
 type Rendered = { svg: string } | { error: string } | null;
@@ -41,7 +42,7 @@ export function MermaidDiagram({ source }: { source: string }) {
         .then((mermaid) => mermaid.render(id, source))
         .then(({ svg }) => !stale && setRendered({ svg }))
         .catch((error: unknown) => {
-          if (!stale) setRendered({ error: error instanceof Error ? error.message : String(error) });
+          if (!stale) setRendered({ error: errorMessage(error) });
           // A failed render leaves its scratch element behind.
           document.getElementById(`d${id}`)?.remove();
         });

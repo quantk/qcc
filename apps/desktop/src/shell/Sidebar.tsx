@@ -1,21 +1,31 @@
-import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, FolderPlusIcon, PlusIcon, Settings2Icon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { activityText, attentionLabel, attentionOf, findProvider, threadGroups, threadTree, type TreeRow } from "../state/selectors";
+import {
+  activityText,
+  attentionLabel,
+  attentionOf,
+  providerName,
+  threadGroups,
+  threadTitle,
+  threadTree,
+  type TreeRow,
+} from "../state/selectors";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
-import { NEW_THREAD, openNewThread } from "../modules/new-thread";
-import { openProject } from "../modules/projects";
 import { useUi } from "../ui/registry";
 import { ThreadMenu } from "../ui/kit";
-import { baseName, relativeTime } from "../util/format";
+import { baseName, plural, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
 import { type DragState, useThreadDrag } from "./useThreadDrag";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 
 export function Sidebar() {
-  const newThread = useUi((snapshot) => snapshot.commands.find((command) => command.id === NEW_THREAD));
+  // The shell offers what modules contribute, and nothing when they are left out.
+  const newThread = useUi((snapshot) => snapshot.commands.find((command) => command.id === "thread.new"));
+  const newProject = useUi((snapshot) => snapshot.commands.find((command) => command.id === "project.new"));
+  const groupActions = useUi((snapshot) => snapshot.groupActions);
   const threads = useApp((state) => state.threads);
   const plugins = useApp((state) => state.allPlugins);
   const projects = useApp((state) => state.projects);
@@ -85,15 +95,17 @@ export function Sidebar() {
       <nav className="thread-list" aria-label="Threads">
         <div className="flex items-center justify-between pr-1 pl-3">
           <span className="text-xs text-muted-foreground">{projects.length === 0 ? "Threads by folder" : "Projects"}</span>
-          <Button
-            variant="ghost"
-            size="xs"
-            disabled={!connected}
-            onClick={() => openProject()}
-            title="Group repositories and folders under one name"
-          >
-            <PlusIcon /> Project
-          </Button>
+          {newProject && (
+            <Button
+              variant="ghost"
+              size="xs"
+              disabled={!connected}
+              onClick={newProject.run}
+              title="Group repositories and folders under one name"
+            >
+              <PlusIcon /> Project
+            </Button>
+          )}
         </div>
         {groups.length === 0 && <p className="hint">No threads yet.</p>}
         {groups.map((group) => (
@@ -108,49 +120,31 @@ export function Sidebar() {
               <h2 className="min-w-0 flex-1 truncate" title={group.kind === "project" ? group.project.folders.join("\n") : `${group.folder}\nNot in a project`}>
                 {group.kind === "project" ? group.project.name : baseName(group.folder)}
               </h2>
-              {group.kind === "project" ? (
-                <>
+              {groupActions
+                .filter((action) => action.when?.(group) ?? true)
+                .map((action) => (
                   <Button
+                    key={action.id}
                     variant="ghost"
                     size="icon-xs"
                     disabled={!connected}
-                    aria-label={`New thread in ${group.project.name}`}
-                    title="New thread in this project"
-                    onClick={() => openNewThread({ project: group.project.id })}
+                    className={
+                      action.onHover ? "opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100" : undefined
+                    }
+                    aria-label={action.label(group)}
+                    title={action.title}
+                    onClick={() => action.run(group)}
                   >
-                    <PlusIcon />
+                    <action.icon />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    disabled={!connected}
-                    aria-label={`Edit ${group.project.name}`}
-                    title="Name and folders"
-                    onClick={() => openProject(group.project)}
-                  >
-                    <Settings2Icon />
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={!connected}
-                  className="opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100"
-                  aria-label={`Make ${baseName(group.folder)} a project`}
-                  title="Make this folder a project"
-                  onClick={() => openProject(undefined, { name: baseName(group.folder), folders: [group.folder] })}
-                >
-                  <FolderPlusIcon />
-                </Button>
-              )}
+                ))}
             </div>
             {group.kind === "project" && group.threads.length === 0 && <p className="hint">No threads yet.</p>}
             {threadTree(group.threads, collapsed, selected).map((row) => {
               const { thread, depth, children } = row;
               const attention = attentionOf(thread);
               const unread = isUnread(thread, seen);
-              const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
+              const provider = providerName(plugins, thread.provider);
               const indent = Math.min(depth, MAX_INDENT);
               const over = drag?.over?.target === thread.id ? drag.over : null;
               const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
@@ -205,7 +199,7 @@ export function Sidebar() {
                     <span
                       className={`thread-title${unread ? " font-semibold" : ""}${depth > 0 ? " text-[13px]" : ""}${depth > 0 && !unread && thread.id !== selected ? " text-foreground/80" : ""}`}
                     >
-                      {thread.title ?? "New thread"}
+                      {threadTitle(thread)}
                     </span>
                     <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
                     <span className={`thread-meta${children > 0 ? " mr-11" : ""}`}>
@@ -255,7 +249,7 @@ function FamilyToggle({ row }: { row: TreeRow }) {
   const { thread, children, collapsed, hidden, hiddenAttention } = row;
   const Chevron = collapsed ? ChevronRightIcon : ChevronDownIcon;
   const count = collapsed ? hidden : children;
-  const label = `${collapsed ? "Show" : "Hide"} ${count} thread${count === 1 ? "" : "s"} it started`;
+  const label = `${collapsed ? "Show" : "Hide"} ${plural(count, "thread")} it started`;
   return (
     <Button
       variant="ghost"

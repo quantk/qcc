@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { Thread } from "../api/protocol.gen";
-import { type Drop, type DropZone, dropOf } from "../state/selectors";
+import { type Drop, type DropZone, dropOf, threadTitle } from "../state/selectors";
 import { store, useApp } from "../state/store";
 
 /** How far the pointer moves before a press becomes a drag, in pixels. */
@@ -109,7 +109,7 @@ export function useThreadDrag() {
       if (event.button !== 0) return;
       press.current = {
         id: thread.id,
-        title: thread.title ?? "New thread",
+        title: threadTitle(thread),
         group,
         groupKey,
         x: event.clientX,

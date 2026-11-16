@@ -7,7 +7,7 @@ src-tauri/        the backend: one connection to qccd, requests and notification
 src/api/          the typed door to the daemon; protocol.gen.ts is generated from qcc-protocol
 src/state/        the store (mirror of the daemon) and pure folds: timeline, diff
 src/ui/registry   the extension points
-src/ui/kit/       shared building blocks: Markdown, DiffView, Disclosure, InteractionPrompt,
+src/ui/kit/       shared building blocks: Markdown, DiffView, InteractionPrompt,
                   ItemTrace and its kin (the AI Elements Terminal, Tool and Reasoning patterns)
 src/components/ui shadcn components, added with the shadcn CLI and owned by us from then on
 src/shell/        the frame: sidebar, thread frame, command palette
@@ -26,8 +26,8 @@ timeline items rather than AI SDK messages.
 `src/theme.css` maps shadcn's tokens (`--background`, `--primary`, `--muted`, …) onto the
 palette, so a component follows the app's colors and its light and dark scheme. Because
 the app's rules sit in a layer, a utility class on a component always wins over them; the
-app's global `button` and `select` rules skip elements with a `data-slot`, which is how
-shadcn components mark themselves.
+app's global `button` rule skips elements with a `data-slot`, which is how shadcn
+components mark themselves.
 
 Run it with `./dev desktop` from the repository root; check it with
 `nix develop .#desktop -c ./scripts/check-desktop.sh`.
@@ -45,8 +45,9 @@ plugin's UI does:
 | A tab of the side panel at the right of a thread | `ui.threadPanel` | `modules/insights` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
+| A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
-| A command (palette, shortcut) | `ui.command` | `modules/new-thread`, `modules/settings` |
+| A command (palette, shortcut, sidebar buttons) | `ui.command` | `modules/new-thread`, `modules/projects`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
 
 The side panel stays in view beside whichever thread tab is open, so it is the place

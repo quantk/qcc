@@ -100,3 +100,15 @@ describe("thread menu", () => {
     expect(registry.getSnapshot().menu.map((item) => item.id)).toEqual(["open", "archive"]);
   });
 });
+
+describe("group actions", () => {
+  it("keeps the buttons of sidebar groups in order and takes them out with their module", () => {
+    const registry = new UiRegistry();
+    const action = (id: string, order: number) => ({ id, order, label: () => id, title: id, icon: Nothing, run: () => {} });
+    registry.activate({ id: "a", activate: (ui) => void ui.groupAction(action("edit", 20)) });
+    registry.activate({ id: "b", activate: (ui) => void ui.groupAction(action("new", 10)) });
+    expect(registry.getSnapshot().groupActions.map((item) => item.id)).toEqual(["new", "edit"]);
+    registry.deactivate("b");
+    expect(registry.getSnapshot().groupActions.map((item) => item.id)).toEqual(["edit"]);
+  });
+});

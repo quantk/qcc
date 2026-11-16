@@ -6,6 +6,7 @@ import { store } from "../../state/store";
 import { contextUsed } from "../../state/stats";
 import { type QueuedMessage, type Timeline, queuedMessages } from "../../state/timeline";
 import { compactNumber } from "../../util/format";
+import { readText, saveText } from "../../util/storage";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { Button } from "@/components/ui/button";
@@ -20,19 +21,7 @@ const drafts = new Map<string, string>();
 const DELIVERY = "qcc.composer.delivery";
 
 function readDelivery(): SendMode {
-  try {
-    return localStorage.getItem(DELIVERY) === "steer" ? "steer" : "queue";
-  } catch {
-    return "queue";
-  }
-}
-
-function saveDelivery(mode: SendMode) {
-  try {
-    localStorage.setItem(DELIVERY, mode);
-  } catch {
-    // Not remembered; it still applies until the window closes.
-  }
+  return readText(DELIVERY) === "steer" ? "steer" : "queue";
 }
 
 function statusText(thread: Thread): string {
@@ -80,7 +69,7 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
 
   const choose = (mode: SendMode) => {
     setPreferred(mode);
-    saveDelivery(mode);
+    saveText(DELIVERY, mode);
   };
 
   /** Put a queued message back into the composer, after what is typed there. */

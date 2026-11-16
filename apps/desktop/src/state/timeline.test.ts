@@ -7,7 +7,6 @@ import {
   conversationStart,
   earlierConversations,
   emptyTimeline,
-  pendingInteractions,
   queuedMessages,
 } from "./timeline";
 
@@ -99,7 +98,8 @@ describe("timeline", () => {
   it("tracks interactions until they are resolved", () => {
     const request = { type: "approval" as const, title: "Run ls", options: [] };
     const asked = fold({ type: "interaction/requested", interaction_id: "x1", request });
-    expect(pendingInteractions(asked)).toHaveLength(1);
+    expect(asked.entries).toMatchObject([{ kind: "interaction" }]);
+    expect(asked.entries[0]).not.toHaveProperty("resolution");
     const answered = applyEvents(asked, [
       {
         thread_id: "t",
@@ -110,7 +110,6 @@ describe("timeline", () => {
         resolution: { type: "selected", option_id: "allow" },
       },
     ]);
-    expect(pendingInteractions(answered)).toHaveLength(0);
     expect(answered.entries[0]).toMatchObject({ resolution: { type: "selected", option_id: "allow" } });
   });
 

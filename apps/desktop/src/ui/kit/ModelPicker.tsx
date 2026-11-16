@@ -36,7 +36,7 @@ export function ModelPicker(props: {
     if (provider) void store().loadModels(provider);
   }, [provider]);
 
-  const models = list?.models ?? [];
+  const models = list?.items ?? [];
   const options = useMemo(() => modelOptions(models, value, typed), [models, value, typed]);
   // Items are keys, so they stay equal from one keystroke to the next. The agent's
   // default is an item to pick, but choosing it selects nothing: the input then

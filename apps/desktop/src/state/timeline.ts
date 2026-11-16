@@ -216,11 +216,6 @@ export function applyEvents(timeline: Timeline, events: readonly ThreadEvent[]):
   return events.reduce(applyEvent, timeline);
 }
 
-/** Interactions nobody answered yet, oldest first. */
-export function pendingInteractions(timeline: Timeline): Entry[] {
-  return timeline.entries.filter((entry) => entry.kind === "interaction" && !entry.resolution);
-}
-
 export type QueuedMessage = { queueId: string; text: string };
 
 /** Messages waiting for the running turn to end, oldest first. */

@@ -7,6 +7,7 @@ import { store, useApp } from "../../state/store";
 import { effortFor } from "../../state/models";
 import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
 import { tailPath } from "../../util/format";
+import { readJson, saveJson } from "../../util/storage";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -27,11 +28,7 @@ type Remembered = {
 };
 
 function remembered(): Remembered {
-  try {
-    return JSON.parse(localStorage.getItem(REMEMBERED) ?? "{}") as Remembered;
-  } catch {
-    return {};
-  }
+  return (readJson(REMEMBERED) as Remembered | null) ?? {};
 }
 
 export function NewThreadDialog({ close: onClose, project: preset }: { close: () => void; project?: ProjectId }) {
@@ -101,7 +98,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
       effort: effort ?? undefined,
       project: project?.id,
     };
-    localStorage.setItem(REMEMBERED, JSON.stringify(next));
+    saveJson(REMEMBERED, next);
     onClose();
   };
 
@@ -252,7 +249,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
                   value={model}
                   onChange={(next) => {
                     setModel(next);
-                    setEffort((level) => effortFor(modelList?.models ?? [], next, level));
+                    setEffort((level) => effortFor(modelList?.items ?? [], next, level));
                   }}
                 />
               </Field>

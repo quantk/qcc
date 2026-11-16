@@ -30,6 +30,8 @@ import type {
 import { type History, type Place, startHistory, step, visit } from "./history";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { visiblePlugins } from "./selectors";
+import { errorMessage } from "../util/format";
+import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
@@ -51,34 +53,17 @@ function panelFitsBeside(): boolean {
 }
 
 function readSidePanel(): SidePanel {
-  try {
-    const saved: unknown = JSON.parse(globalThis.localStorage?.getItem(SIDE_PANEL) ?? "null");
-    if (saved && typeof saved === "object") {
-      const { open, tab } = saved as Record<string, unknown>;
-      return { open: open !== false, tab: typeof tab === "string" ? tab : null };
-    }
-  } catch {
-    // Fall through to the default.
+  const saved = readJson(SIDE_PANEL);
+  if (saved && typeof saved === "object") {
+    const { open, tab } = saved as Record<string, unknown>;
+    return { open: open !== false, tab: typeof tab === "string" ? tab : null };
   }
   return { open: true, tab: null };
 }
 
 /** Null when nothing was ever recorded: the first run of the app. */
 function readSeen(): Seen | null {
-  try {
-    const text = globalThis.localStorage?.getItem(SEEN);
-    return text ? (JSON.parse(text) as Seen) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveSeen(seen: Seen) {
-  try {
-    globalThis.localStorage?.setItem(SEEN, JSON.stringify(seen));
-  } catch {
-    // Not remembered past this window; it still works until it closes.
-  }
+  return readJson(SEEN) as Seen | null;
 }
 
 /** Whether the user can be looking at the window right now. */
@@ -87,25 +72,14 @@ function windowInView(): boolean {
 }
 
 function readCollapsed(): ReadonlySet<ThreadId> {
-  try {
-    const ids: unknown = JSON.parse(globalThis.localStorage?.getItem(COLLAPSED) ?? "[]");
-    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function readShowExamples(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(SHOW_EXAMPLES) === "1";
-  } catch {
-    return false;
-  }
+  const ids = readJson(COLLAPSED);
+  return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
 }
 
 /** What a provider said it offers. Asked once per provider and connection. */
-export type ModelList = { loading: boolean; models: readonly ModelInfo[]; error: string | null };
-export type AgentSkillList = { loading: boolean; skills: readonly AgentSkill[]; error: string | null };
+export type ProviderList<T> = { loading: boolean; items: readonly T[]; error: string | null };
+export type ModelList = ProviderList<ModelInfo>;
+export type AgentSkillList = ProviderList<AgentSkill>;
 
 export type AppState = {
   daemon: DaemonState;
@@ -159,7 +133,7 @@ export class AppStore {
     threads: {},
     plugins: [],
     allPlugins: [],
-    showExamples: readShowExamples(),
+    showExamples: readText(SHOW_EXAMPLES) === "1",
     selected: null,
     view: null,
     timelines: {},
@@ -297,7 +271,7 @@ export class AppStore {
   private setSeen(seen: Seen) {
     if (seen === this.state.seen) return;
     this.set({ seen });
-    saveSeen(seen);
+    saveJson(SEEN, seen);
   }
 
   markUnread = (threadId: ThreadId) => {
@@ -353,7 +327,7 @@ export class AppStore {
   private fail(error: unknown) {
     // A lost connection is already on screen as the daemon's state.
     if (error instanceof ApiError && error.code === codes.notConnected) return;
-    this.set({ error: error instanceof Error ? error.message : String(error) });
+    this.set({ error: errorMessage(error) });
   }
 
   private async attempt<T>(action: () => Promise<T>): Promise<T | null> {
@@ -378,56 +352,55 @@ export class AppStore {
     try {
       return await this.api.call("command.run", params);
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return { error: errorMessage(error) };
     }
   }
 
   /** Ask the provider which models it offers, unless that is known or underway. */
-  loadModels = async (provider: ProviderId, refresh = false) => {
-    const known = this.state.models[provider];
-    if (known?.loading || (known && !refresh && !known.error)) return;
-    const put = (list: ModelList) => this.set({ models: { ...this.state.models, [provider]: list } });
-    put({ loading: true, models: known?.models ?? [], error: null });
-    try {
-      const { models } = await this.api.call("provider.models", { provider, refresh });
-      put({ loading: false, models, error: null });
-    } catch (error) {
-      put({ loading: false, models: [], error: error instanceof Error ? error.message : String(error) });
-    }
-  };
+  loadModels = (provider: ProviderId, refresh = false) =>
+    this.loadList(
+      () => this.state.models[provider],
+      (list) => this.set({ models: { ...this.state.models, [provider]: list } }),
+      refresh,
+      async () => (await this.api.call("provider.models", { provider, refresh })).models,
+    );
 
   /** Ask the agent which skills it finds by itself, unless that is known or underway. */
-  loadAgentSkills = async (provider: ProviderId, refresh = false) => {
-    const known = this.state.agentSkills[provider];
-    if (known?.loading || (known && !refresh && !known.error)) return;
-    const put = (list: AgentSkillList) => this.set({ agentSkills: { ...this.state.agentSkills, [provider]: list } });
-    put({ loading: true, skills: known?.skills ?? [], error: null });
+  loadAgentSkills = (provider: ProviderId, refresh = false) =>
+    this.loadList(
+      () => this.state.agentSkills[provider],
+      (list) => this.set({ agentSkills: { ...this.state.agentSkills, [provider]: list } }),
+      refresh,
+      async () => (await this.api.call("provider.skills", { provider, refresh })).skills,
+    );
+
+  /** Fill one of the lists a provider is asked for, unless it is known or underway. */
+  private async loadList<T>(
+    known: () => ProviderList<T> | undefined,
+    put: (list: ProviderList<T>) => void,
+    refresh: boolean,
+    fetch: () => Promise<readonly T[]>,
+  ) {
+    const list = known();
+    if (list?.loading || (list && !refresh && !list.error)) return;
+    put({ loading: true, items: list?.items ?? [], error: null });
     try {
-      const { skills } = await this.api.call("provider.skills", { provider, refresh });
-      put({ loading: false, skills, error: null });
+      put({ loading: false, items: await fetch(), error: null });
     } catch (error) {
-      put({ loading: false, skills: [], error: error instanceof Error ? error.message : String(error) });
+      put({ loading: false, items: [], error: errorMessage(error) });
     }
-  };
+  }
 
   /** Offer example plugins (the echo provider and its views) or leave them out. */
   setShowExamples = (show: boolean) => {
-    try {
-      localStorage.setItem(SHOW_EXAMPLES, show ? "1" : "0");
-    } catch {
-      // Not remembered; it still applies to this window.
-    }
+    saveText(SHOW_EXAMPLES, show ? "1" : "0");
     this.set({ showExamples: show, plugins: visiblePlugins(this.state.allPlugins, show) });
   };
 
   /** Open or close the panel at the right of a thread, or show one of its tabs. */
   setSidePanel = (patch: Partial<SidePanel>) => {
     const sidePanel = { ...this.state.sidePanel, ...patch };
-    try {
-      globalThis.localStorage?.setItem(SIDE_PANEL, JSON.stringify(sidePanel));
-    } catch {
-      // Not remembered past this window.
-    }
+    saveJson(SIDE_PANEL, sidePanel);
     this.set({ sidePanel });
   };
 
@@ -442,11 +415,7 @@ export class AppStore {
     if (!collapsed.delete(threadId)) collapsed.add(threadId);
     // Threads that are gone need not be remembered.
     for (const id of collapsed) if (!this.state.threads[id]) collapsed.delete(id);
-    try {
-      globalThis.localStorage?.setItem(COLLAPSED, JSON.stringify([...collapsed]));
-    } catch {
-      // Not remembered past this window.
-    }
+    saveJson(COLLAPSED, [...collapsed]);
     this.set({ collapsed });
   };
 

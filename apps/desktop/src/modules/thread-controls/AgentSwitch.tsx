@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
 import { effortFor, modelLabel } from "../../state/models";
-import { findProvider, pickableProviders } from "../../state/selectors";
+import { findProvider, pickableProviders, providerName } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
   const settings = useApp((state) => state.settings?.settings);
   // The slice must be stable: select the list, not a fallback made on every read.
   const list = useApp((state) => state.models[thread.provider]);
-  const models = list?.models ?? [];
+  const models = list?.items ?? [];
   // The thread's own agent stays on the list even when its plugin is hidden.
   const providers = useMemo(() => {
     const shown = pickableProviders(plugins, settings);
@@ -33,7 +33,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
   const chosenList = useApp((state) => state.models[provider]);
   const active = thread.status === "active";
   const locked = active || thread.archived;
-  const current = findProvider(allPlugins, thread.provider)?.name ?? thread.provider;
+  const current = providerName(allPlugins, thread.provider);
   const switching = provider !== thread.provider;
   const changed = switching || model !== (thread.model ?? null) || effort !== (thread.effort ?? null);
 
@@ -119,7 +119,7 @@ export function AgentSwitch({ thread }: { thread: Thread }) {
                 value={model}
                 onChange={(next) => {
                   setModel(next);
-                  setEffort((level) => effortFor(chosenList?.models ?? [], next, level));
+                  setEffort((level) => effortFor(chosenList?.items ?? [], next, level));
                 }}
               />
             </Field>

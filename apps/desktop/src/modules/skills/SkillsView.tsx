@@ -85,7 +85,7 @@ function AgentSkills({ provider }: { provider: ProviderInfo }) {
   useEffect(() => {
     if (can) void store().loadAgentSkills(provider.id);
   }, [can, provider.id]);
-  const skills = list?.skills ?? [];
+  const skills = list?.items ?? [];
   const summary = !can
     ? "does not say which skills it finds"
     : list?.loading

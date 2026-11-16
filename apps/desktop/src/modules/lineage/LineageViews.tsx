@@ -1,10 +1,17 @@
 import { ArrowUpIcon } from "lucide-react";
 
 import type { Thread } from "../../api/protocol.gen";
-import { activityText, attentionLabel, attentionOf, findProvider } from "../../state/selectors";
+import {
+  activityText,
+  attentionLabel,
+  attentionOf,
+  cardTime,
+  failureText,
+  providerName,
+  threadTitle,
+} from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt } from "../../ui/kit";
-import { elapsed, relativeTime } from "../../util/format";
 import { useNow } from "../../util/useNow";
 import { Button } from "@/components/ui/button";
 
@@ -27,7 +34,7 @@ function childStatus(thread: Thread): string {
   const attention = attentionOf(thread);
   if (attention === "active") return activityText(thread) || "Working";
   if (attention === "waiting") return "Waiting for your answer";
-  if (attention === "failed") return thread.status === "failed" ? "The session failed" : "The last turn failed";
+  if (attention === "failed") return failureText(thread);
   if (thread.last_turn_status === "interrupted") return "Stopped";
   return thread.activity?.kind === "agentMessage" && thread.activity.detail ? thread.activity.detail : "Done";
 }
@@ -41,23 +48,19 @@ export function ChildrenView({ children }: { children: readonly Thread[] }) {
       <p className="hint">Threads this agent started. Their approvals can be answered here.</p>
       {children.map((child) => {
         const attention = attentionOf(child);
-        const provider = findProvider(plugins, child.provider)?.name ?? child.provider;
+        const provider = providerName(plugins, child.provider);
         return (
           <article key={child.id} className={`child-card ${attention}`}>
             <header>
               <span className={`dot ${attention}`} title={attentionLabel[attention]} />
               <Button variant="link" className="h-auto p-0 font-semibold text-foreground" onClick={() => store().select(child.id)}>
-                {child.title ?? "New thread"}
+                {threadTitle(child)}
               </Button>
               <span className="child-facts">
                 {provider}
                 {child.environment ? " · worktree" : ""}
               </span>
-              <span className="child-time">
-                {attention === "active" && child.turn_started_at
-                  ? elapsed(now - child.turn_started_at)
-                  : relativeTime(child.updated_at, now)}
-              </span>
+              <span className="child-time">{cardTime(child, now)}</span>
             </header>
             <div className={`child-status${attention === "active" && child.activity?.kind === "command" ? " technical" : ""}`}>
               {childStatus(child)}

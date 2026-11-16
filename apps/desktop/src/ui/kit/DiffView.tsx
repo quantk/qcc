@@ -1,6 +1,8 @@
+import { ChevronRightIcon } from "lucide-react";
 import { memo, useState } from "react";
 
 import type { DiffFile } from "../../state/diff";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 /** Files longer than this start folded: a huge diff must not freeze the window. */
 const FOLD_ABOVE = 400;
@@ -11,21 +13,34 @@ export function fileAnchor(path: string): string {
   return `diff-${path}`;
 }
 
+/** Lines added and removed, as a diff counts them. */
+export function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
+  return (
+    <span className="diff-stat">
+      <span className="add">+{additions}</span> <span className="del">−{deletions}</span>
+    </span>
+  );
+}
+
 const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile; bare: boolean }) {
   const [open, setOpen] = useState(file.lines.length <= FOLD_ABOVE);
   return (
-    <section className="diff-file" id={bare ? undefined : fileAnchor(file.path)}>
+    <Collapsible
+      render={<section />}
+      className="diff-file"
+      id={bare ? undefined : fileAnchor(file.path)}
+      open={open || bare}
+      onOpenChange={setOpen}
+    >
       {!bare && (
-        <button className="diff-file-head" onClick={() => setOpen(!open)} aria-expanded={open}>
-          <span className="chevron">{open ? "▾" : "▸"}</span>
+        <CollapsibleTrigger className="diff-file-head group cursor-pointer">
+          <ChevronRightIcon className="size-3.5 flex-none text-muted-foreground transition-transform group-data-[panel-open]:rotate-90" />
           <span className="diff-path">{file.path}</span>
           {statusLabel[file.status] && <span className="tag">{statusLabel[file.status]}</span>}
-          <span className="diff-stat">
-            <span className="add">+{file.additions}</span> <span className="del">−{file.deletions}</span>
-          </span>
-        </button>
+          <DiffStat additions={file.additions} deletions={file.deletions} />
+        </CollapsibleTrigger>
       )}
-      {(open || bare) && (
+      <CollapsibleContent>
         <table className="diff-lines">
           <tbody>
             {file.lines.map((line, index) =>
@@ -47,8 +62,8 @@ const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile
             )}
           </tbody>
         </table>
-      )}
-    </section>
+      </CollapsibleContent>
+    </Collapsible>
   );
 });
 

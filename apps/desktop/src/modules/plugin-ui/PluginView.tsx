@@ -3,8 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Thread } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import { NodeView } from "../../ui/kit";
+import { errorMessage } from "../../util/format";
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /** One view of a plugin: asks the plugin to draw it and sends the user's actions back. */
 export function PluginView({ plugin, view, thread }: { plugin: string; view: string; thread?: Thread }) {
@@ -25,7 +25,7 @@ export function PluginView({ plugin, view, thread }: { plugin: string; view: str
         setError(null);
       })
       .catch((error: unknown) => {
-        if (!stale) setError(message(error));
+        if (!stale) setError(errorMessage(error));
       });
     return () => {
       stale = true;
@@ -41,7 +41,7 @@ export function PluginView({ plugin, view, thread }: { plugin: string; view: str
           setTree(result.tree);
           setError(null);
         })
-        .catch((error: unknown) => setError(message(error)))
+        .catch((error: unknown) => setError(errorMessage(error)))
         .finally(() => setBusy(false));
     },
     [plugin, view, threadId],

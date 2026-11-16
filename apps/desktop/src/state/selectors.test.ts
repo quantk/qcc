@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import type { PluginInfo, Project, Thread } from "../api/protocol.gen";
-import { allowedModes, childrenOf, dropOf, rootOf, threadGroups, threadTree, visiblePlugins } from "./selectors";
+import {
+  allowedModes,
+  cardTime,
+  childrenOf,
+  dropOf,
+  failureText,
+  providerName,
+  rootOf,
+  threadGroups,
+  threadTitle,
+  threadTree,
+  visiblePlugins,
+} from "./selectors";
 
 function thread(id: string, created_at: number, parent?: string): Thread {
   return {
@@ -132,5 +144,32 @@ describe("dragging a thread in the sidebar", () => {
     // Without a mode it may sit only under a thread without one.
     expect(dropOf(group, "c", "b", "into")).toHaveProperty("refused");
     expect(dropOf(group, "b", "c", "into")).toEqual({ parent: "c" });
+  });
+});
+
+describe("what cards and rows say about a thread", () => {
+  const plugins = [{ id: "p", providers: [{ id: "echo", name: "Echo" }] }] as unknown as PluginInfo[];
+
+  it("names an agent by its plugin, or by its id when no plugin provides it", () => {
+    expect(providerName(plugins, "echo")).toBe("Echo");
+    expect(providerName(plugins, "gone")).toBe("gone");
+  });
+
+  it("calls a thread without a title a new thread", () => {
+    expect(threadTitle({ ...thread("a", 1), title: "Fix the build" })).toBe("Fix the build");
+    expect(threadTitle(thread("a", 1))).toBe("New thread");
+    expect(threadTitle(undefined)).toBe("New thread");
+  });
+
+  it("tells a failed session from a failed turn", () => {
+    expect(failureText({ ...thread("a", 1), status: "failed" })).toBe("The session failed");
+    expect(failureText({ ...thread("a", 1), last_turn_status: "failed" })).toBe("The last turn failed");
+  });
+
+  it("shows how long a turn runs while it does, and how long ago otherwise", () => {
+    const now = 10 * 60_000;
+    const working = { ...thread("a", 0), status: "active", turn_started_at: now - 65_000 } as Thread;
+    expect(cardTime(working, now)).toBe("1m 05s");
+    expect(cardTime({ ...thread("a", 0), updated_at: now - 5 * 60_000 }, now)).toBe("5m");
   });
 });

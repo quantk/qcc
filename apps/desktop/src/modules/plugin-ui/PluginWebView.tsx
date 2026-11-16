@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
 import { store } from "../../state/store";
+import { errorMessage } from "../../util/format";
 
 type Request = { qcc: 1; id: number; action: string; value?: string };
 
@@ -42,7 +43,7 @@ export function PluginWebView(props: { plugin: string; view: string; entry: stri
         .then(
           (result) => page.postMessage({ qcc: 1, id, result: result.tree }, "*"),
           (error: unknown) =>
-            page.postMessage({ qcc: 1, id, error: error instanceof Error ? error.message : String(error) }, "*"),
+            page.postMessage({ qcc: 1, id, error: errorMessage(error) }, "*"),
         );
     };
     window.addEventListener("message", onMessage);

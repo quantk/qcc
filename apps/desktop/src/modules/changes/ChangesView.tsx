@@ -4,8 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChangeKind, EnvironmentChanges, Thread } from "../../api/protocol.gen";
 import { type DiffFile, parseDiff } from "../../state/diff";
 import { store } from "../../state/store";
-import { plural } from "../../util/format";
-import { DiffView, fileAnchor } from "../../ui/kit";
+import { errorMessage, plural } from "../../util/format";
+import { DiffStat, DiffView, fileAnchor } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { DeliverButtons } from "./DeliverButtons";
 
@@ -39,7 +39,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
         setError(null);
       })
       .catch((error: unknown) => {
-        if (!stale) setError(error instanceof Error ? error.message : String(error));
+        if (!stale) setError(errorMessage(error));
       })
       .finally(() => {
         if (!stale) setLoading(false);
@@ -85,7 +85,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
         ) : (
           <span>{loading ? "Reading changes…" : ""}</span>
         )}
-        <span className="spacer" />
+        <span className="flex-1" />
         <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={() => setRefresh(refresh + 1)} />
         <Button variant="outline" size="sm" disabled={loading} onClick={() => setRefresh(refresh + 1)}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
@@ -111,9 +111,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
                     </span>
                     <span className="diff-path">{file.path}</span>
                     {file.additions !== undefined && file.additions !== null && (
-                      <span className="diff-stat">
-                        <span className="add">+{file.additions}</span> <span className="del">−{file.deletions ?? 0}</span>
-                      </span>
+                      <DiffStat additions={file.additions} deletions={file.deletions ?? 0} />
                     )}
                   </button>
                 </li>

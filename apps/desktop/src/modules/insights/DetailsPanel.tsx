@@ -1,5 +1,6 @@
 import { CopyIcon } from "lucide-react";
 
+import { threadTitle } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import type { ThreadContext } from "../../ui/registry";
 import { relativeTime, tailPath } from "../../util/format";
@@ -64,7 +65,7 @@ export function DetailsPanel({ thread, provider, parent, children }: ThreadConte
         {(thread.conversations ?? 0) > 0 && <Fact label="Fresh starts">{thread.conversations}</Fact>}
         {parent && (
           <Fact label="Started by" title={parent.title ?? parent.id}>
-            {parent.title ?? "New thread"}
+            {threadTitle(parent)}
           </Fact>
         )}
         {children.length > 0 && <Fact label="Threads started">{children.length}</Fact>}

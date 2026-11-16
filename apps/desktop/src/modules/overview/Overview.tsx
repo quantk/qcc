@@ -6,14 +6,17 @@ import {
   activityText,
   attentionLabel,
   attentionOf,
-  findProvider,
+  cardTime,
+  failureText,
   folderOf,
+  providerName,
+  threadTitle,
 } from "../../state/selectors";
 import { mcpTrouble } from "../../state/mcp";
 import { isUnread } from "../../state/reads";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt, ThreadMenu } from "../../ui/kit";
-import { baseName, elapsed, plural, relativeTime } from "../../util/format";
+import { baseName, plural } from "../../util/format";
 import { useNow } from "../../util/useNow";
 
 type Lane = { id: string; title: string; hint: string; shows: Attention[]; unread?: boolean };
@@ -34,7 +37,7 @@ const LANES: Lane[] = [
 function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const plugins = useApp((state) => state.allPlugins);
   const attention = attentionOf(thread);
-  const provider = findProvider(plugins, thread.provider)?.name ?? thread.provider;
+  const provider = providerName(plugins, thread.provider);
   const parent = useApp((state) => (thread.parent ? state.threads[thread.parent] : undefined));
   const project = useApp((state) => state.projects.find((candidate) => candidate.id === thread.project));
   const unread = useApp((state) => isUnread(thread, state.seen));
@@ -60,12 +63,8 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
     >
       <header>
         <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-        <h3>{thread.title ?? "New thread"}</h3>
-        <span className="agent-time">
-          {attention === "active" && thread.turn_started_at
-            ? elapsed(now - thread.turn_started_at)
-            : relativeTime(thread.updated_at, now)}
-        </span>
+        <h3>{threadTitle(thread)}</h3>
+        <span className="agent-time">{cardTime(thread, now)}</span>
       </header>
       <div className="agent-facts">
         <span title={folderOf(thread)}>{project ? project.name : baseName(folderOf(thread))}</span>
@@ -88,7 +87,7 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
         )}
       </div>
       {unread && attention === "idle" && <div className="text-xs font-semibold text-(--blue)">New reply</div>}
-      {attention === "failed" && <div className="agent-failed">{thread.status === "failed" ? "The session failed" : "The last turn failed"} — open the thread to see why</div>}
+      {attention === "failed" && <div className="agent-failed">{failureText(thread)} — open the thread to see why</div>}
       {activity && <div className={`agent-activity${technical ? " technical" : ""}`}>{activity}</div>}
       {(thread.pending_interactions ?? []).map((pending) => (
         <InteractionPrompt key={pending.id} threadId={thread.id} id={pending.id} request={pending.request} />

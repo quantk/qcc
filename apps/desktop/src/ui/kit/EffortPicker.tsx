@@ -25,7 +25,7 @@ export function EffortPicker(props: {
     if (provider) void store().loadModels(provider);
   }, [provider]);
 
-  const options = effortOptions(list?.models ?? [], props.model, props.value);
+  const options = effortOptions(list?.items ?? [], props.model, props.value);
   const unavailable = options.length === 0;
   return (
     <Choice

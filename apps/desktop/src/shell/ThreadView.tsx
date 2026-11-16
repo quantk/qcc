@@ -2,7 +2,7 @@ import { PanelRightIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import type { ThreadId } from "../api/protocol.gen";
-import { attentionLabel, attentionOf, childrenOf, findProvider } from "../state/selectors";
+import { attentionLabel, attentionOf, childrenOf, findProvider, threadTitle } from "../state/selectors";
 import { SIDE_PANEL_BESIDE, store, useApp } from "../state/store";
 import { type ThreadContext, useUi } from "../ui/registry";
 import { tailPath } from "../util/format";
@@ -55,7 +55,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
           <div className="thread-head-main">
             <h1>
               <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-              {thread.title ?? "New thread"}
+              {threadTitle(thread)}
             </h1>
             <div className="thread-facts">
               <span className="path" title={thread.cwd}>

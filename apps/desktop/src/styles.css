@@ -115,10 +115,6 @@ textarea {
   outline-offset: 1px;
 }
 
-.spacer {
-  flex: 1;
-}
-
 .hint {
   color: var(--text-muted);
   padding: 16px;
@@ -137,13 +133,6 @@ textarea {
 .tag.declined {
   color: var(--red);
   border-color: color-mix(in srgb, var(--red) 45%, var(--border));
-}
-
-.one-line {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 .spinner {
@@ -538,13 +527,6 @@ textarea {
   font-size: 12px;
   font-weight: 600;
   flex: none;
-}
-
-.chevron {
-  color: var(--text-muted);
-  width: 10px;
-  flex: none;
-  font-size: 11px;
 }
 
 .output {

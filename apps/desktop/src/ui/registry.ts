@@ -5,6 +5,7 @@
 import { type ComponentType, useSyncExternalStore } from "react";
 
 import type { Item, ProviderInfo, Thread } from "../api/protocol.gen";
+import type { ThreadGroup } from "../state/selectors";
 import type { Timeline } from "../state/timeline";
 
 /** What a contribution about one thread is given. */
@@ -95,6 +96,22 @@ export type ThreadMenuItem = {
   run: (thread: Thread) => void;
 };
 
+/** A button on the header of a sidebar group: a project, or a folder of threads in no project. */
+export type GroupAction = {
+  id: string;
+  order: number;
+  /** Absent: offered for every group. */
+  when?: (group: ThreadGroup) => boolean;
+  /** What the button does, for screen readers. */
+  label: (group: ThreadGroup) => string;
+  /** The tooltip. */
+  title: string;
+  icon: ComponentType;
+  /** Shown only while the pointer is over the group, for actions rarely wanted. */
+  onHover?: boolean;
+  run: (group: ThreadGroup) => void;
+};
+
 /** A modal the shell shows on a contribution's behalf. */
 export type DialogRenderer = ComponentType<{ close: () => void }>;
 
@@ -117,6 +134,7 @@ type Snapshot = {
   actions: readonly ThreadAction[];
   commands: readonly Command[];
   menu: readonly ThreadMenuItem[];
+  groupActions: readonly GroupAction[];
   items: ReadonlyMap<string, ItemRenderer>;
   dialog: DialogRenderer | null;
 };
@@ -132,6 +150,7 @@ export class UiRegistry {
     actions: [],
     commands: [],
     menu: [],
+    groupActions: [],
     items: new Map(),
     dialog: null,
   };
@@ -199,6 +218,15 @@ export class UiRegistry {
   threadMenuItem(item: ThreadMenuItem): () => void {
     this.update({ menu: [...this.snapshot.menu.filter((other) => other.id !== item.id), item].sort(byOrder) });
     return this.track(() => this.update({ menu: this.snapshot.menu.filter((other) => other !== item) }));
+  }
+
+  groupAction(action: GroupAction): () => void {
+    this.update({
+      groupActions: [...this.snapshot.groupActions.filter((other) => other.id !== action.id), action].sort(byOrder),
+    });
+    return this.track(() =>
+      this.update({ groupActions: this.snapshot.groupActions.filter((other) => other !== action) }),
+    );
   }
 
   threadAction(action: ThreadAction): () => void {

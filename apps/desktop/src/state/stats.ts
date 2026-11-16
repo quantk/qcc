@@ -223,3 +223,17 @@ export function activityOf(entries: readonly Entry[]): Activity {
     errors,
   };
 }
+
+/**
+ * How many times the agent may have touched its files: edits and commands that are
+ * no longer pending. A view of the working tree reads it again when this grows,
+ * rather than on every event or only at the end of a turn.
+ */
+export function settledEdits(entries: readonly Entry[]): number {
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.kind !== "item" || entry.item.status === "pending") continue;
+    if (entry.item.type === "fileChange" || entry.item.type === "command") count += 1;
+  }
+  return count;
+}

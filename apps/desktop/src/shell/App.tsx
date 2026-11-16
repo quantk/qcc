@@ -37,6 +37,7 @@ export function App() {
   const viewId = useApp((state) => state.view);
   const View = (views.find((view) => view.id === viewId) ?? views[0])?.render;
   const [palette, setPalette] = useState(false);
+  const sidebarWidth = useApp((state) => state.sidebarWidth);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -62,7 +63,7 @@ export function App() {
   }, [notice]);
 
   return (
-    <div className="app">
+    <div className="app" style={{ gridTemplateColumns: `${sidebarWidth}px minmax(0, 1fr)` }}>
       <Sidebar />
       <main className="main">
         <ConnectionBanner daemon={daemon} />

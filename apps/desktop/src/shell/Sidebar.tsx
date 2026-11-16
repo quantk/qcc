@@ -11,10 +11,11 @@ import {
   threadTree,
   type TreeRow,
 } from "../state/selectors";
+import { SIDEBAR, THREAD_MIN } from "../state/layout";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
 import { useUi } from "../ui/registry";
-import { ThreadMenu } from "../ui/kit";
+import { ResizeHandle, ThreadMenu } from "../ui/kit";
 import { baseName, plural, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
 import { type DragState, useThreadDrag } from "./useThreadDrag";
@@ -34,6 +35,7 @@ export function Sidebar() {
   const selected = useApp((state) => state.selected);
   const collapsed = useApp((state) => state.collapsed);
   const connected = useApp((state) => state.daemon.status === "connected");
+  const width = useApp((state) => state.sidebarWidth);
   const views = useUi((snapshot) => snapshot.views);
   const viewId = useApp((state) => state.view) ?? views[0]?.id;
   const [showArchived, setShowArchived] = useState(false);
@@ -49,7 +51,7 @@ export function Sidebar() {
   );
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar relative">
       <div className="sidebar-head">
         <span className="brand">qcc</span>
         <span className="ml-2 flex gap-0.5">
@@ -228,6 +230,14 @@ export function Sidebar() {
         </label>
       )}
       {drag && <DragGhost drag={drag} />}
+      <ResizeHandle
+        edge="right"
+        width={width}
+        bounds={SIDEBAR}
+        room={() => window.innerWidth - THREAD_MIN}
+        resize={store().setSidebarWidth}
+        label="Thread list width"
+      />
     </aside>
   );
 }

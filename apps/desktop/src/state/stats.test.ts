@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventPayload, Item, ItemShape, ThreadEvent, TokenUsage } from "../api/protocol.gen";
-import { activityOf, contextUsed, threadTotal, turnSummary } from "./stats";
+import { activityOf, contextUsed, settledEdits, threadTotal, turnSummary } from "./stats";
 import { applyEvents, emptyTimeline } from "./timeline";
 
 function fold(...payloads: EventPayload[]) {
@@ -99,5 +99,16 @@ describe("stats", () => {
         { name: "grep", count: 1 },
       ],
     });
+  });
+
+  it("count edits and commands once they settle", () => {
+    const { entries } = fold(
+      { type: "turn/started", turn_id: "u1" },
+      item({ type: "fileChange", path: "/w/a.rs" }, "i1"),
+      item({ type: "command", command: "make" }, "i2", "failed"),
+      item({ type: "fileChange", path: "/w/b.rs" }, "i3", "pending"),
+      item({ type: "fileRead", path: "/w/c.rs" }, "i4"),
+    );
+    expect(settledEdits(entries)).toBe(2);
   });
 });

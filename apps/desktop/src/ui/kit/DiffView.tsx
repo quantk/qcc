@@ -9,8 +9,15 @@ const FOLD_ABOVE = 400;
 
 const statusLabel = { added: "new", deleted: "deleted", modified: "" } as const;
 
-export function fileAnchor(path: string): string {
-  return `diff-${path}`;
+/**
+ * Bring the diff of `path` into view inside `within`. The same diff may be drawn
+ * twice at once (a thread tab and the side panel), so files are found by a data
+ * attribute in their own container rather than by a document-wide id.
+ */
+export function scrollToFile(within: HTMLElement | null, path: string): void {
+  const sections = within?.querySelectorAll<HTMLElement>("[data-diff-path]") ?? [];
+  const target = Array.from(sections).find((section) => section.dataset.diffPath === path);
+  target?.scrollIntoView({ block: "start", behavior: "smooth" });
 }
 
 /** Lines added and removed, as a diff counts them. */
@@ -28,7 +35,7 @@ const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile
     <Collapsible
       render={<section />}
       className="diff-file"
-      id={bare ? undefined : fileAnchor(file.path)}
+      data-diff-path={bare ? undefined : file.path}
       open={open || bare}
       onOpenChange={setOpen}
     >

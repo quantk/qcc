@@ -42,7 +42,7 @@ plugin's UI does:
 | --- | --- | --- |
 | A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/mcp`, `modules/skills` |
 | A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage`, `modules/mcp`, `modules/skills` |
-| A tab of the side panel at the right of a thread | `ui.threadPanel` | `modules/insights` |
+| A tab of the side panel at the right of a thread | `ui.threadPanel` | `modules/insights`, `modules/changes` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
@@ -56,8 +56,14 @@ three tabs there: Usage (how full the context is, the context at each request, c
 tokens the thread spent over all its sessions), Activity (turns and their times,
 messages, commands, files, tools) and Details (agent, model, permissions, session,
 directory, dates). The numbers come from `state/stats.ts`, folded from the same events
-as the timeline. Ctrl+B or the button in the thread header shows and hides the panel;
+as the timeline. `modules/changes` adds Changes there: the diff of a thread's worktree,
+read again whenever the agent settles an edit or a command, so it keeps up beside the
+timeline. Ctrl+B or the button in the thread header shows and hides the panel;
 in a window too narrow for it, it opens over the thread and Escape puts it away.
+
+Both sides of the window can be resized by dragging their edge (`ui/kit/ResizeHandle`,
+arrow keys when it has focus, a double click resets it). The widths live in the store
+and are bounded by `state/layout.ts`, which also keeps room for the thread.
 
 A module is an id and an `activate` function:
 

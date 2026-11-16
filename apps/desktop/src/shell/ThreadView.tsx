@@ -1,9 +1,11 @@
 import { PanelRightIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type { ThreadId } from "../api/protocol.gen";
+import { SIDE_PANEL_WIDTH, THREAD_MIN } from "../state/layout";
 import { attentionLabel, attentionOf, childrenOf, findProvider, threadTitle } from "../state/selectors";
 import { SIDE_PANEL_BESIDE, store, useApp } from "../state/store";
+import { ResizeHandle } from "../ui/kit";
 import { type ThreadContext, useUi } from "../ui/registry";
 import { tailPath } from "../util/format";
 import { Button } from "@/components/ui/button";
@@ -23,6 +25,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
   const overlay = useApp((state) => state.sideOverlay);
   const beside = useMediaQuery(SIDE_PANEL_BESIDE);
   const panelOpen = beside ? sidePanel.open : overlay;
+  const frame = useRef<HTMLDivElement>(null);
 
   // Over the thread, the panel hides what is under it: Escape puts it away.
   useEffect(() => {
@@ -49,7 +52,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
   const attention = attentionOf(thread);
 
   return (
-    <div className="relative flex min-h-0 flex-1">
+    <div ref={frame} className="relative flex min-h-0 flex-1">
       <div className="thread min-w-0">
         <header className="thread-head">
           <div className="thread-head-main">
@@ -100,12 +103,26 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
       </div>
       {panel && panelOpen && (
         <aside
-          className={`flex min-h-0 w-[300px] flex-none flex-col border-l bg-muted ${beside ? "" : "absolute inset-y-0 right-0 z-20 shadow-xl"}`}
+          className={`flex min-h-0 flex-none flex-col border-l bg-muted ${beside ? "relative" : "absolute inset-y-0 right-0 z-20 shadow-xl"}`}
+          // Beside the thread, the panel leaves it room; over it, it leaves a strip to see what is under.
+          style={{
+            width: sidePanel.width,
+            maxWidth: beside ? `calc(100% - ${THREAD_MIN}px)` : "calc(100% - 48px)",
+          }}
           aria-label="Side panel"
         >
+          <ResizeHandle
+            edge="left"
+            width={sidePanel.width}
+            bounds={SIDE_PANEL_WIDTH}
+            room={() => (frame.current?.clientWidth ?? window.innerWidth) - (beside ? THREAD_MIN : 48)}
+            resize={store().setSidePanelWidth}
+            label="Side panel width"
+          />
           <div className="flex items-center gap-1 border-b pr-2 pl-3">
             <Tabs value={panel.id} onValueChange={(value) => store().setSidePanel({ tab: String(value) })} className="min-w-0 flex-1">
-              <TabsList variant="line" className="h-10">
+              {/* A narrow panel scrolls its tabs rather than spilling them over the close button. */}
+              <TabsList variant="line" className="h-10 max-w-full justify-start overflow-x-auto [scrollbar-width:none]">
                 {panels.map((candidate) => (
                   <TabsTrigger key={candidate.id} value={candidate.id} className="flex-none px-2 after:bg-primary">
                     {candidate.title}

@@ -1,61 +1,17 @@
 import { RefreshCwIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useRef } from "react";
 
-import type { ChangeKind, EnvironmentChanges, Thread } from "../../api/protocol.gen";
-import { type DiffFile, parseDiff } from "../../state/diff";
-import { store } from "../../state/store";
-import { errorMessage, plural } from "../../util/format";
-import { DiffStat, DiffView, fileAnchor } from "../../ui/kit";
+import type { Thread } from "../../api/protocol.gen";
+import { plural } from "../../util/format";
+import { DiffView, scrollToFile } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
+import { ChangedFiles } from "./ChangedFiles";
 import { DeliverButtons } from "./DeliverButtons";
-
-type Loaded = { changes: EnvironmentChanges; files: DiffFile[]; truncated: boolean };
-
-const kindMark: Record<ChangeKind, string> = { added: "A", modified: "M", deleted: "D", untracked: "N" };
-const kindTitle: Record<ChangeKind, string> = {
-  added: "Added",
-  modified: "Modified",
-  deleted: "Deleted",
-  untracked: "New, not yet tracked",
-};
+import { useChanges } from "./useChanges";
 
 export function ChangesView({ thread }: { thread: Thread }) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-  const active = thread.status === "active";
-
-  // Read again whenever a turn ends: that is when the files stop moving.
-  useEffect(() => {
-    let stale = false;
-    setLoading(true);
-    const { api } = store();
-    const params = { thread_id: thread.id };
-    Promise.all([api.call("thread.changes", params), api.call("thread.diff", params)])
-      .then(([{ changes }, { diff, truncated }]) => {
-        if (stale) return;
-        setLoaded({ changes, files: parseDiff(diff), truncated: truncated ?? false });
-        setError(null);
-      })
-      .catch((error: unknown) => {
-        if (!stale) setError(errorMessage(error));
-      })
-      .finally(() => {
-        if (!stale) setLoading(false);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [thread.id, active, refresh]);
-
-  const totals = useMemo(() => {
-    const files = loaded?.changes.files ?? [];
-    return {
-      additions: files.reduce((sum, file) => sum + (file.additions ?? 0), 0),
-      deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
-    };
-  }, [loaded]);
+  const { loaded, error, loading, active, totals, reload } = useChanges(thread);
+  const body = useRef<HTMLDivElement>(null);
 
   return (
     <div className="changes">
@@ -86,37 +42,19 @@ export function ChangesView({ thread }: { thread: Thread }) {
           <span>{loading ? "Reading changes…" : ""}</span>
         )}
         <span className="flex-1" />
-        <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={() => setRefresh(refresh + 1)} />
-        <Button variant="outline" size="sm" disabled={loading} onClick={() => setRefresh(refresh + 1)}>
+        <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={reload} />
+        <Button variant="outline" size="sm" disabled={loading} onClick={reload}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           {loading ? "Refreshing…" : "Refresh"}
         </Button>
       </div>
       {error && <div className="notice error">{error}</div>}
       {loaded && (
-        <div className="changes-body">
+        <div className="changes-body" ref={body}>
           {loaded.changes.files.length === 0 ? (
             <p className="hint">The agent has not changed any files.</p>
           ) : (
-            <ul className="changed-files">
-              {loaded.changes.files.map((file) => (
-                <li key={file.path}>
-                  <button
-                    onClick={() =>
-                      document.getElementById(fileAnchor(file.path))?.scrollIntoView({ block: "start", behavior: "smooth" })
-                    }
-                  >
-                    <span className={`kind ${file.kind}`} title={kindTitle[file.kind]}>
-                      {kindMark[file.kind]}
-                    </span>
-                    <span className="diff-path">{file.path}</span>
-                    {file.additions !== undefined && file.additions !== null && (
-                      <DiffStat additions={file.additions} deletions={file.deletions ?? 0} />
-                    )}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <ChangedFiles changes={loaded.changes} open={(path) => scrollToFile(body.current, path)} />
           )}
           {loaded.truncated && (
             <div className="notice warning">The diff is too large to show in full; what follows is cut short.</div>

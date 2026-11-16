@@ -28,6 +28,7 @@ import type {
   ThreadSpawnParams,
 } from "../api/protocol.gen";
 import { type History, type Place, startHistory, step, visit } from "./history";
+import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { visiblePlugins } from "./selectors";
 import { errorMessage } from "../util/format";
@@ -38,9 +39,10 @@ const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
 const COLLAPSED = "qcc.collapsed-families";
 const SIDE_PANEL = "qcc.side-panel";
+const SIDEBAR_WIDTH = "qcc.sidebar-width";
 
-/** The panel at the right of a thread: whether it is open and which tab it shows. */
-export type SidePanel = { open: boolean; tab: string | null };
+/** The panel at the right of a thread: whether it is open, which tab it shows, how wide it is. */
+export type SidePanel = { open: boolean; tab: string | null; width: number };
 
 /**
  * Narrower than this, the side panel would squeeze the thread: it covers the thread
@@ -55,10 +57,10 @@ function panelFitsBeside(): boolean {
 function readSidePanel(): SidePanel {
   const saved = readJson(SIDE_PANEL);
   if (saved && typeof saved === "object") {
-    const { open, tab } = saved as Record<string, unknown>;
-    return { open: open !== false, tab: typeof tab === "string" ? tab : null };
+    const { open, tab, width } = saved as Record<string, unknown>;
+    return { open: open !== false, tab: typeof tab === "string" ? tab : null, width: clampWidth(width, SIDE_PANEL_WIDTH) };
   }
-  return { open: true, tab: null };
+  return { open: true, tab: null, width: SIDE_PANEL_WIDTH.initial };
 }
 
 /** Null when nothing was ever recorded: the first run of the app. */
@@ -112,6 +114,8 @@ export type AppState = {
   /** Threads whose children the sidebar keeps folded under them. */
   collapsed: ReadonlySet<ThreadId>;
   sidePanel: SidePanel;
+  /** How wide the thread list at the left is, in pixels. */
+  sidebarWidth: number;
   /** The side panel covers the thread in a narrow window. Not remembered. */
   sideOverlay: boolean;
   /** The skills plugins offer; whether one is off is in the settings. */
@@ -147,6 +151,7 @@ export class AppStore {
     history: startHistory,
     collapsed: readCollapsed(),
     sidePanel: readSidePanel(),
+    sidebarWidth: clampWidth(readJson(SIDEBAR_WIDTH), SIDEBAR),
     sideOverlay: false,
     skills: [],
     agentSkills: {},
@@ -402,6 +407,20 @@ export class AppStore {
     const sidePanel = { ...this.state.sidePanel, ...patch };
     saveJson(SIDE_PANEL, sidePanel);
     this.set({ sidePanel });
+  };
+
+  /** Resize the thread list. `save` remembers the width; a drag saves once, when it ends. */
+  setSidebarWidth = (width: number, save = true) => {
+    const sidebarWidth = clampWidth(width, SIDEBAR);
+    if (save) saveJson(SIDEBAR_WIDTH, sidebarWidth);
+    if (sidebarWidth !== this.state.sidebarWidth) this.set({ sidebarWidth });
+  };
+
+  /** Resize the side panel; `save` as for the sidebar. */
+  setSidePanelWidth = (width: number, save = true) => {
+    const sidePanel = { ...this.state.sidePanel, width: clampWidth(width, SIDE_PANEL_WIDTH) };
+    if (save) saveJson(SIDE_PANEL, sidePanel);
+    if (sidePanel.width !== this.state.sidePanel.width) this.set({ sidePanel });
   };
 
   toggleSidePanel = () => {

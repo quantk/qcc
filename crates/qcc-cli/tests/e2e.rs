@@ -97,12 +97,21 @@ impl Daemon {
 
     /// Poll the journal until an event of `kind` shows up.
     fn wait_for(&self, thread: &str, kind: &str) -> Value {
+        let events = self.eventually(thread, &format!("saw a {kind} event"), |events| {
+            events.iter().any(|e| e["type"] == kind)
+        });
+        events.into_iter().find(|e| e["type"] == kind).unwrap()
+    }
+
+    /// Poll a thread's events until `check` holds for them, and return them.
+    fn eventually(&self, thread: &str, what: &str, check: impl Fn(&[Value]) -> bool) -> Vec<Value> {
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
-            if let Some(event) = self.events(thread).into_iter().find(|e| e["type"] == kind) {
-                return event;
+            let events = self.events(thread);
+            if check(&events) {
+                return events;
             }
-            assert!(Instant::now() < deadline, "no {kind} event: {:#?}", self.events(thread));
+            assert!(Instant::now() < deadline, "never {what}: {events:#?}");
             std::thread::sleep(Duration::from_millis(20));
         }
     }
@@ -821,11 +830,9 @@ fn stop_drops_the_queue_and_a_restart_keeps_it() {
     daemon.stop();
     let daemon = Daemon::start(dir.path());
     daemon.wait_for(&kept, "session/started");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while messages(&daemon.events(&kept)).last() != Some(&"run me later") {
-        assert!(Instant::now() < deadline, "{:#?}", types(&daemon.events(&kept)));
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    daemon.eventually(&kept, "ran the queued message", |events| {
+        messages(events).last() == Some(&"run me later")
+    });
     assert!(daemon.thread(&kept).get("queued_inputs").is_none());
     assert_eq!(types(&daemon.events(&stopped)).iter().filter(|k| **k == "turn/started").count(), 1);
 }
@@ -1401,15 +1408,9 @@ fn the_model_changes_between_turns_and_the_session_resumes() {
     assert!(thread.get("handover").is_none(), "the same agent resumes: {thread}");
 
     assert!(daemon.qcc(&["thread", "send", &id, "again"]).ok);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let events = loop {
-        let events = daemon.events(&id);
-        if types(&events).iter().filter(|kind| **kind == "turn/completed").count() == 2 {
-            break events;
-        }
-        assert!(Instant::now() < deadline, "the second turn never ran: {events:#?}");
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let events = daemon.eventually(&id, "ran the second turn", |events| {
+        types(events).iter().filter(|kind| **kind == "turn/completed").count() == 2
+    });
     let changed = events.iter().position(|event| event["type"] == "thread/agent").unwrap();
     let resumed = events[changed..].iter().find(|event| event["type"] == "session/started");
     assert_eq!(resumed.unwrap()["resumed"], true);
@@ -1434,12 +1435,7 @@ fn the_effort_reaches_the_session_and_changes_between_turns() {
     assert!(daemon.qcc(&["thread", "agent", &id, "echo", "--effort", "low"]).ok);
     assert_eq!(daemon.thread(&id)["effort"], "low");
     assert!(daemon.qcc(&["thread", "send", &id, "/agent"]).ok);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while messages(&daemon.events(&id)).len() < 2 {
-        assert!(Instant::now() < deadline, "the second turn never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let events = daemon.events(&id);
+    let events = daemon.eventually(&id, "ran the second turn", |e| messages(e).len() >= 2);
     assert_eq!(messages(&events)[1], "model default, effort low");
     let changed = events.iter().position(|event| event["type"] == "thread/agent").unwrap();
     let resumed = events[changed..].iter().find(|event| event["type"] == "session/started");
@@ -1461,12 +1457,7 @@ fn a_message_tells_the_agent_what_it_is_about() {
 
     let sent = daemon.qcc(&["thread", "send", &id, "/notes", "--about", &other]);
     assert!(sent.ok, "{}", sent.stderr);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while messages(&daemon.events(&id)).len() < 2 {
-        assert!(Instant::now() < deadline, "the second turn never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let events = daemon.events(&id);
+    let events = daemon.eventually(&id, "ran the second turn", |e| messages(e).len() >= 2);
     let reply = messages(&events)[1];
     assert!(reply.contains(&format!("looking at qcc thread {other}")), "{reply}");
     assert!(reply.contains("\"hello\", run by echo, idle"), "{reply}");
@@ -1487,15 +1478,7 @@ fn a_thread_starts_its_conversation_afresh_and_compacts_its_context() {
     daemon.wait_for(&id, "turn/completed");
     let turns = |events: &[Value]| types(events).iter().filter(|t| **t == "turn/completed").count();
     let wait_turns = |count: usize| {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        loop {
-            let events = daemon.events(&id);
-            if turns(&events) >= count {
-                return events;
-            }
-            assert!(Instant::now() < deadline, "turn {count} never ended: {events:#?}");
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        daemon.eventually(&id, &format!("ended turn {count}"), |events| turns(events) >= count)
     };
 
     // Compacting is a turn of the agent's own, with no message of the user's.
@@ -1557,15 +1540,9 @@ fn a_message_sent_during_a_release_starts_a_new_session() {
         assert_eq!(sent.unwrap()["delivery"], "queued");
     });
 
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let events = loop {
-        let events = daemon.events(&id);
-        if types(&events).iter().filter(|kind| **kind == "turn/completed").count() == 2 {
-            break events;
-        }
-        assert!(Instant::now() < deadline, "the queued message never ran: {events:#?}");
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    let events = daemon.eventually(&id, "ran the queued message", |events| {
+        types(events).iter().filter(|kind| **kind == "turn/completed").count() == 2
+    });
     let kinds = types(&events);
     let changed = kinds.iter().position(|kind| *kind == "thread/permission-mode").unwrap();
     let after = &kinds[changed..];
@@ -1703,19 +1680,6 @@ fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
         }
     });
     daemon.stop();
-}
-
-/// Poll until `check` holds for a thread's events.
-fn eventually(daemon: &Daemon, thread: &str, what: &str, check: impl Fn(&[Value]) -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        let events = daemon.events(thread);
-        if check(&events) {
-            return;
-        }
-        assert!(Instant::now() < deadline, "never {what}: {events:#?}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 fn inputs(events: &[Value]) -> Vec<&str> {
@@ -1942,20 +1906,13 @@ fn skills_are_switched_for_all_threads_and_for_one() {
         switched.stdout
     );
     assert!(daemon.qcc(&["thread", "send", &plain, "/notes"]).ok);
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while messages(&daemon.events(&plain)).len() < 2 {
-        assert!(Instant::now() < deadline, "the second turn never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    let note = messages(&daemon.events(&plain))[1].to_owned();
+    let events = daemon.eventually(&plain, "ran the second turn", |e| messages(e).len() >= 2);
+    let note = messages(&events)[1].to_owned();
     assert!(note.contains("qcc now offers the skill echo-demo"), "{note}");
     // Told once: the next message carries no note.
     assert!(daemon.qcc(&["thread", "send", &plain, "/notes"]).ok);
-    while messages(&daemon.events(&plain)).len() < 3 {
-        assert!(Instant::now() < deadline, "the third turn never ran");
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    assert_eq!(messages(&daemon.events(&plain))[2], "no notes");
+    let events = daemon.eventually(&plain, "ran the third turn", |e| messages(e).len() >= 3);
+    assert_eq!(messages(&events)[2], "no notes");
     // Turned off, it is gone for the thread's next session, with no note.
     assert!(daemon.qcc(&["thread", "skills", &plain, "--off", "echo-demo"]).ok);
     assert!(daemon.thread(&plain).get("skills_enabled").is_none());
@@ -2085,7 +2042,7 @@ fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
     let reviewer =
         review.stdout.lines().last().unwrap().strip_prefix("thread ").unwrap().to_owned();
     assert_eq!(daemon.thread(&reviewer)["parent"], source.as_str());
-    eventually(&daemon, &source, "received the review", |events| {
+    daemon.eventually(&source, "received the review", |events| {
         inputs(events)
             .iter()
             .any(|text| text.starts_with(&format!("A reviewer (qcc thread {reviewer})")))

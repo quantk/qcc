@@ -73,10 +73,6 @@ impl DeltaAssembler {
         }
     }
 
-    pub fn open_turn(&self) -> Option<&TurnId> {
-        self.turn.as_ref()
-    }
-
     /// Record that user input was handed to the provider. A later claiming boundary
     /// may own a turn because of it.
     pub fn note_input(&mut self) {

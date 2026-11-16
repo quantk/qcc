@@ -69,36 +69,25 @@ impl Core {
         PluginListResult { plugins }
     }
 
-    /// What every agent process sees: where it is and how to reach the daemon.
     pub(super) fn provider_models(&mut self, p: ProviderModelsParams, responder: Responder) {
         let ProviderModelsParams { provider, refresh } = p;
         if !refresh && let Some(models) = self.models.get(&provider) {
             return responder.reply(Ok(ProviderModelsResult { models: models.clone() }));
         }
-        let Some((plugin, _)) = self.host.provider(&provider) else {
-            return responder.reply::<Empty>(Err(RpcError::new(
-                codes::PROVIDER_NOT_FOUND,
-                format!("no plugin provides {:?}", provider.as_str()),
-            )));
+        let pick = |outcome| match outcome {
+            Outcome::Models(models) => Ok(models),
+            other => Err(other),
         };
-        let plugin = plugin.clone();
-        let commands = self.commands.clone();
-        tokio::spawn(async move {
-            let request = PluginRequest::Provider {
-                provider: provider.clone(),
-                request: ProviderRequest::ListModels,
-            };
-            let result = match tokio::time::timeout(MODELS_TIMEOUT, plugin.call(request)).await {
-                Ok(Ok(Outcome::Models(models))) => Ok(models),
-                Ok(Ok(other)) => Err(format!("the provider answered with {other:?}")),
-                Ok(Err(error)) => Err(error.to_string()),
-                Err(_) => Err(format!(
-                    "the provider did not list its models within {} s",
-                    MODELS_TIMEOUT.as_secs()
-                )),
-            };
-            let _ = commands.send(Command::ModelsListed { provider, result, responder });
-        });
+        let done =
+            |provider, result, responder| Command::ModelsListed { provider, result, responder };
+        self.list_from_provider(
+            provider,
+            ProviderRequest::ListModels,
+            "models",
+            pick,
+            done,
+            responder,
+        );
     }
 
     pub(super) fn provider_skills(&mut self, p: ProviderSkillsParams, responder: Responder) {
@@ -106,32 +95,54 @@ impl Core {
         if !refresh && let Some(skills) = self.agent_skills.get(&provider) {
             return responder.reply(Ok(ProviderSkillsResult { skills: skills.clone() }));
         }
-        let Some((plugin, _)) = self.host.provider(&provider) else {
-            return responder.reply::<Empty>(Err(RpcError::new(
-                codes::PROVIDER_NOT_FOUND,
-                format!("no plugin provides {:?}", provider.as_str()),
-            )));
+        let pick = |outcome| match outcome {
+            Outcome::Skills(mut skills) => {
+                skills.sort_by(|a: &AgentSkill, b| a.name.cmp(&b.name));
+                Ok(skills)
+            }
+            other => Err(other),
         };
-        let plugin = plugin.clone();
+        let done =
+            |provider, result, responder| Command::SkillsListed { provider, result, responder };
+        self.list_from_provider(
+            provider,
+            ProviderRequest::ListSkills,
+            "skills",
+            pick,
+            done,
+            responder,
+        );
+    }
+
+    /// Ask a provider for a list in the background; `done` brings the answer back
+    /// to the core, which caches it and replies.
+    fn list_from_provider<T: Send + 'static>(
+        &self,
+        provider: ProviderId,
+        request: ProviderRequest,
+        what: &'static str,
+        pick: fn(Outcome) -> Result<Vec<T>, Outcome>,
+        done: fn(ProviderId, Result<Vec<T>, String>, Responder) -> Command,
+        responder: Responder,
+    ) {
+        let plugin = match self.provider_of(&provider) {
+            Ok((plugin, _)) => plugin.clone(),
+            Err(error) => return responder.reply::<Empty>(Err(error)),
+        };
         let commands = self.commands.clone();
         tokio::spawn(async move {
-            let request = PluginRequest::Provider {
-                provider: provider.clone(),
-                request: ProviderRequest::ListSkills,
-            };
+            let request = PluginRequest::Provider { provider: provider.clone(), request };
             let result = match tokio::time::timeout(MODELS_TIMEOUT, plugin.call(request)).await {
-                Ok(Ok(Outcome::Skills(mut skills))) => {
-                    skills.sort_by(|a, b| a.name.cmp(&b.name));
-                    Ok(skills)
+                Ok(Ok(outcome)) => {
+                    pick(outcome).map_err(|other| format!("the provider answered with {other:?}"))
                 }
-                Ok(Ok(other)) => Err(format!("the provider answered with {other:?}")),
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(_) => Err(format!(
-                    "the provider did not list its skills within {} s",
+                    "the provider did not list its {what} within {} s",
                     MODELS_TIMEOUT.as_secs()
                 )),
             };
-            let _ = commands.send(Command::SkillsListed { provider, result, responder });
+            let _ = commands.send(done(provider, result, responder));
         });
     }
 
@@ -141,15 +152,8 @@ impl Core {
         result: Result<Vec<AgentSkill>, String>,
         responder: Responder,
     ) {
-        match result {
-            Ok(skills) => {
-                self.agent_skills.insert(provider, skills.clone());
-                responder.reply(Ok(ProviderSkillsResult { skills }));
-            }
-            Err(message) => {
-                responder.reply::<Empty>(Err(RpcError::new(codes::PLUGIN_ERROR, message)));
-            }
-        }
+        let reply = listed(&mut self.agent_skills, provider, result);
+        responder.reply(reply.map(|skills| ProviderSkillsResult { skills }));
     }
 
     pub(super) fn models_listed(
@@ -158,15 +162,8 @@ impl Core {
         result: Result<Vec<ModelInfo>, String>,
         responder: Responder,
     ) {
-        match result {
-            Ok(models) => {
-                self.models.insert(provider, models.clone());
-                responder.reply(Ok(ProviderModelsResult { models }));
-            }
-            Err(message) => {
-                responder.reply::<Empty>(Err(RpcError::new(codes::PLUGIN_ERROR, message)));
-            }
-        }
+        let reply = listed(&mut self.models, provider, result);
+        responder.reply(reply.map(|models| ProviderModelsResult { models }));
     }
 
     pub(super) fn threads_call(
@@ -361,8 +358,7 @@ impl Core {
         responder: Responder,
     ) {
         let plugin_error = |message: String| RpcError::new(codes::PLUGIN_ERROR, message);
-        let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == plugin_id)
-        else {
+        let Some(plugin) = self.host.plugin(plugin_id) else {
             return responder
                 .reply::<Empty>(Err(plugin_error(format!("no plugin {plugin_id:?} is loaded"))));
         };
@@ -394,4 +390,15 @@ impl Core {
             responder.reply(result);
         });
     }
+}
+
+/// Cache what a provider listed, or turn its failure into an RPC error.
+fn listed<T: Clone>(
+    cache: &mut std::collections::HashMap<ProviderId, Vec<T>>,
+    provider: ProviderId,
+    result: Result<Vec<T>, String>,
+) -> Result<Vec<T>, RpcError> {
+    let items = result.map_err(|message| RpcError::new(codes::PLUGIN_ERROR, message))?;
+    cache.insert(provider, items.clone());
+    Ok(items)
 }

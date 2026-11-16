@@ -212,11 +212,11 @@ impl Core {
             return;
         }
         let session = std::mem::take(session);
-        // A change that came while the session started is not in it.
-        if let Some(next) = self.sessions.get_mut(&id) {
-            next.release_when_idle = session.release_when_idle;
-            next.notes = session.notes;
-        }
+        // A change that came while the session started is not in it. `take` left
+        // a default entry in place of the one taken.
+        let next = self.sessions.get_mut(&id).expect("the entry stays in the map");
+        next.release_when_idle = session.release_when_idle;
+        next.notes = session.notes;
         match result {
             Ok(Outcome::SessionStarted { provider_session }) => {
                 if let Ok(engine) = self.supervisor.engine(&id) {

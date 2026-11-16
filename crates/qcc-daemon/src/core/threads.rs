@@ -195,12 +195,7 @@ impl Core {
         provider: &ProviderId,
         mode: Option<PermissionMode>,
     ) -> Result<(), RpcError> {
-        let Some((_, info)) = self.host.provider(provider) else {
-            return Err(RpcError::new(
-                codes::PROVIDER_NOT_FOUND,
-                format!("no plugin provides {:?}", provider.as_str()),
-            ));
-        };
+        let (_, info) = self.provider_of(provider)?;
         match mode {
             Some(mode) if !info.capabilities.permission_modes.contains(&mode) => {
                 let supported: Vec<&str> =
@@ -221,15 +216,7 @@ impl Core {
 
     /// The modes a provider can enforce.
     fn permission_modes(&self, provider: &ProviderId) -> Result<Vec<PermissionMode>, RpcError> {
-        self.host
-            .provider(provider)
-            .map(|(_, info)| info.capabilities.permission_modes.clone())
-            .ok_or_else(|| {
-                RpcError::new(
-                    codes::PROVIDER_NOT_FOUND,
-                    format!("no plugin provides {:?}", provider.as_str()),
-                )
-            })
+        self.provider_of(provider).map(|(_, info)| info.capabilities.permission_modes.clone())
     }
 
     /// The thread that started `thread`, if it is still known.
@@ -381,8 +368,7 @@ impl Core {
             self.supervisor.engine(&p.thread_id).map_err(|_| thread_not_found(&p.thread_id))?;
         let events = engine.set_title(title, now_ms());
         self.commit(events);
-        let thread = self.supervisor.thread(&p.thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&p.thread_id))
+        self.thread_result(&p.thread_id)
     }
 
     pub(super) fn thread_set_project(
@@ -397,8 +383,7 @@ impl Core {
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let events = engine.set_project(project, now_ms());
         self.commit(events);
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        self.thread_result(&thread_id)
     }
 
     pub(super) fn thread_set_parent(
@@ -435,8 +420,7 @@ impl Core {
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
         let events = engine.set_parent(parent, now_ms());
         self.commit(events);
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        self.thread_result(&thread_id)
     }
 
     pub(super) fn thread_unqueue(
@@ -510,19 +494,19 @@ impl Core {
     }
 
     /// The note a message's context becomes: a line the agent can act on.
-    fn context_note(&mut self, context: &MessageContext) -> String {
+    fn context_note(&self, context: &MessageContext) -> String {
         match context {
             MessageContext::Thread { thread_id } => {
                 let Some(summary) = self.summary(thread_id) else {
                     return format!("The user is looking at qcc thread {thread_id}.");
                 };
                 let thread = summary.thread;
-                let state = match Some(summary.state) {
-                    Some(ThreadState::Working) => "working",
-                    Some(ThreadState::Waiting) => "waiting for the user",
-                    Some(ThreadState::Failed) => "failed",
-                    Some(ThreadState::Archived) => "archived",
-                    Some(ThreadState::Idle) | None => "idle",
+                let state = match summary.state {
+                    ThreadState::Working => "working",
+                    ThreadState::Waiting => "waiting for the user",
+                    ThreadState::Failed => "failed",
+                    ThreadState::Archived => "archived",
+                    ThreadState::Idle => "idle",
                 };
                 let title = thread.title.as_deref().unwrap_or("untitled");
                 format!(
@@ -655,8 +639,7 @@ impl Core {
             // resumes; a running turn is let finish first.
             self.sessions.entry(thread_id.clone()).or_default().release_when_idle = true;
         }
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        self.thread_result(&thread_id)
     }
 
     pub(super) fn thread_set_mode(
@@ -738,8 +721,7 @@ impl Core {
             session.notes.clear();
             session.compact_after_start = false;
         }
-        let thread = self.supervisor.thread(thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(thread_id))
+        self.thread_result(thread_id)
     }
 
     pub(super) fn thread_compact(
@@ -785,8 +767,7 @@ impl Core {
             self.start_session(&thread_id, None);
             self.sessions.entry(thread_id.clone()).or_default().compact_after_start = true;
         }
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        self.thread_result(&thread_id)
     }
 
     /// Change what a session is constructed with. Refused while a turn runs or the
@@ -819,8 +800,7 @@ impl Core {
                 ProviderRequest::Stop { thread }
             });
         }
-        let thread = self.supervisor.thread(thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(thread_id))
+        self.thread_result(thread_id)
     }
 
     pub(super) fn thread_stop(&mut self, p: ThreadStopParams, responder: Responder) {

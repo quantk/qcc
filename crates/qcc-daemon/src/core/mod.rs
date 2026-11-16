@@ -6,8 +6,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    AgentSkill, Delta, EventPayload, ModelInfo, Project, ProviderId, ThreadEnvironment,
-    ThreadEvent, ThreadId, ThreadStatus, UserInput,
+    AgentSkill, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
+    ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -16,7 +16,8 @@ use qcc_plugin_host::{
 use qcc_protocol::Method;
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
 use qcc_protocol::methods::{
-    Settings, THREAD_EVENT, THREAD_UPDATED, ThreadEventNotification, ThreadUpdatedNotification,
+    Settings, THREAD_EVENT, THREAD_UPDATED, ThreadEventNotification, ThreadResult,
+    ThreadUpdatedNotification,
 };
 use qcc_runtime::{Supervisor, UuidMint};
 use qcc_store::Store;
@@ -284,11 +285,39 @@ fn params<M: Method>(params: Value) -> Result<M::Params, RpcError> {
         .map_err(|error| RpcError::new(codes::INVALID_PARAMS, format!("{}: {error}", M::NAME)))
 }
 
+/// Send a notification on a connection. False once the connection is gone, so
+/// callers can drop it from their lists.
+fn notify(out: &UnboundedSender<String>, method: &str, params: impl Serialize) -> bool {
+    let params = serde_json::to_value(params).expect("notifications serialize");
+    let line = serde_json::to_string(&Request::notification(method, params))
+        .expect("notifications serialize");
+    out.send(line).is_ok()
+}
+
 fn thread_not_found(id: &ThreadId) -> RpcError {
     RpcError::new(codes::THREAD_NOT_FOUND, format!("thread {id} does not exist"))
 }
 
 impl Core {
+    /// The plugin that provides `provider`, and what it says about it.
+    fn provider_of(
+        &self,
+        provider: &ProviderId,
+    ) -> Result<(&PluginHandle, &ProviderInfo), RpcError> {
+        self.host.provider(provider).ok_or_else(|| {
+            RpcError::new(
+                codes::PROVIDER_NOT_FOUND,
+                format!("no plugin provides {:?}", provider.as_str()),
+            )
+        })
+    }
+
+    /// The thread as it is now, as most thread methods answer.
+    fn thread_result(&self, id: &ThreadId) -> Result<ThreadResult, RpcError> {
+        let thread = self.supervisor.thread(id).cloned();
+        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(id))
+    }
+
     /// Open the journal, load the plugins and adopt the persisted threads.
     pub(crate) fn start(
         config: &Config,
@@ -472,17 +501,9 @@ impl Core {
                     continue;
                 };
                 self.watchers.retain(|watcher| {
-                    let notification = Request::notification(
-                        THREAD_UPDATED,
-                        serde_json::to_value(ThreadUpdatedNotification {
-                            subscription: watcher.subscription,
-                            thread: thread.clone(),
-                        })
-                        .expect("threads serialize"),
-                    );
-                    let line =
-                        serde_json::to_string(&notification).expect("notifications serialize");
-                    watcher.out.send(line).is_ok()
+                    let subscription = watcher.subscription;
+                    let params = ThreadUpdatedNotification { subscription, thread: thread.clone() };
+                    notify(&watcher.out, THREAD_UPDATED, params)
                 });
             }
         }
@@ -491,16 +512,9 @@ impl Core {
                 continue;
             };
             subscribers.retain(|subscriber| {
-                let notification = Request::notification(
-                    THREAD_EVENT,
-                    serde_json::to_value(ThreadEventNotification {
-                        subscription: subscriber.subscription,
-                        event: event.clone(),
-                    })
-                    .expect("events serialize"),
-                );
-                let line = serde_json::to_string(&notification).expect("notifications serialize");
-                subscriber.out.send(line).is_ok()
+                let subscription = subscriber.subscription;
+                let params = ThreadEventNotification { subscription, event: event.clone() };
+                notify(&subscriber.out, THREAD_EVENT, params)
             });
         }
     }

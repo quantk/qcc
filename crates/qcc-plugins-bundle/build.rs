@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const TARGET: &str = "wasm32-wasip2";
+/// The manifest that makes a directory under `plugins/` a plugin.
+const MANIFEST_FILE: &str = "plugin.toml";
 /// Where a bundled plugin keeps its web bundle; its manifest says `web = "web"`.
 const WEB_DIR: &str = "web";
 
@@ -43,7 +45,7 @@ fn main() {
         .expect("plugins directory")
         .filter_map(|entry| {
             let path = entry.ok()?.path();
-            path.join("plugin.toml")
+            path.join(MANIFEST_FILE)
                 .is_file()
                 .then(|| path.file_name().unwrap().to_str().unwrap().to_owned())
         })
@@ -88,7 +90,7 @@ fn main() {
             .join(format!("{}.wasm", plugin.replace('-', "_")));
         let embedded = out_dir.join(format!("{plugin}.wasm"));
         fs::copy(&wasm, &embedded).unwrap_or_else(|error| panic!("{}: {error}", wasm.display()));
-        let manifest = plugins_dir.join(plugin).join("plugin.toml");
+        let manifest = plugins_dir.join(plugin).join(MANIFEST_FILE);
         // The web bundle, if the plugin has one, ships as the files it is made of.
         let mut web = String::new();
         let mut files = Vec::new();

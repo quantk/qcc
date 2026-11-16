@@ -9,11 +9,16 @@ use super::{Core, now_ms, thread_not_found};
 use crate::plugins::OfferedSkill;
 
 impl Core {
+    /// Whether the user switched the skill off for every thread.
+    fn skill_switched_off(&self, name: &str) -> bool {
+        self.settings.skills.get(name).is_some_and(|settings| settings.disabled)
+    }
+
     /// Whether a session of a thread with these choices gets the skill.
     fn takes(&self, skill: &OfferedSkill, enabled: &[String], disabled: &[String]) -> bool {
         let name = &skill.reference.name;
-        let off = self.settings.skills.get(name).is_some_and(|settings| settings.disabled);
-        !off && if skill.on_request { enabled.contains(name) } else { !disabled.contains(name) }
+        !self.skill_switched_off(name)
+            && if skill.on_request { enabled.contains(name) } else { !disabled.contains(name) }
     }
 
     /// The skills a session of a thread with these choices gets.
@@ -52,11 +57,7 @@ impl Core {
                 description: skill.reference.description.clone(),
                 plugin: skill.plugin.clone(),
                 on_request: skill.on_request,
-                disabled: self
-                    .settings
-                    .skills
-                    .get(&skill.reference.name)
-                    .is_some_and(|settings| settings.disabled),
+                disabled: self.skill_switched_off(&skill.reference.name),
                 path: skill.reference.path.clone(),
             })
             .collect();
@@ -109,7 +110,6 @@ impl Core {
                 ),
             );
         }
-        let thread = self.supervisor.thread(&thread_id).cloned();
-        thread.map(|thread| ThreadResult { thread }).ok_or_else(|| thread_not_found(&thread_id))
+        self.thread_result(&thread_id)
     }
 }

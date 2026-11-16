@@ -2,14 +2,14 @@
 
 use qcc_domain::{Project, ProjectId, SettingField, ThreadId};
 use qcc_plugin_host::{Contribution, PluginHandle, PluginRequest};
-use qcc_protocol::jsonrpc::{Request, RpcError, codes};
+use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     Empty, PROJECTS_UPDATED, ProgramStatus, ProjectCreateParams, ProjectDeleteParams,
     ProjectResult, ProjectUpdateParams, ProjectsUpdatedNotification, Settings, SettingsResult,
     SettingsSetParams,
 };
 
-use super::{Core, now_ms};
+use super::{Core, notify, now_ms};
 use crate::{projects, settings};
 
 impl Core {
@@ -48,7 +48,7 @@ impl Core {
             self.host.providers().map(|(_, info)| info.id.to_string()).collect();
         let providers: Vec<&str> = providers.iter().map(String::as_str).collect();
         for (id, values) in &settings.plugins {
-            let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == id) else {
+            let Some(plugin) = self.host.plugin(id) else {
                 continue;
             };
             let fields = setting_fields(plugin);
@@ -69,7 +69,7 @@ impl Core {
 
     /// Tell a plugin its settings, defaults filled in. Nothing for a plugin without.
     pub(super) fn post_plugin_settings(&self, id: &str) {
-        let Some(plugin) = self.host.plugins().iter().find(|plugin| plugin.id() == id) else {
+        let Some(plugin) = self.host.plugin(id) else {
             return;
         };
         let fields = setting_fields(plugin);
@@ -212,16 +212,9 @@ impl Core {
     fn projects_changed(&mut self) {
         let projects = self.projects.clone();
         self.watchers.retain(|watcher| {
-            let notification = Request::notification(
-                PROJECTS_UPDATED,
-                serde_json::to_value(ProjectsUpdatedNotification {
-                    subscription: watcher.subscription,
-                    projects: projects.clone(),
-                })
-                .expect("projects serialize"),
-            );
-            let line = serde_json::to_string(&notification).expect("notifications serialize");
-            watcher.out.send(line).is_ok()
+            let subscription = watcher.subscription;
+            let params = ProjectsUpdatedNotification { subscription, projects: projects.clone() };
+            notify(&watcher.out, PROJECTS_UPDATED, params)
         });
     }
 }

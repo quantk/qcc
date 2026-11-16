@@ -19,14 +19,9 @@ pub struct Project {
 }
 
 impl Project {
-    /// Whether `dir` is one of the project's folders or inside one.
-    pub fn contains(&self, dir: &str) -> bool {
-        self.folders.iter().any(|folder| Path::new(dir).starts_with(folder))
-    }
-
     /// How specific the project is about `dir`: the length of the longest folder
     /// that holds it. A project for a subdirectory wins over one for its parent.
-    pub fn depth_of(&self, dir: &str) -> Option<usize> {
+    fn depth_of(&self, dir: &str) -> Option<usize> {
         self.folders
             .iter()
             .filter(|folder| Path::new(dir).starts_with(folder))
@@ -68,6 +63,6 @@ mod tests {
         assert_eq!(project_of(&projects, "/src/lib").map(|p| p.id.as_str()), Some("all"));
         assert_eq!(project_of(&projects, "/home"), None);
         // Whole components only: /src/application is not inside /src/app.
-        assert!(!projects[1].contains("/src/application"));
+        assert_eq!(projects[1].depth_of("/src/application"), None);
     }
 }

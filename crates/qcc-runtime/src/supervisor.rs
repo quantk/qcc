@@ -5,7 +5,7 @@ use qcc_domain::{
     ThreadId, ThreadStatus,
 };
 
-use crate::engine::ThreadEngine;
+use crate::engine::{ThreadEngine, sorted};
 use crate::mint::IdMint;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -33,6 +33,44 @@ pub struct NewThread {
     pub hidden: bool,
 }
 
+impl NewThread {
+    /// The thread as it is the moment it is created.
+    pub fn into_thread(self, now: u64) -> Thread {
+        Thread {
+            id: self.id,
+            provider: self.provider,
+            cwd: self.cwd,
+            environment: self.environment,
+            model: self.model,
+            effort: self.effort,
+            parent: self.parent,
+            started_by: self.started_by,
+            hidden: self.hidden,
+            project: self.project,
+            permission_mode: self.permission_mode,
+            title: None,
+            status: ThreadStatus::Idle,
+            provider_session: None,
+            created_at: now,
+            updated_at: now,
+            last_seq: 0,
+            queued_inputs: 0,
+            pending_interactions: Vec::new(),
+            mcp_servers: Vec::new(),
+            mcp_disabled: Vec::new(),
+            skills_enabled: sorted(self.skills_enabled),
+            skills_disabled: sorted(self.skills_disabled),
+            conversations: 0,
+            activity: None,
+            turn_started_at: None,
+            last_turn_status: None,
+            last_turn_at: None,
+            archived: false,
+            handover: false,
+        }
+    }
+}
+
 /// All threads of a daemon. Owns one [`ThreadEngine`] per thread.
 pub struct Supervisor {
     engines: HashMap<ThreadId, ThreadEngine>,
@@ -53,40 +91,9 @@ impl Supervisor {
         if self.engines.contains_key(&new.id) {
             return Err(SupervisorError::ThreadExists(new.id));
         }
-        let thread = Thread {
-            id: new.id.clone(),
-            provider: new.provider,
-            cwd: new.cwd,
-            environment: new.environment,
-            model: new.model,
-            effort: new.effort,
-            parent: new.parent,
-            started_by: new.started_by,
-            hidden: new.hidden,
-            project: new.project,
-            permission_mode: new.permission_mode,
-            title: None,
-            status: ThreadStatus::Idle,
-            provider_session: None,
-            created_at: now,
-            updated_at: now,
-            last_seq: 0,
-            queued_inputs: 0,
-            pending_interactions: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_disabled: Vec::new(),
-            skills_enabled: sorted(new.skills_enabled),
-            skills_disabled: sorted(new.skills_disabled),
-            conversations: 0,
-            activity: None,
-            turn_started_at: None,
-            last_turn_status: None,
-            last_turn_at: None,
-            archived: false,
-            handover: false,
-        };
-        let (engine, events) = ThreadEngine::create(thread, (self.mint)(), now);
-        self.engines.insert(new.id, engine);
+        let id = new.id.clone();
+        let (engine, events) = ThreadEngine::create(new.into_thread(now), (self.mint)(), now);
+        self.engines.insert(id, engine);
         Ok(events)
     }
 
@@ -111,13 +118,12 @@ impl Supervisor {
         self.engines.values().map(ThreadEngine::thread)
     }
 
+    /// The engine of a thread, to read from.
+    pub fn engine_ref(&self, id: &ThreadId) -> Option<&ThreadEngine> {
+        self.engines.get(id)
+    }
+
     pub fn engine(&mut self, id: &ThreadId) -> Result<&mut ThreadEngine, SupervisorError> {
         self.engines.get_mut(id).ok_or_else(|| SupervisorError::UnknownThread(id.clone()))
     }
-}
-
-fn sorted(mut names: Vec<String>) -> Vec<String> {
-    names.sort();
-    names.dedup();
-    names
 }

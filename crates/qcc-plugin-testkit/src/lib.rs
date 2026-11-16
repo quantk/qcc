@@ -17,14 +17,14 @@ use std::time::{Duration, Instant};
 
 use qcc_domain::{
     Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, PermissionMode,
-    ProviderId, Thread, ThreadEvent, ThreadId, ThreadStatus, TurnStatus, UserInput,
+    ProviderId, Thread, ThreadEvent, ThreadId, TurnStatus, UserInput,
 };
 use qcc_plugin_host::services::{KvStore, ProcessBackend};
 use qcc_plugin_host::{
     Grant, Manifest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
     ProviderRequest, Services, SessionStart,
 };
-use qcc_runtime::{GrammarViolation, SequentialMint, ThreadEngine, Timeline};
+use qcc_runtime::{GrammarViolation, NewThread, SequentialMint, ThreadEngine, Timeline};
 
 pub use scripted::{ScriptStep, ScriptedProcesses, message_key, script_from_recording};
 
@@ -89,38 +89,22 @@ impl HarnessBuilder {
         });
 
         let thread_id = ThreadId::new("thread-1");
-        let thread = Thread {
+        let thread = NewThread {
             id: thread_id.clone(),
             provider: provider.clone(),
             cwd: "/work".into(),
+            environment: None,
             model: None,
             effort: None,
             parent: None,
-            started_by: None,
-            hidden: false,
             project: None,
             permission_mode: None,
-            title: None,
-            status: ThreadStatus::Idle,
-            provider_session: None,
-            created_at: 0,
-            updated_at: 0,
-            last_seq: 0,
-            queued_inputs: 0,
-            pending_interactions: Vec::new(),
-            mcp_servers: Vec::new(),
-            mcp_disabled: Vec::new(),
             skills_enabled: Vec::new(),
             skills_disabled: Vec::new(),
-            conversations: 0,
-            activity: None,
-            turn_started_at: None,
-            last_turn_status: None,
-            last_turn_at: None,
-            environment: None,
-            archived: false,
-            handover: false,
-        };
+            started_by: None,
+            hidden: false,
+        }
+        .into_thread(0);
         let (engine, events) = ThreadEngine::create(thread, Box::new(SequentialMint::default()), 0);
         Harness {
             _host: host,

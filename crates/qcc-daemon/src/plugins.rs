@@ -128,13 +128,6 @@ const THREADS_TIMEOUT: Duration = Duration::from_secs(5);
 /// How much longer a plugin waits than the core may take to start its call.
 const THREADS_GRACE: Duration = Duration::from_secs(1);
 
-fn valid_skill_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 64
-        && !name.starts_with('-')
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
 /// A skill a plugin offers, written out where agents read it.
 #[derive(Debug, Clone)]
 pub(crate) struct OfferedSkill {
@@ -166,7 +159,7 @@ pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<OfferedSki
                 );
                 continue;
             }
-            if !valid_skill_name(&skill.name) {
+            if !qcc_plugin_host::valid_name(&skill.name) {
                 tracing::warn!(
                     plugin = plugin.id(),
                     skill = skill.name,

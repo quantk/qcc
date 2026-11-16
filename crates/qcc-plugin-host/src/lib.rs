@@ -23,6 +23,6 @@ pub use api::{
     SettledThread, SpawnThread, ThreadSummary, ThreadsAnswer, ThreadsCall, UiRequest,
 };
 pub use host::{LoadError, PluginHost};
-pub use manifest::{API_VERSION, MANIFEST_FILE, Manifest, ManifestError};
+pub use manifest::{API_VERSION, MANIFEST_FILE, Manifest, ManifestError, valid_name};
 pub use permissions::{Grant, Permissions};
 pub use services::{ProgramPaths, Services, resolve_program};

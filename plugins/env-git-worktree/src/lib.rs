@@ -12,6 +12,7 @@ pub mod jobs;
 
 use std::collections::{HashMap, VecDeque};
 
+use qcc_plugin_sdk::lines::Tail;
 use qcc_plugin_sdk::prelude::*;
 
 use jobs::{Answer, Cmd, Exit, Job, Record, Step};
@@ -26,7 +27,7 @@ struct Running {
     tag: u32,
     stdout: Vec<u8>,
     limit: usize,
-    stderr: Vec<u8>,
+    stderr: Tail,
     truncated: bool,
     timer: Option<u64>,
     timed_out: bool,
@@ -117,7 +118,7 @@ impl Worktrees {
                 tag: cmd.tag,
                 stdout: Vec::new(),
                 limit: cmd.limit,
-                stderr: Vec::new(),
+                stderr: Tail::new(STDERR_TAIL),
                 truncated: false,
                 timer,
                 timed_out: false,
@@ -228,9 +229,7 @@ impl Plugin for Worktrees {
             }
             ProcessEvent::Stderr { process, data } => {
                 let Some(run) = self.running.get_mut(&process) else { return };
-                run.stderr.extend_from_slice(&data);
-                let excess = run.stderr.len().saturating_sub(STDERR_TAIL);
-                run.stderr.drain(..excess);
+                run.stderr.push(&data);
             }
             ProcessEvent::Exit { process, code } => {
                 let Some(run) = self.running.remove(&process) else { return };
@@ -241,7 +240,7 @@ impl Plugin for Worktrees {
                 let exit = Exit {
                     code,
                     stdout: run.stdout,
-                    stderr: String::from_utf8_lossy(&run.stderr).into_owned(),
+                    stderr: run.stderr.as_str().to_owned(),
                     truncated: run.truncated,
                     timed_out: run.timed_out,
                 };

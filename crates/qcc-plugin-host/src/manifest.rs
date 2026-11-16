@@ -47,6 +47,16 @@ pub struct Manifest {
     pub example: bool,
 }
 
+/// Whether a name fits where plugins name things on disk and on the command line,
+/// as plugin ids and skill names do: 1 to 64 of `a-z`, `0-9` and `-`, not
+/// starting with `-`.
+pub fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('-')
+        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
 impl Manifest {
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
         let manifest: Self =
@@ -56,11 +66,7 @@ impl Manifest {
     }
 
     fn validate(&self) -> Result<(), ManifestError> {
-        let id_ok = !self.id.is_empty()
-            && self.id.len() <= 64
-            && !self.id.starts_with('-')
-            && self.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-        if !id_ok {
+        if !valid_name(&self.id) {
             return Err(ManifestError::InvalidId(self.id.clone()));
         }
         if self.api != API_VERSION {

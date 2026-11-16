@@ -42,15 +42,20 @@ impl LineBuffer {
 pub struct Tail {
     limit: usize,
     text: String,
+    /// The start of a character whose remaining bytes come in the next chunk.
+    split: Vec<u8>,
 }
 
 impl Tail {
     pub fn new(limit: usize) -> Self {
-        Self { limit, text: String::new() }
+        Self { limit, text: String::new(), split: Vec::new() }
     }
 
     pub fn push(&mut self, chunk: &[u8]) {
-        self.text.push_str(&String::from_utf8_lossy(chunk));
+        self.split.extend_from_slice(chunk);
+        let complete = self.split.len() - incomplete_suffix(&self.split);
+        self.text.push_str(&String::from_utf8_lossy(&self.split[..complete]));
+        self.split.drain(..complete);
         if self.text.len() > self.limit {
             let mut cut = self.text.len() - self.limit;
             while !self.text.is_char_boundary(cut) {
@@ -60,10 +65,32 @@ impl Tail {
         }
     }
 
+    /// All of the tail that is kept.
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
+
     /// The last non-empty line, which is usually the error.
     pub fn last_line(&self) -> Option<&str> {
         self.text.lines().rev().map(str::trim).find(|line| !line.is_empty())
     }
+}
+
+/// How many trailing bytes start a UTF-8 character that the chunk cut off.
+fn incomplete_suffix(bytes: &[u8]) -> usize {
+    for len in 1..=bytes.len().min(3) {
+        let byte = bytes[bytes.len() - len];
+        if byte & 0xC0 != 0x80 {
+            let needed = match byte {
+                0xC0..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF7 => 4,
+                _ => 1,
+            };
+            return if needed > len { len } else { 0 };
+        }
+    }
+    0
 }
 
 #[cfg(test)]
@@ -92,5 +119,17 @@ mod tests {
         tail.push(b"error: boom\n\n");
         assert_eq!(tail.last_line(), Some("error: boom"));
         assert_eq!(Tail::new(8).last_line(), None);
+    }
+
+    #[test]
+    fn tail_keeps_characters_split_between_chunks() {
+        let text = "ошибка: 💥";
+        for size in 1..text.len() {
+            let mut tail = Tail::new(64);
+            for chunk in text.as_bytes().chunks(size) {
+                tail.push(chunk);
+            }
+            assert_eq!(tail.as_str(), text, "chunk size {size}");
+        }
     }
 }

@@ -1,7 +1,7 @@
 //! Dispatching JSON-RPC requests to the handlers.
 
 use base64::Engine as _;
-use qcc_domain::ThreadState;
+use qcc_domain::{Thread, ThreadState};
 use qcc_plugin_host::UiRequest;
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
@@ -10,16 +10,16 @@ use qcc_protocol::methods::{
     ProviderModels, ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive,
     ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet,
     ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename,
-    ThreadReset, ThreadResult, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode,
-    ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue,
-    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
-    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
-    UiRenderItem, UiRenderItemParams, UiRenderParams,
+    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
+    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
+    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
 
-use super::{Core, Responder, Subscriber, params, thread_not_found};
+use super::{Core, Responder, Subscriber, params};
 use crate::plugins;
 
 impl Core {
@@ -128,13 +128,9 @@ impl Core {
                             .cloned()
                             .collect();
                         if let Some(state) = state {
-                            threads.retain(|thread| {
-                                let id = thread.id.clone();
-                                self.thread_state(&id) == Some(state)
-                            });
+                            threads.retain(|thread| self.thread_state(&thread.id) == Some(state));
                         }
-                        threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
-                        ThreadListResult { threads }
+                        ThreadListResult { threads: oldest_first(threads) }
                     },
                 );
                 responder.reply(result);
@@ -142,8 +138,7 @@ impl Core {
             ThreadWatch::NAME => match params::<ThreadWatch>(raw) {
                 Ok(ThreadWatchParams { subscription }) => {
                     let out = responder.out.clone();
-                    let mut threads: Vec<_> = self.supervisor.threads().cloned().collect();
-                    threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+                    let threads = oldest_first(self.supervisor.threads().cloned().collect());
                     responder.reply(Ok(ThreadListResult { threads }));
                     // Registered in the same step as the listing, so no change is missed.
                     self.watchers.push(Subscriber { connection, subscription, out });
@@ -163,10 +158,8 @@ impl Core {
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadGet::NAME => {
-                let result = params::<ThreadGet>(raw).and_then(|ThreadGetParams { thread_id }| {
-                    let thread = self.supervisor.thread(&thread_id).cloned();
-                    thread.map(|thread| ThreadResult { thread }).ok_or(thread_not_found(&thread_id))
-                });
+                let result = params::<ThreadGet>(raw)
+                    .and_then(|ThreadGetParams { thread_id }| self.thread_result(&thread_id));
                 responder.reply(result);
             }
             ThreadWait::NAME => match params::<ThreadWait>(raw) {
@@ -259,4 +252,10 @@ impl Core {
             ))),
         }
     }
+}
+
+/// Threads in the order they were created, ties broken by id so the order is stable.
+fn oldest_first(mut threads: Vec<Thread>) -> Vec<Thread> {
+    threads.sort_by(|a, b| (a.created_at, &a.id).cmp(&(b.created_at, &b.id)));
+    threads
 }

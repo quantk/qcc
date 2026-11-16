@@ -57,10 +57,6 @@ impl Timeline {
         self.open_turn.as_ref()
     }
 
-    pub fn open_items(&self) -> impl Iterator<Item = &Item> {
-        self.open_items.values()
-    }
-
     pub fn pending_interactions(&self) -> &[InteractionId] {
         &self.pending_interactions
     }

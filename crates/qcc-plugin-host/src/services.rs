@@ -1,4 +1,5 @@
-//! The outside world as a plugin sees it. Everything is a trait so tests and the
+//! The outside world as a plugin sees it. Storage and processes are traits, and
+//! deltas, `threads` calls and crashes go to closures, so tests and the
 //! conformance kit can substitute a scripted world.
 
 use std::collections::BTreeMap;

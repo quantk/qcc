@@ -11,10 +11,10 @@ use super::{Command, Core, Responder, Waiter, thread_not_found};
 
 impl Core {
     /// Where a thread is, for someone waiting on it.
-    pub(super) fn thread_state(&mut self, id: &ThreadId) -> Option<ThreadState> {
+    pub(super) fn thread_state(&self, id: &ThreadId) -> Option<ThreadState> {
         let held = self.in_transition(id);
         let archiving = self.archiving.contains(id);
-        let engine = self.supervisor.engine(id).ok()?;
+        let engine = self.supervisor.engine_ref(id)?;
         let thread = engine.thread();
         Some(if thread.archived {
             ThreadState::Archived
@@ -29,7 +29,7 @@ impl Core {
         })
     }
 
-    pub(super) fn summary(&mut self, id: &ThreadId) -> Option<ThreadSummary> {
+    pub(super) fn summary(&self, id: &ThreadId) -> Option<ThreadSummary> {
         let state = self.thread_state(id)?;
         let thread = self.supervisor.thread(id)?.clone();
         Some(ThreadSummary { thread, state })

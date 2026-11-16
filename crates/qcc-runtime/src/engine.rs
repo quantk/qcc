@@ -239,7 +239,8 @@ impl ThreadEngine {
     }
 
     /// Record a step in the life of the thread's environment or of the thread
-    /// itself (`environment/*`, `thread/archived`). These carry no timeline grammar.
+    /// itself (`environment/*`, `thread/archived`, `thread/reset`). These carry no
+    /// timeline grammar.
     pub fn record(&mut self, payload: EventPayload, now: u64) -> Vec<ThreadEvent> {
         self.emit(vec![payload], now)
     }
@@ -303,9 +304,8 @@ impl ThreadEngine {
     }
 
     /// Keep these MCP servers off in the thread's sessions from now on.
-    pub fn set_mcp_disabled(&mut self, mut disabled: Vec<String>, now: u64) -> Vec<ThreadEvent> {
-        disabled.sort();
-        disabled.dedup();
+    pub fn set_mcp_disabled(&mut self, disabled: Vec<String>, now: u64) -> Vec<ThreadEvent> {
+        let disabled = sorted(disabled);
         if disabled == self.thread.mcp_disabled {
             return Vec::new();
         }
@@ -315,14 +315,11 @@ impl ThreadEngine {
     /// The skills the thread takes beyond, and leaves out of, what every session gets.
     pub fn set_skills(
         &mut self,
-        mut enabled: Vec<String>,
-        mut disabled: Vec<String>,
+        enabled: Vec<String>,
+        disabled: Vec<String>,
         now: u64,
     ) -> Vec<ThreadEvent> {
-        for names in [&mut enabled, &mut disabled] {
-            names.sort();
-            names.dedup();
-        }
+        let (enabled, disabled) = (sorted(enabled), sorted(disabled));
         if enabled == self.thread.skills_enabled && disabled == self.thread.skills_disabled {
             return Vec::new();
         }
@@ -395,4 +392,11 @@ impl ThreadEngine {
         self.thread.apply(&event);
         events.push(event);
     }
+}
+
+/// Names sorted and without repeats, as the thread keeps its lists.
+pub(crate) fn sorted(mut names: Vec<String>) -> Vec<String> {
+    names.sort();
+    names.dedup();
+    names
 }

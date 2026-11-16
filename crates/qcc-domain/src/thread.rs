@@ -146,9 +146,14 @@ impl ThreadActivity {
     }
 }
 
-fn first_line(text: &str) -> String {
+/// The first line with something on it, trimmed and cut to `max` characters.
+fn first_line_within(text: &str, max: usize) -> String {
     let line = text.lines().find(|line| !line.trim().is_empty()).unwrap_or("").trim();
-    line.chars().take(ACTIVITY_MAX_CHARS).collect()
+    line.chars().take(max).collect()
+}
+
+fn first_line(text: &str) -> String {
+    first_line_within(text, ACTIVITY_MAX_CHARS)
 }
 
 /// The unit of work: one conversation with one provider in one working directory.
@@ -239,8 +244,9 @@ pub struct Thread {
     /// Put away: it takes no more input and is left out of listings.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
-    /// The provider changed since the last session started. The next session has
-    /// nothing to resume and is told the conversation so far instead.
+    /// The provider changed, or the thread moved into an environment, since the
+    /// last session started. The next session has nothing to resume and is told
+    /// the conversation so far instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub handover: bool,
 }
@@ -271,9 +277,9 @@ impl Thread {
             && let EventPayload::InputSubmitted { text, .. }
             | EventPayload::InputQueued { text, .. } = &event.payload
         {
-            let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+            let line = first_line_within(text, TITLE_MAX_CHARS);
             if !line.is_empty() {
-                self.title = Some(line.chars().take(TITLE_MAX_CHARS).collect());
+                self.title = Some(line);
             }
         }
         match &event.payload {

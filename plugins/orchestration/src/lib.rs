@@ -29,7 +29,29 @@ const MESSAGE_MAX_CHARS: usize = 8_000;
 const TASK_MAX_CHARS: usize = 2_000;
 
 #[derive(Default)]
-struct Orchestration;
+struct Orchestration {
+    /// The reviews of the last daemon run are watched again: the instance lives
+    /// exactly as long as the daemon, so once is enough.
+    rewatched: bool,
+}
+
+/// A thread started from `source`, in its directory.
+fn child_of(source: &ThreadInfo, provider: String, prompt: String) -> SpawnOptions {
+    SpawnOptions {
+        provider,
+        cwd: Some(source.cwd.clone()),
+        prompt: Some(prompt),
+        model: None,
+        effort: None,
+        parent: Some(source.id.clone()),
+        environment: None,
+        base: None,
+        permission_mode: None,
+        skills_enabled: Vec::new(),
+        skills_disabled: Vec::new(),
+        hidden: false,
+    }
+}
 
 fn param(name: &str, label: &str, placeholder: &str) -> CommandParam {
     CommandParam {
@@ -158,19 +180,11 @@ impl Orchestration {
         let same = provider == source.provider;
         let model = if same { source.model.clone() } else { None };
         let effort = if same { source.effort.clone() } else { None };
+        let prompt = handoff_prompt(&source, &messages, arg(call, "note"));
         let child = threads::spawn(&SpawnOptions {
-            provider: provider.clone(),
-            cwd: Some(source.cwd.clone()),
-            prompt: Some(handoff_prompt(&source, &messages, arg(call, "note"))),
             model,
             effort,
-            parent: Some(source.id.clone()),
-            environment: None,
-            base: None,
-            permission_mode: None,
-            skills_enabled: Vec::new(),
-            skills_disabled: Vec::new(),
-            hidden: false,
+            ..child_of(&source, provider.clone(), prompt)
         })?;
         Ok(CommandResult {
             message: format!(
@@ -187,20 +201,8 @@ impl Orchestration {
         let messages = threads::transcript(&source.id)?;
         let task = messages.iter().find(|m| m.role == Role::User).map(|m| m.text.as_str());
         let provider = arg(call, "by").unwrap_or(&source.provider).to_owned();
-        let reviewer = threads::spawn(&SpawnOptions {
-            provider: provider.clone(),
-            cwd: Some(source.cwd.clone()),
-            prompt: Some(review_prompt(&source, task, arg(call, "focus"))),
-            model: None,
-            effort: None,
-            parent: Some(source.id.clone()),
-            environment: None,
-            base: None,
-            permission_mode: None,
-            skills_enabled: Vec::new(),
-            skills_disabled: Vec::new(),
-            hidden: false,
-        })?;
+        let prompt = review_prompt(&source, task, arg(call, "focus"));
+        let reviewer = threads::spawn(&child_of(&source, provider.clone(), prompt))?;
         kv::put(&format!("{REVIEW_PREFIX}{}", reviewer.id), source.id.as_bytes())?;
         threads::watch(&reviewer.id)?;
         Ok(CommandResult {
@@ -214,7 +216,10 @@ impl Orchestration {
 
     /// Watches end with the daemon; the reviews they were for are kept. Watch them
     /// again: a reviewer that finished meanwhile is reported at once.
-    fn rewatch_reviews(&self) {
+    fn rewatch_reviews(&mut self) {
+        if std::mem::replace(&mut self.rewatched, true) {
+            return;
+        }
         let Ok(keys) = kv::keys(REVIEW_PREFIX) else { return };
         for key in keys {
             let reviewer = &key[REVIEW_PREFIX.len()..];

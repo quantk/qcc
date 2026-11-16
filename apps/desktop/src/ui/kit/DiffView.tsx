@@ -1,11 +1,16 @@
 import { ChevronRightIcon } from "lucide-react";
-import { memo, useState } from "react";
+import { type ReactNode, memo, useEffect, useMemo, useState } from "react";
 
-import type { DiffFile } from "../../state/diff";
+import { type DiffFile, highlightRuns } from "../../state/diff";
+import { languageOfPath } from "../../state/languages";
+import { loadHighlighter } from "@/lib/highlighter";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 /** Files longer than this start folded: a huge diff must not freeze the window. */
 const FOLD_ABOVE = 400;
+
+/** Past this many lines a file is shown plain: highlighting it would stall the window. */
+const HIGHLIGHT_UP_TO = 3000;
 
 const statusLabel = { added: "new", deleted: "deleted", modified: "" } as const;
 
@@ -29,8 +34,48 @@ export function DiffStat({ additions, deletions }: { additions: number; deletion
   );
 }
 
+type Highlighter = NonNullable<Awaited<ReturnType<typeof loadHighlighter>>>;
+
+/**
+ * The lines of `file` highlighted in the language its name suggests, by index in
+ * `file.lines`; null until the highlighter is loaded, and for a file in a language
+ * it does not know. Only an open file is highlighted, so folded ones cost nothing.
+ */
+function useHighlightedLines(file: DiffFile, open: boolean): (ReactNode[] | undefined)[] | null {
+  const language = file.binary || file.lines.length > HIGHLIGHT_UP_TO ? null : languageOfPath(file.path);
+  const [loaded, setLoaded] = useState<{ language: string; highlighter: Highlighter } | null>(null);
+  const wanted = open ? language : null;
+
+  useEffect(() => {
+    if (!wanted) return;
+    let stale = false;
+    loadHighlighter(wanted)
+      .then((highlighter) => {
+        if (!stale && highlighter) setLoaded({ language: wanted, highlighter });
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [wanted]);
+
+  const highlighter = loaded && loaded.language === wanted ? loaded.highlighter : null;
+  return useMemo(() => {
+    if (!highlighter) return null;
+    const lines: (ReactNode[] | undefined)[] = new Array(file.lines.length);
+    for (const run of highlightRuns(file)) {
+      const highlighted = highlighter.highlight(run.text).lines;
+      run.indices.forEach((index, at) => {
+        lines[index] = highlighted[at];
+      });
+    }
+    return lines;
+  }, [file, highlighter]);
+}
+
 const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile; bare: boolean }) {
   const [open, setOpen] = useState(file.lines.length <= FOLD_ABOVE);
+  const highlighted = useHighlightedLines(file, open || bare);
   return (
     <Collapsible
       render={<section />}
@@ -62,7 +107,7 @@ const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile
                   <td className="no">{line.newNo}</td>
                   <td className="code">
                     <span className="sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
-                    {line.text}
+                    {highlighted?.[index] ?? line.text}
                   </td>
                 </tr>
               ),

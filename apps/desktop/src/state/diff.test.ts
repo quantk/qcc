@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseDiff } from "./diff";
+import { highlightRuns, parseDiff } from "./diff";
 
 const GIT = `diff --git a/README.md b/README.md
 index 1234567..89abcde 100644
@@ -68,5 +68,26 @@ describe("parseDiff", () => {
   it("keeps paths with spaces", () => {
     const files = parseDiff("diff --git a/my file.txt b/my file.txt\n--- a/my file.txt\n+++ b/my file.txt\n@@ -1 +1 @@\n-a\n+b\n");
     expect(files[0]!.path).toBe("my file.txt");
+  });
+});
+
+describe("highlightRuns", () => {
+  it("splits each hunk into the code before and after it", () => {
+    const [readme] = parseDiff(GIT);
+    // # Title, -old line, +new line, +another, tail after the hunk header.
+    expect(highlightRuns(readme!)).toEqual([
+      { indices: [1, 2, 5], text: "# Title\nold line\ntail" },
+      { indices: [1, 3, 4, 5], text: "# Title\nnew line\nanother\ntail" },
+    ]);
+  });
+
+  it("starts afresh at every hunk and leaves notes out", () => {
+    const [file] = parseDiff("@@ -1 +1 @@\n-a\n+b\n\\ No newline at end of file\n@@ -9 +9 @@\n c\n", "x.rs");
+    expect(highlightRuns(file!)).toEqual([
+      { indices: [1], text: "a" },
+      { indices: [2], text: "b" },
+      { indices: [5], text: "c" },
+      { indices: [5], text: "c" },
+    ]);
   });
 });

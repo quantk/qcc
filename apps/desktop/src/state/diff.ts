@@ -119,3 +119,45 @@ export function parseDiff(text: string, fallbackPath = ""): DiffFile[] {
   }
   return files;
 }
+
+/**
+ * A stretch of a file's diff to highlight as one piece of code: the lines of one
+ * side of a hunk, by their index in `DiffFile.lines`. Each side is highlighted
+ * apart, so a deleted line does not leave the grammar of the new code in the wrong
+ * state, and each hunk starts afresh, since what lies between hunks is unknown.
+ */
+export type HighlightRun = { indices: number[]; text: string };
+
+export function highlightRuns(file: DiffFile): HighlightRun[] {
+  const runs: HighlightRun[] = [];
+  let before: number[] = [];
+  let after: number[] = [];
+  const flush = () => {
+    for (const indices of [before, after]) {
+      if (indices.length > 0) runs.push({ indices, text: indices.map((index) => file.lines[index]!.text).join("\n") });
+    }
+    before = [];
+    after = [];
+  };
+  file.lines.forEach((line, index) => {
+    switch (line.kind) {
+      case "hunk":
+        flush();
+        break;
+      case "del":
+        before.push(index);
+        break;
+      case "add":
+        after.push(index);
+        break;
+      case "context":
+        before.push(index);
+        after.push(index);
+        break;
+      case "note":
+        break;
+    }
+  });
+  flush();
+  return runs;
+}

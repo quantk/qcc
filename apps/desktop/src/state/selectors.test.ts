@@ -4,6 +4,7 @@ import type { PluginInfo, Project, Thread } from "../api/protocol.gen";
 import {
   allowedModes,
   cardTime,
+  changesShown,
   childrenOf,
   dropOf,
   failureText,
@@ -171,5 +172,19 @@ describe("what cards and rows say about a thread", () => {
     const working = { ...thread("a", 0), status: "active", turn_started_at: now - 65_000 } as Thread;
     expect(cardTime(working, now)).toBe("1m 05s");
     expect(cardTime({ ...thread("a", 0), updated_at: now - 5 * 60_000 }, now)).toBe("5m");
+  });
+});
+
+describe("changes", () => {
+  const plugins = (inspects: boolean) =>
+    [{ environments: [{ id: "git-worktree", name: "Git worktree", inspects_directories: inspects }] }] as unknown as PluginInfo[];
+
+  it("are shown for a ready environment, or a directory an environment can inspect", () => {
+    const own = thread("a", 1);
+    expect(changesShown(own, plugins(true))).toBe(true);
+    expect(changesShown(own, plugins(false))).toBe(false);
+    const pending = { ...own, environment: { id: "git-worktree", source_dir: "/w", state: "pending" } } as Thread;
+    expect(changesShown(pending, plugins(true))).toBe(false);
+    expect(changesShown({ ...pending, environment: { ...pending.environment!, state: "ready" } }, plugins(false))).toBe(true);
   });
 });

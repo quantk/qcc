@@ -261,6 +261,10 @@ interface types {
   record environment-info {
     id: string,
     name: string,
+    /// It can also tell what changed in a directory it did not make, the kind its
+    /// environments are made from (for git: uncommitted work against HEAD). Threads
+    /// that work in a directory of their own are asked about through it.
+    inspects-directories: bool,
   }
 
   /// Where a view appears in the app.
@@ -583,6 +587,9 @@ interface types {
   record environment-query {
     thread: thread-id,
     cwd: string,
+    /// The thread works in `cwd` itself, not in an environment of this plugin: tell
+    /// what changed there. Only asked of environments that inspect directories.
+    inspect: bool,
   }
 
   variant environment-request {

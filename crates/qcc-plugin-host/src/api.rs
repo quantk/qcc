@@ -98,10 +98,14 @@ pub enum EnvironmentRequest {
     Changes {
         thread: ThreadId,
         cwd: String,
+        /// `cwd` is the thread's own directory, not one of the plugin's environments.
+        inspect: bool,
     },
     Diff {
         thread: ThreadId,
         cwd: String,
+        /// `cwd` is the thread's own directory, not one of the plugin's environments.
+        inspect: bool,
     },
     /// Answered with [`Outcome::EnvironmentDelivered`].
     Deliver {

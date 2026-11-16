@@ -163,6 +163,18 @@ impl PluginHost {
         })
     }
 
+    /// The first environment that can tell what changed in a directory it did not make.
+    pub fn directory_inspector(&self) -> Option<(&PluginHandle, &EnvironmentInfo)> {
+        self.plugins.iter().find_map(|plugin| {
+            plugin.contributions().iter().find_map(|contribution| match contribution {
+                Contribution::Environment(info) if info.inspects_directories => {
+                    Some((plugin, info))
+                }
+                _ => None,
+            })
+        })
+    }
+
     pub fn providers(&self) -> impl Iterator<Item = (&PluginHandle, &ProviderInfo)> {
         self.plugins.iter().flat_map(|plugin| {
             plugin.contributions().iter().filter_map(move |contribution| match contribution {

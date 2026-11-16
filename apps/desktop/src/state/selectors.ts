@@ -19,6 +19,15 @@ export function environmentsOf(plugins: readonly PluginInfo[]) {
   return plugins.flatMap((plugin) => plugin.environments);
 }
 
+/**
+ * Whether the changes of a thread can be shown: its environment is ready, or it
+ * works in a directory of its own and some environment can inspect directories.
+ */
+export function changesShown(thread: Thread, plugins: readonly PluginInfo[]): boolean {
+  if (thread.environment) return thread.environment.state === "ready";
+  return environmentsOf(plugins).some((environment) => environment.inspects_directories);
+}
+
 export function findProvider(plugins: readonly PluginInfo[], id: string): ProviderInfo | undefined {
   return providersOf(plugins).find((provider) => provider.id === id);
 }

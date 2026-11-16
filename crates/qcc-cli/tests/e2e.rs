@@ -1082,6 +1082,51 @@ fn spawn_in_worktree(daemon: &Daemon, repo: &Path, extra: &[&str]) -> Output {
 }
 
 #[test]
+fn a_thread_in_a_checkout_of_its_own_reports_what_is_uncommitted_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(dir.path(), &[("README.md", "hello\n"), ("src/a.txt", "one\n")]);
+    write(repo.join("src/a.txt"), "one\ntwo\n");
+    write(repo.join("src/new.txt"), "new\n");
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let cwd = repo.join("src");
+    let output = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--json",
+        "--cwd",
+        cwd.to_str().unwrap(),
+    ]);
+    assert!(output.ok, "{}", output.stderr);
+    let id = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+
+    // Paths read from the top of the checkout, as they do for a worktree.
+    let changes = daemon.qcc(&["thread", "changes", &id, "--json"]);
+    assert!(changes.ok, "{}", changes.stderr);
+    let changes = changes.json();
+    assert_eq!(changes["changes"]["base"], "HEAD");
+    let files: Vec<_> = changes["changes"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| {
+            (file["path"].as_str().unwrap().to_owned(), file["kind"].as_str().unwrap().to_owned())
+        })
+        .collect();
+    assert_eq!(
+        files,
+        [
+            ("src/a.txt".to_owned(), "modified".to_owned()),
+            ("src/new.txt".to_owned(), "untracked".to_owned())
+        ]
+    );
+    let diff = daemon.qcc(&["thread", "diff", &id]);
+    assert!(diff.ok, "{}", diff.stderr);
+    assert!(diff.stdout.contains("+two") && diff.stdout.contains("+new"), "{}", diff.stdout);
+}
+
+#[test]
 fn a_thread_gets_a_worktree_of_its_own_and_reports_what_it_changed() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");
@@ -1252,7 +1297,7 @@ fn a_thread_never_runs_in_the_source_when_its_environment_fails() {
     assert_eq!(thread["status"], "failed");
     assert_eq!(thread["environment"]["state"], "failed");
     let changes = daemon.qcc(&["thread", "changes", &id]);
-    assert!(changes.stderr.contains("has no environment"), "{}", changes.stderr);
+    assert!(changes.stderr.contains("is not ready"), "{}", changes.stderr);
 
     // Once the directory is a repository, the next message tries again and runs.
     git(&plain, &["init", "--quiet", "--initial-branch", "main"]);
@@ -1284,10 +1329,22 @@ fn a_thread_never_runs_in_the_source_when_its_environment_fails() {
     // Requests that cannot mean anything are refused up front.
     let unknown = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--env", "docker"]);
     assert!(unknown.stderr.contains("no plugin provides environment \"docker\""));
-    let plain_thread = daemon.spawn("no environment");
+    // A thread in a directory of its own outside git has no changes to tell.
+    let outside = dir.path().join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    let plain_thread = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--json",
+        "--cwd",
+        outside.to_str().unwrap(),
+    ]);
+    let plain_thread = plain_thread.json()["thread"]["id"].as_str().unwrap().to_owned();
     let diff = daemon.qcc(&["thread", "diff", &plain_thread]);
     assert!(!diff.ok);
-    assert!(diff.stderr.contains("has no environment"), "{}", diff.stderr);
+    assert!(diff.stderr.contains("is not in a git checkout"), "{}", diff.stderr);
     let bad_base = spawn_in_worktree(&daemon, &broken, &["--base", "nope"]);
     let id = bad_base.json()["thread"]["id"].as_str().unwrap().to_owned();
     let failed = daemon.wait_for(&id, "environment/failed");

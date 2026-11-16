@@ -198,6 +198,7 @@ pub enum Job {
     Changes(Changes),
     Diff(Diff),
     Deliver(Deliver),
+    Inspect(Inspect),
 }
 
 impl Job {
@@ -208,6 +209,7 @@ impl Job {
             Self::Changes(job) => job.start(),
             Self::Diff(job) => job.start(),
             Self::Deliver(job) => job.start(),
+            Self::Inspect(job) => job.start(),
         }
     }
 
@@ -218,6 +220,7 @@ impl Job {
             Self::Changes(job) => job.on_exit(tag, exit),
             Self::Diff(job) => job.on_exit(tag, exit),
             Self::Deliver(job) => job.on_exit(tag, exit),
+            Self::Inspect(job) => job.on_exit(tag, exit),
         }
     }
 }
@@ -582,6 +585,60 @@ impl Remove {
             }
             _ => Step::Finish(Ok(Answer::Removed)),
         }
+    }
+}
+
+// ----- inspect ------------------------------------------------------------------------
+
+/// The changes or the diff of a directory that is not one of our worktrees: the
+/// thread works in a checkout of the user's own. Its uncommitted work against HEAD,
+/// measured from the top of the checkout so paths read the same as a worktree's.
+pub struct Inspect {
+    cwd: String,
+    diff: bool,
+    /// The job that does the work, once the top of the checkout is known.
+    inner: Option<Box<Job>>,
+}
+
+/// The tag of `rev-parse`, apart from the tags of the job it leads to.
+const TOPLEVEL_OF: u32 = u32::MAX;
+
+impl Inspect {
+    pub fn new(cwd: String, diff: bool) -> Self {
+        Self { cwd, diff, inner: None }
+    }
+
+    fn start(&mut self) -> Step {
+        Step::Run(vec![git(TOPLEVEL_OF, &self.cwd, &["rev-parse", "--show-toplevel"])])
+    }
+
+    fn on_exit(&mut self, tag: u32, exit: Exit) -> Step {
+        if let Some(inner) = &mut self.inner {
+            return inner.on_exit(tag, exit);
+        }
+        if !exit.ok() {
+            return Step::Finish(Err(format!(
+                "{} is not in a git checkout: {}",
+                self.cwd,
+                exit.reason()
+            )));
+        }
+        let toplevel = exit.text().trim().to_owned();
+        let record = Record {
+            toplevel: toplevel.clone(),
+            worktree: toplevel,
+            cwd: self.cwd.clone(),
+            branch: String::new(),
+            base: "HEAD".to_owned(),
+        };
+        let mut inner = Box::new(if self.diff {
+            Job::Diff(Diff::new(record))
+        } else {
+            Job::Changes(Changes::new(record))
+        });
+        let step = inner.start();
+        self.inner = Some(inner);
+        step
     }
 }
 
@@ -1240,6 +1297,36 @@ mod tests {
                 ("src/a.rs", ChangeKind::Modified, Some(3), Some(1)),
             ]
         );
+    }
+
+    #[test]
+    fn a_checkout_of_the_users_own_is_measured_from_its_top_against_head() {
+        let mut job = Inspect::new("/src/app/crates".into(), false);
+        let first = run(job.start());
+        assert_eq!(first[0].args, ["-C", "/src/app/crates", "rev-parse", "--show-toplevel"]);
+        let next = run(job.on_exit(TOPLEVEL_OF, out("/src/app\n")));
+        assert_eq!(next.len(), changes::COUNT);
+        assert_eq!(next[0].args[..2], ["-C", "/src/app"]);
+        assert_eq!(next[0].args.last().map(String::as_str), Some("HEAD"));
+        job.on_exit(changes::BRANCH, out("main\n"));
+        job.on_exit(changes::NAMES, out("M\0src/a.rs\0"));
+        job.on_exit(changes::UNTRACKED, out(""));
+        let step = job.on_exit(changes::STATS, out("1\t1\tsrc/a.rs\0"));
+        let Step::Finish(Ok(Answer::Changes(changes))) = step else { panic!("{step:?}") };
+        assert_eq!(
+            (changes.branch.as_deref(), changes.base.as_deref()),
+            (Some("main"), Some("HEAD"))
+        );
+        assert_eq!(changes.files.len(), 1);
+    }
+
+    #[test]
+    fn a_directory_outside_git_says_so() {
+        let mut job = Inspect::new("/tmp/notes".into(), true);
+        job.start();
+        let step = job.on_exit(TOPLEVEL_OF, fatal("fatal: not a git repository"));
+        let Step::Finish(Err(error)) = step else { panic!("{step:?}") };
+        assert!(error.contains("/tmp/notes is not in a git checkout"), "{error}");
     }
 
     #[test]

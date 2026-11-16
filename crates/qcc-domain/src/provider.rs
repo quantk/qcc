@@ -89,6 +89,10 @@ pub struct ProviderInfo {
 pub struct EnvironmentInfo {
     pub id: String,
     pub name: String,
+    /// It can also tell what changed in a directory it did not make, so threads
+    /// without an environment can show their changes through it.
+    #[serde(default)]
+    pub inspects_directories: bool,
 }
 
 /// Where a plugin's view appears in the app.

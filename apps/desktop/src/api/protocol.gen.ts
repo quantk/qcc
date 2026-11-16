@@ -115,6 +115,11 @@ export type EnvironmentChanges = {
 export type EnvironmentInfo = {
 	id: string,
 	name: string,
+	/**
+	 *  It can also tell what changed in a directory it did not make, so threads
+	 *  without an environment can show their changes through it.
+	 */
+	inspects_directories?: boolean,
 };
 
 /**  Where a thread's environment is in its life. */

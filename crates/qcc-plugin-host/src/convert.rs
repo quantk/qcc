@@ -199,9 +199,11 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                     .collect(),
             },
         }),
-        wit::Contribution::Environment(e) => {
-            Contribution::Environment(EnvironmentInfo { id: e.id, name: e.name })
-        }
+        wit::Contribution::Environment(e) => Contribution::Environment(EnvironmentInfo {
+            id: e.id,
+            name: e.name,
+            inspects_directories: e.inspects_directories,
+        }),
         wit::Contribution::UiView(view) => Contribution::UiView(UiViewInfo {
             id: view.id,
             title: view.title,
@@ -536,16 +538,18 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                             force,
                         })
                     }
-                    EnvironmentRequest::Changes { thread, cwd } => {
+                    EnvironmentRequest::Changes { thread, cwd, inspect } => {
                         wit::EnvironmentRequest::Changes(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
+                            inspect,
                         })
                     }
-                    EnvironmentRequest::Diff { thread, cwd } => {
+                    EnvironmentRequest::Diff { thread, cwd, inspect } => {
                         wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
+                            inspect,
                         })
                     }
                     EnvironmentRequest::Deliver { thread, cwd, mode } => {

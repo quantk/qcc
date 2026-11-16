@@ -42,7 +42,10 @@ export function ChangesView({ thread }: { thread: Thread }) {
           <span>{loading ? "Reading changes…" : ""}</span>
         )}
         <span className="flex-1" />
-        <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={reload} />
+        {/* Only work in an environment has somewhere to go back to. */}
+        {thread.environment && (
+          <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={reload} />
+        )}
         <Button variant="outline" size="sm" disabled={loading} onClick={reload}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
           {loading ? "Refreshing…" : "Refresh"}

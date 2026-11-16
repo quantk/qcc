@@ -56,7 +56,8 @@ three tabs there: Usage (how full the context is, the context at each request, c
 tokens the thread spent over all its sessions), Activity (turns and their times,
 messages, commands, files, tools) and Details (agent, model, permissions, session,
 directory, dates). The numbers come from `state/stats.ts`, folded from the same events
-as the timeline. `modules/changes` adds Changes there: the diff of a thread's worktree,
+as the timeline. `modules/changes` adds Changes there: the diff of a thread's worktree, or of
+the uncommitted work in its own git checkout,
 read again whenever the agent settles an edit or a command, so it keeps up beside the
 timeline. Ctrl+B or the button in the thread header shows and hides the panel;
 in a window too narrow for it, it opens over the thread and Escape puts it away.

@@ -168,7 +168,12 @@ impl Worktrees {
 
 impl Environment for Worktrees {
     fn info(&self) -> EnvironmentInfo {
-        EnvironmentInfo { id: ENVIRONMENT.into(), name: "Git worktree".into() }
+        EnvironmentInfo {
+            id: ENVIRONMENT.into(),
+            name: "Git worktree".into(),
+            // Any git checkout can say what is uncommitted in it.
+            inspects_directories: true,
+        }
     }
 
     fn prepare(&mut self, request: EnvironmentPrepare) -> Result<Reply<String>, String> {
@@ -193,11 +198,17 @@ impl Environment for Worktrees {
     }
 
     fn changes(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentChanges>, String> {
+        if query.inspect {
+            return self.begin(query.thread, Job::Inspect(jobs::Inspect::new(query.cwd, false)));
+        }
         let record = known(&query.thread)?;
         self.begin(query.thread, Job::Changes(jobs::Changes::new(record)))
     }
 
     fn diff(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentDiff>, String> {
+        if query.inspect {
+            return self.begin(query.thread, Job::Inspect(jobs::Inspect::new(query.cwd, true)));
+        }
         let record = known(&query.thread)?;
         self.begin(query.thread, Job::Diff(jobs::Diff::new(record)))
     }

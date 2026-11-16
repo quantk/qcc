@@ -126,24 +126,40 @@ impl Core {
         Ok(Some((plugin.clone(), environment.id.clone(), thread.cwd.clone())))
     }
 
-    /// `thread.changes` and `thread.diff`: answered by the environment plugin, off
+    /// Who answers `thread.changes` and `thread.diff`: the plugin of the thread's
+    /// environment, or for a thread working in a directory of its own, an
+    /// environment that inspects directories. The flag says which.
+    fn changes_source(
+        &self,
+        id: &ThreadId,
+    ) -> Result<(PluginHandle, String, String, bool), RpcError> {
+        if let Some((plugin, environment, cwd)) = self.ready_environment(id)? {
+            return Ok((plugin, environment, cwd, false));
+        }
+        let thread = self.supervisor.thread(id).ok_or_else(|| thread_not_found(id))?;
+        if thread.environment.is_some() {
+            return Err(environment_error(format!("the environment of thread {id} is not ready")));
+        }
+        let (plugin, info) = self.host.directory_inspector().ok_or_else(|| {
+            environment_error(format!(
+                "thread {id} has no environment, and no plugin can tell the changes of its directory"
+            ))
+        })?;
+        Ok((plugin.clone(), info.id.clone(), thread.cwd.clone(), true))
+    }
+
+    /// `thread.changes` and `thread.diff`: answered by an environment plugin, off
     /// the core task.
     pub(super) fn environment_query(&mut self, id: &ThreadId, diff: bool, responder: Responder) {
-        let (plugin, environment, cwd) = match self.ready_environment(id) {
-            Ok(Some(found)) => found,
-            Ok(None) => {
-                return responder.reply::<Empty>(Err(environment_error(format!(
-                    "thread {id} has no environment to track its changes; \
-                     start threads with an environment for that"
-                ))));
-            }
+        let (plugin, environment, cwd, inspect) = match self.changes_source(id) {
+            Ok(found) => found,
             Err(error) => return responder.reply::<Empty>(Err(error)),
         };
         let thread = id.clone();
         let request = if diff {
-            EnvironmentRequest::Diff { thread, cwd }
+            EnvironmentRequest::Diff { thread, cwd, inspect }
         } else {
-            EnvironmentRequest::Changes { thread, cwd }
+            EnvironmentRequest::Changes { thread, cwd, inspect }
         };
         tokio::spawn(async move {
             match call_environment(plugin, environment, request, QUERY_TIMEOUT).await {

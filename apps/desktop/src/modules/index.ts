@@ -7,6 +7,7 @@ import { insightsModule } from "./insights";
 import { lineageModule } from "./lineage";
 import { liveModule } from "./live";
 import { mcpModule } from "./mcp";
+import { metricsModule } from "./metrics";
 import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
 import { overviewModule } from "./overview";
@@ -35,5 +36,6 @@ export const builtinModules: UiModule[] = [
   mcpModule,
   skillsModule,
   insightsModule,
+  metricsModule,
   settingsModule,
 ];

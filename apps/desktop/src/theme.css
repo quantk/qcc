@@ -55,6 +55,10 @@
   --color-success: var(--green);
   --color-success-muted: var(--green-bg);
   --color-danger-muted: var(--red-bg);
+  --color-chart-1: var(--series-1);
+  --color-chart-2: var(--series-2);
+  --color-chart-3: var(--series-3);
+  --color-chart-4: var(--series-4);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);

@@ -40,7 +40,7 @@ plugin's UI does:
 
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
-| A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/mcp`, `modules/skills` |
+| A screen in the sidebar | `ui.appView` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/mcp`, `modules/skills` |
 | A tab of the thread view | `ui.threadTab` | `modules/timeline`, `modules/changes`, `modules/lineage`, `modules/mcp`, `modules/skills` |
 | A tab of the side panel at the right of a thread | `ui.threadPanel` | `modules/insights`, `modules/changes` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |

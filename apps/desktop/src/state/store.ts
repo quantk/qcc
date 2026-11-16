@@ -126,6 +126,9 @@ export type AppState = {
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
 
+/** A thread whose events someone wants as they come: how many, and the subscription. */
+type Followed = { holders: number; live: Live | null };
+
 const defaultSchedule = (run: () => void) => {
   if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
   else queueMicrotask(run);
@@ -162,7 +165,8 @@ export class AppStore {
   private notifying = false;
   private nextSubscription = 1;
   private watch: number | null = null;
-  private live: Live | null = null;
+  /** Threads whose timelines are kept current: the selected one and whatever a view holds. */
+  private followed = new Map<ThreadId, Followed>();
 
   constructor(
     readonly api: Api,
@@ -209,7 +213,7 @@ export class AppStore {
       // Subscriptions die with the connection, and a daemon that comes back may
       // have other plugins.
       this.watch = null;
-      this.live = null;
+      for (const entry of this.followed.values()) entry.live = null;
       this.set({ models: {}, agentSkills: {} });
     }
   }
@@ -232,7 +236,7 @@ export class AppStore {
         allPlugins: plugins.plugins,
         plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
       });
-      if (this.state.selected) await this.follow(this.state.selected);
+      await Promise.all([...this.followed.keys()].map((threadId) => this.followLive(threadId)));
     } catch (error) {
       this.fail(error);
     }
@@ -244,8 +248,9 @@ export class AppStore {
     } else if (notification.method === "projects.updated") {
       if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
     } else if (notification.method === "thread.event") {
-      const live = this.live;
-      if (!live || notification.params.subscription !== live.id) return;
+      const { subscription } = notification.params;
+      const live = [...this.followed.values()].find((entry) => entry.live?.id === subscription)?.live;
+      if (!live) return;
       // Until the backlog is in, live events wait: the fold needs them in order.
       if (live.ready) this.fold(live.threadId, [notification.params.event]);
       else live.buffer.push(notification.params.event);
@@ -295,17 +300,47 @@ export class AppStore {
     this.set({ timelines: { ...this.state.timelines, [threadId]: timeline } });
   }
 
-  private unfollow() {
-    const live = this.live;
-    this.live = null;
+  /**
+   * Keep a thread's timeline current until the returned function is called. Holds
+   * are counted: the thread stays followed while anyone holds it, and is followed
+   * again after the daemon comes back.
+   */
+  hold = (threadId: ThreadId): (() => void) => {
+    const entry = this.followed.get(threadId);
+    if (entry) entry.holders += 1;
+    else {
+      this.followed.set(threadId, { holders: 1, live: null });
+      if (this.state.daemon.status === "connected") void this.followLive(threadId);
+    }
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      this.release(threadId);
+    };
+  };
+
+  private release(threadId: ThreadId) {
+    const entry = this.followed.get(threadId);
+    if (!entry) return;
+    entry.holders -= 1;
+    if (entry.holders > 0) return;
+    this.followed.delete(threadId);
+    const live = entry.live;
     if (live) void this.api.call("thread.unsubscribe", { subscription: live.id }).catch(() => {});
   }
 
-  private async follow(threadId: ThreadId) {
-    this.unfollow();
+  /** The selected thread's hold. */
+  private selectedHold: (() => void) | null = null;
+
+  private async followLive(threadId: ThreadId) {
+    const entry = this.followed.get(threadId);
+    if (!entry) return;
     const live: Live = { id: this.nextSubscription++, threadId, ready: false, buffer: [] };
-    this.live = live;
-    this.set({ loading: !this.state.timelines[threadId] });
+    entry.live = live;
+    const current = () => this.followed.get(threadId)?.live === live;
+    const shown = () => this.state.selected === threadId;
+    if (shown()) this.set({ loading: !this.state.timelines[threadId] });
     try {
       const after = this.state.timelines[threadId]?.lastSeq ?? 0;
       const { events } = await this.api.call("thread.events", {
@@ -314,7 +349,11 @@ export class AppStore {
         subscription: live.id,
       });
       this.fold(threadId, events);
-      if (this.live !== live) return;
+      if (!current()) {
+        // Let go while the backlog was on its way: the daemon is still sending.
+        void this.api.call("thread.unsubscribe", { subscription: live.id }).catch(() => {});
+        return;
+      }
       this.fold(threadId, live.buffer);
       live.buffer = [];
       live.ready = true;
@@ -322,10 +361,10 @@ export class AppStore {
         this.set({ timelines: { ...this.state.timelines, [threadId]: emptyTimeline } });
       }
     } catch (error) {
-      if (this.live === live) this.live = null;
+      if (current()) entry.live = null;
       this.fail(error);
     } finally {
-      if (this.live === live || this.live === null) this.set({ loading: false });
+      if (shown()) this.set({ loading: false });
     }
   }
 
@@ -461,9 +500,9 @@ export class AppStore {
     const threadId = place.thread;
     if (threadId === this.state.selected) return;
     this.set({ selected: threadId, loading: false });
+    this.selectedHold?.();
+    this.selectedHold = threadId === null ? null : this.hold(threadId);
     this.seeSelected();
-    if (threadId === null) this.unfollow();
-    else if (this.state.daemon.status === "connected") void this.follow(threadId);
   }
 
   async spawn(params: ThreadSpawnParams): Promise<Thread | null> {

@@ -5,6 +5,7 @@ import type { UiModule } from "../ui/registry";
 import { changesModule } from "./changes";
 import { insightsModule } from "./insights";
 import { lineageModule } from "./lineage";
+import { liveModule } from "./live";
 import { mcpModule } from "./mcp";
 import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
@@ -20,6 +21,7 @@ import { timelineModule } from "./timeline";
 
 export const builtinModules: UiModule[] = [
   overviewModule,
+  liveModule,
   timelineModule,
   changesModule,
   lineageModule,

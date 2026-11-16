@@ -4,41 +4,23 @@
 //! account can use, the same list `/model` shows. Asking costs nothing: no prompt is
 //! sent, and the process is killed once it answered.
 
-use qcc_plugin_sdk::stdio::{ProbeParser, exit_reason};
 use qcc_plugin_sdk::types::{ModelInfo, Outcome};
-use serde_json::{Value, json};
+use serde_json::Value;
+
+use crate::probe::{self, ControlProbe};
 
 const REQUEST_ID: &str = "qcc-models";
 
-/// The arguments the probe runs `claude` with.
-pub const ARGS: &[&str] =
-    &["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"];
-
 /// The line that asks.
 pub fn request() -> String {
-    json!({"type": "control_request", "request_id": REQUEST_ID, "request": {"subtype": "initialize"}})
-        .to_string()
+    probe::request(REQUEST_ID, "initialize")
 }
 
-#[derive(Default)]
-pub struct ModelsProbe;
-
-impl ProbeParser for ModelsProbe {
-    fn on_line(&mut self, line: &str) -> Option<Result<Outcome, String>> {
-        let message: Value = serde_json::from_str(line).ok()?;
-        let response = &message["response"];
-        if message["type"] != "control_response" || response["request_id"] != REQUEST_ID {
-            return None;
-        }
-        if response["subtype"] != "success" {
-            let error = response["error"].as_str().unwrap_or("the request failed");
-            return Some(Err(format!("claude could not list its models: {error}")));
-        }
-        Some(Ok(Outcome::Models(parse(&response["response"]["models"]))))
-    }
-
-    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Result<Outcome, String> {
-        Err(exit_reason("claude", code, stderr))
+pub fn probe() -> ControlProbe {
+    ControlProbe {
+        request_id: REQUEST_ID,
+        what: "models",
+        parse: |response| Outcome::Models(parse(&response["models"])),
     }
 }
 
@@ -79,10 +61,13 @@ fn strings(list: &Value) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use qcc_plugin_sdk::stdio::ProbeParser;
+    use serde_json::json;
+
     use super::*;
 
     fn answer(line: &str) -> Option<Result<Outcome, String>> {
-        ModelsProbe.on_line(line)
+        probe().on_line(line)
     }
 
     #[test]

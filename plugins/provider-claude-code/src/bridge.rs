@@ -16,9 +16,11 @@
 
 use std::collections::{HashMap, HashSet};
 
+use qcc_plugin_sdk::json::str_field;
 pub use qcc_plugin_sdk::stdio::Output;
-use qcc_plugin_sdk::stdio::{LineBridge, exit_reason};
+use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
+use qcc_plugin_sdk::{add_usage, boundary, option};
 use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
@@ -75,10 +77,6 @@ fn text_of(value: &Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
-}
-
-fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
-    value.get(name).and_then(Value::as_str).unwrap_or("")
 }
 
 /// The item a tool call is shown as. `output` is absent while the call is running.
@@ -143,10 +141,6 @@ fn applied_diff(tool_use_result: &Value) -> Option<String> {
         lines.extend(hunk["lines"].as_array()?.iter().filter_map(Value::as_str).map(str::to_owned));
     }
     (!lines.is_empty()).then(|| lines.join("\n"))
-}
-
-fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
-    InteractionOption { id: id.into(), label: label.into(), kind }
 }
 
 impl Bridge {
@@ -245,113 +239,7 @@ impl Bridge {
 
     /// The session was stopped on request.
     pub fn stopped(&mut self) -> Vec<Delta> {
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Interrupted, None));
-        }
-        deltas.push(Delta::SessionEnded(Some("stopped".into())));
-        deltas
-    }
-
-    /// The process went away by itself.
-    pub fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let reason = exit_reason("claude", code, stderr);
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Failed, Some(reason.clone())));
-        } else if code != Some(0) {
-            deltas.push(Delta::ProviderError(reason.clone()));
-        }
-        deltas.push(Delta::SessionEnded(Some(reason)));
-        deltas
-    }
-
-    /// One line of the agent's stdout.
-    pub fn on_line(&mut self, line: &str) -> Output {
-        let mut output = Output::default();
-        let Ok(message) = serde_json::from_str::<Value>(line) else {
-            return output;
-        };
-        let kind = str_field(&message, "type");
-
-        if kind == "system" {
-            // The agent summed up the conversation: when asked (`/compact`) or on
-            // its own, its context being full.
-            if str_field(&message, "subtype") == "compact_boundary" {
-                let metadata = &message["compact_metadata"];
-                output.deltas.push(Delta::ContextCompacted(Compaction {
-                    automatic: str_field(metadata, "trigger") == "auto",
-                    tokens_before: metadata["pre_tokens"].as_u64(),
-                    tokens_after: metadata["post_tokens"].as_u64(),
-                }));
-            }
-            if str_field(&message, "subtype") == "init" {
-                let id = str_field(&message, "session_id");
-                if !id.is_empty() && self.session.as_deref() != Some(id) {
-                    self.session = Some(id.to_owned());
-                    output.deltas.push(Delta::SessionIdentity(id.to_owned()));
-                }
-                // A turn we did not start: a steered message arrived after its turn
-                // had ended, so the agent runs it as a turn of its own.
-                if !self.turn_open && self.draining == 0 {
-                    self.turn_open = true;
-                    output.deltas.push(Delta::TurnOpen);
-                }
-            }
-            return output;
-        }
-        // Answers to our own requests come whatever the turn is doing.
-        if kind == "control_response" {
-            self.control_response(&message["response"], &mut output);
-            return output;
-        }
-        if self.draining > 0 {
-            match kind {
-                "result" => self.draining -= 1,
-                // The turn is over for us, but the agent still waits for an answer.
-                "control_request" => {
-                    let request_id = str_field(&message, "request_id");
-                    let refusal = match str_field(&message["request"], "subtype") {
-                        "can_use_tool" => denial(request_id, "The turn was interrupted."),
-                        _ => request_error(request_id),
-                    };
-                    output.writes.push(refusal.to_string());
-                }
-                _ => {}
-            }
-            return output;
-        }
-
-        let parent = message.get("parent_tool_use_id").and_then(Value::as_str);
-        match kind {
-            "stream_event" => self.stream_event(&message["event"], parent, &mut output.deltas),
-            "assistant" => {
-                for block in message["message"]["content"].as_array().into_iter().flatten() {
-                    self.assistant_block(block, parent, &mut output.deltas);
-                }
-            }
-            "user" => {
-                for block in message["message"]["content"].as_array().into_iter().flatten() {
-                    if str_field(block, "type") == "tool_result" {
-                        self.tool_result(block, &message["tool_use_result"], &mut output.deltas);
-                    }
-                }
-            }
-            "control_request" => self.control_request(&message, &mut output),
-            "result" => {
-                self.result(&message, &mut output.deltas);
-                // A turn may have started, lost or signed in to a server.
-                self.mcp_polls = 0;
-                output.writes.push(self.mcp_status_request());
-            }
-            // Answers to our own control requests and bookkeeping the timeline has
-            // no use for.
-            "rate_limit_event" | "keep_alive" => {}
-            _ => output.deltas.push(Delta::Unhandled(message.to_string())),
-        }
-        output
+        stdio::stopped(std::mem::take(&mut self.turn_open))
     }
 
     fn stream_event(&mut self, event: &Value, parent: Option<&str>, deltas: &mut Vec<Delta>) {
@@ -501,7 +389,7 @@ impl Bridge {
             }
             return;
         }
-        // An agent too old to tell answers with an error; it is not asked again.
+        // An agent too old to tell answers with an error, which is ignored.
         if !str_field(response, "request_id").starts_with(MCP_QUERY)
             || str_field(response, "subtype") != "success"
         {
@@ -544,9 +432,7 @@ impl Bridge {
             cached_input_tokens: Some(cached),
         };
         // Claude reports per turn; the session total is ours to keep.
-        self.total.input_tokens += last.input_tokens;
-        self.total.output_tokens += last.output_tokens;
-        self.total.cached_input_tokens = Some(self.total.cached_input_tokens.unwrap_or(0) + cached);
+        add_usage(&mut self.total, &last);
         let model_context_window = message["modelUsage"]
             .as_object()
             .into_iter()
@@ -613,17 +499,95 @@ fn request_error(request_id: &str) -> Value {
     })
 }
 
-fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
-}
-
 impl LineBridge for Bridge {
+    /// One line of the agent's stdout.
     fn on_line(&mut self, line: &str) -> Output {
-        Bridge::on_line(self, line)
+        let mut output = Output::default();
+        let Ok(message) = serde_json::from_str::<Value>(line) else {
+            return output;
+        };
+        let kind = str_field(&message, "type");
+
+        if kind == "system" {
+            // The agent summed up the conversation: when asked (`/compact`) or on
+            // its own, its context being full.
+            if str_field(&message, "subtype") == "compact_boundary" {
+                let metadata = &message["compact_metadata"];
+                output.deltas.push(Delta::ContextCompacted(Compaction {
+                    automatic: str_field(metadata, "trigger") == "auto",
+                    tokens_before: metadata["pre_tokens"].as_u64(),
+                    tokens_after: metadata["post_tokens"].as_u64(),
+                }));
+            }
+            if str_field(&message, "subtype") == "init" {
+                let id = str_field(&message, "session_id");
+                if !id.is_empty() && self.session.as_deref() != Some(id) {
+                    self.session = Some(id.to_owned());
+                    output.deltas.push(Delta::SessionIdentity(id.to_owned()));
+                }
+                // A turn we did not start: a steered message arrived after its turn
+                // had ended, so the agent runs it as a turn of its own.
+                if !self.turn_open && self.draining == 0 {
+                    self.turn_open = true;
+                    output.deltas.push(Delta::TurnOpen);
+                }
+            }
+            return output;
+        }
+        // Answers to our own requests come whatever the turn is doing.
+        if kind == "control_response" {
+            self.control_response(&message["response"], &mut output);
+            return output;
+        }
+        if self.draining > 0 {
+            match kind {
+                "result" => self.draining -= 1,
+                // The turn is over for us, but the agent still waits for an answer.
+                "control_request" => {
+                    let request_id = str_field(&message, "request_id");
+                    let refusal = match str_field(&message["request"], "subtype") {
+                        "can_use_tool" => denial(request_id, "The turn was interrupted."),
+                        _ => request_error(request_id),
+                    };
+                    output.writes.push(refusal.to_string());
+                }
+                _ => {}
+            }
+            return output;
+        }
+
+        let parent = message.get("parent_tool_use_id").and_then(Value::as_str);
+        match kind {
+            "stream_event" => self.stream_event(&message["event"], parent, &mut output.deltas),
+            "assistant" => {
+                for block in message["message"]["content"].as_array().into_iter().flatten() {
+                    self.assistant_block(block, parent, &mut output.deltas);
+                }
+            }
+            "user" => {
+                for block in message["message"]["content"].as_array().into_iter().flatten() {
+                    if str_field(block, "type") == "tool_result" {
+                        self.tool_result(block, &message["tool_use_result"], &mut output.deltas);
+                    }
+                }
+            }
+            "control_request" => self.control_request(&message, &mut output),
+            "result" => {
+                self.result(&message, &mut output.deltas);
+                // A turn may have started, lost or signed in to a server.
+                self.mcp_polls = 0;
+                output.writes.push(self.mcp_status_request());
+            }
+            // Bookkeeping the timeline has no use for.
+            "rate_limit_event" | "keep_alive" => {}
+            _ => output.deltas.push(Delta::Unhandled(message.to_string())),
+        }
+        output
     }
 
     fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        Bridge::exited(self, code, stderr)
+        let turn_open = std::mem::take(&mut self.turn_open);
+        stdio::exited("claude", turn_open, code != Some(0), code, stderr)
     }
 
     fn on_wake(&mut self) -> Output {

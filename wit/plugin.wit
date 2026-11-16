@@ -7,7 +7,8 @@
 /// world. Long-running things (an agent process writing to stdout, a timer) come back
 /// as events, and a request that has to wait for one is answered later (`deferred`).
 ///
-/// Every import is gated by a permission the plugin requests in its manifest.
+/// Every import but `log` and `completions` is gated by a permission the plugin
+/// requests in its manifest.
 package qcc:plugin@0.1.0;
 
 /// The vocabulary shared by imports and exports.
@@ -45,7 +46,8 @@ interface types {
   }
 
   enum text-channel { agent-message, reasoning, plan }
-  enum item-status { pending, completed, failed, declined, interrupted }
+  /// How a closed item ended; an item is only ever closed in a terminal state.
+  enum item-status { completed, failed, declined, interrupted }
   enum turn-status { completed, failed, interrupted }
 
   record command-item {
@@ -231,7 +233,6 @@ interface types {
   record provider-capabilities {
     /// A session can be resumed from its `provider-session` handle.
     resume: bool,
-    fork: bool,
     /// The provider handles `steer`: input fed into the running turn.
     steer: bool,
     /// The permission modes the provider can enforce. A thread is never started in

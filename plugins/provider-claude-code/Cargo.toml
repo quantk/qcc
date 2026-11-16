@@ -11,7 +11,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-qcc-plugin-sdk.workspace = true
+qcc-plugin-sdk = { workspace = true, features = ["json"] }
 serde_json.workspace = true
 
 [dev-dependencies]

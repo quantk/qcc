@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 
 use crate::lines::{LineBuffer, Tail};
-use crate::types::{Delta, Outcome};
-use crate::{ProcessEvent, completions, deltas, log, process, timers};
+use crate::types::{Delta, Outcome, TurnStatus};
+use crate::{ProcessEvent, boundary, completions, deltas, log, process, timers};
 
 /// How much of an agent's stderr is kept to explain why it died.
 const STDERR_TAIL_BYTES: usize = 4096;
@@ -53,6 +53,38 @@ pub fn exit_reason(agent: &str, code: Option<i32>, stderr: Option<&str>) -> Stri
         Some(stderr) => format!("{reason}: {stderr}"),
         None => reason,
     }
+}
+
+/// What a bridge reports when its session is stopped on request: the running turn,
+/// if `turn_open`, ends as interrupted.
+pub fn stopped(turn_open: bool) -> Vec<Delta> {
+    let mut deltas = Vec::new();
+    if turn_open {
+        deltas.push(boundary(TurnStatus::Interrupted, None));
+    }
+    deltas.push(Delta::SessionEnded(Some("stopped".into())));
+    deltas
+}
+
+/// What a bridge reports when its agent process went away by itself: the running
+/// turn, if `turn_open`, fails; otherwise the exit is an error only when
+/// `error_if_idle` (a non-zero code, or input still waiting for the agent).
+pub fn exited(
+    agent: &str,
+    turn_open: bool,
+    error_if_idle: bool,
+    code: Option<i32>,
+    stderr: Option<&str>,
+) -> Vec<Delta> {
+    let reason = exit_reason(agent, code, stderr);
+    let mut deltas = Vec::new();
+    if turn_open {
+        deltas.push(boundary(TurnStatus::Failed, Some(reason.clone())));
+    } else if error_if_idle {
+        deltas.push(Delta::ProviderError(reason.clone()));
+    }
+    deltas.push(Delta::SessionEnded(Some(reason)));
+    deltas
 }
 
 struct Session<B> {
@@ -107,6 +139,17 @@ impl<B: LineBridge> Sessions<B> {
             .get_mut(thread)
             .map(|session| &mut session.bridge)
             .ok_or_else(|| "the session is not running".to_owned())
+    }
+
+    /// Have the bridge of a running session do something, then [`Sessions::apply`]
+    /// what it decided.
+    ///
+    /// # Errors
+    ///
+    /// When no session runs for `thread`, or as [`Sessions::apply`].
+    pub fn run(&mut self, thread: &str, f: impl FnOnce(&mut B) -> Output) -> Result<(), String> {
+        let output = f(self.bridge(thread)?);
+        self.apply(thread, output)
     }
 
     /// End a session on our side: its process is killed and its bridge handed back,
@@ -166,11 +209,7 @@ impl<B: LineBridge> Sessions<B> {
     /// Hand a process event to the session it belongs to. Errors are logged: nobody
     /// waits on a process event.
     pub fn on_process(&mut self, event: ProcessEvent) {
-        let process = match &event {
-            ProcessEvent::Stdout { process, .. }
-            | ProcessEvent::Stderr { process, .. }
-            | ProcessEvent::Exit { process, .. } => *process,
-        };
+        let process = event.process();
         // A process whose session was stopped has nobody to report to.
         let Some(thread) = self
             .sessions
@@ -297,11 +336,7 @@ impl Probes {
 
     /// Hand over a process event. Returns it back when it is not a probe's.
     pub fn on_process(&mut self, event: ProcessEvent) -> Option<ProcessEvent> {
-        let process = match &event {
-            ProcessEvent::Stdout { process, .. }
-            | ProcessEvent::Stderr { process, .. }
-            | ProcessEvent::Exit { process, .. } => *process,
-        };
+        let process = event.process();
         let Some(probe) = self.running.get_mut(&process) else { return Some(event) };
         match event {
             ProcessEvent::Stdout { data, .. } => {

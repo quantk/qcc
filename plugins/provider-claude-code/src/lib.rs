@@ -6,6 +6,7 @@
 
 pub mod bridge;
 pub mod models;
+mod probe;
 pub mod skills;
 
 use qcc_plugin_sdk::prelude::*;
@@ -28,7 +29,6 @@ impl Provider for ClaudeCode {
             name: "Claude Code".into(),
             capabilities: ProviderCapabilities {
                 resume: true,
-                fork: false,
                 steer: true,
                 permission_modes: vec![
                     PermissionMode::Ask,
@@ -100,15 +100,11 @@ impl Provider for ClaudeCode {
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         // Off before the first prompt can use them.
         for name in &start.mcp_disabled {
-            let switch = self.sessions.bridge(&start.thread)?.switch_mcp(name, false);
-            self.sessions.apply(&start.thread, switch)?;
+            self.sessions.run(&start.thread, |bridge| bridge.switch_mcp(name, false))?;
         }
         if let Some(prompt) = &start.prompt {
-            let output = self
-                .sessions
-                .bridge(&start.thread)?
-                .prompt(&with_notes(&start.prompt_notes, prompt));
-            self.sessions.apply(&start.thread, output)?;
+            let prompt = with_notes(&start.prompt_notes, prompt);
+            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
         }
         // After the prompt, which must not wait on it; the agent answers either way.
         // Only a status: an agent already gone is reported by its exit, not here.
@@ -124,20 +120,17 @@ impl Provider for ClaudeCode {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output =
-            self.sessions.bridge(&input.thread)?.prompt(&with_notes(&input.notes, &input.text));
-        self.sessions.apply(&input.thread, output)
+        let text = with_notes(&input.notes, &input.text);
+        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
     }
 
     fn compact(&mut self, thread: String) -> Result<(), String> {
-        let output = self.sessions.bridge(&thread)?.compact();
-        self.sessions.apply(&thread, output)
+        self.sessions.run(&thread, Bridge::compact)
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output =
-            self.sessions.bridge(&input.thread)?.steer(&with_notes(&input.notes, &input.text));
-        self.sessions.apply(&input.thread, output)
+        let text = with_notes(&input.notes, &input.text);
+        self.sessions.run(&input.thread, |bridge| bridge.steer(&text))
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
@@ -156,8 +149,7 @@ impl Provider for ClaudeCode {
     }
 
     fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
-        let output = self.sessions.bridge(&switch.thread)?.switch_mcp(&switch.name, switch.enabled);
-        self.sessions.apply(&switch.thread, output)
+        self.sessions.run(&switch.thread, |bridge| bridge.switch_mcp(&switch.name, switch.enabled))
     }
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
@@ -169,27 +161,28 @@ impl Provider for ClaudeCode {
     }
 
     fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
-        let options = process::SpawnOptions {
-            program: PROGRAM.into(),
-            args: models::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
-            env: Vec::new(),
-            cwd: None,
-        };
-        let token =
-            self.probes.start(&options, &[models::request()], Box::new(models::ModelsProbe))?;
-        Ok(Reply::Later(token))
+        self.probe(&[models::request()], models::probe())
     }
 
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
+        self.probe(&skills::requests(), skills::probe())
+    }
+}
+
+impl ClaudeCode {
+    /// Ask a short-lived `claude` process one question.
+    fn probe<T>(
+        &mut self,
+        stdin: &[String],
+        parser: probe::ControlProbe,
+    ) -> Result<Reply<T>, String> {
         let options = process::SpawnOptions {
             program: PROGRAM.into(),
-            args: models::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
+            args: probe::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
             env: Vec::new(),
             cwd: None,
         };
-        let token =
-            self.probes.start(&options, &skills::requests(), Box::new(skills::SkillsProbe))?;
-        Ok(Reply::Later(token))
+        Ok(Reply::Later(self.probes.start(&options, stdin, Box::new(parser))?))
     }
 }
 

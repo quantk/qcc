@@ -14,10 +14,12 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use qcc_plugin_sdk::jsonrpc::{Incoming, METHOD_NOT_FOUND, Peer, RpcError};
+use qcc_plugin_sdk::json::str_field;
+use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
-use qcc_plugin_sdk::stdio::exit_reason;
+use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
+use qcc_plugin_sdk::{add_usage, boundary};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -75,15 +77,33 @@ struct Approval {
     offered: Vec<String>,
 }
 
+/// What a session is started with.
+#[derive(Debug, Default)]
+pub struct Config {
+    /// The agent's name, which names it when its process dies.
+    pub agent: &'static str,
+    pub cwd: String,
+    pub model: Option<String>,
+    /// The session to continue, if any.
+    pub resume: Option<String>,
+    pub mode: Option<PermissionMode>,
+    /// What qcc tells the agent at the start of a session (see [`Bridge`]'s
+    /// `context`).
+    pub context: Option<String>,
+    /// MCP servers to add to those of the agent's own configuration.
+    pub mcp_servers: Vec<McpServer>,
+}
+
 pub struct Bridge {
+    agent: &'static str,
     peer: Peer<Call>,
     cwd: String,
     model: Option<String>,
     mode: Option<PermissionMode>,
     /// The session being continued, until the agent accepted or refused it.
     resume: Option<String>,
+    /// The agent's session, once it is ready for prompts.
     session: Option<String>,
-    ready: bool,
     /// `session/load` replays the old conversation as updates; they are not news.
     replaying: bool,
     /// Prompts not sent yet: the agent is not ready or another prompt is in flight.
@@ -100,7 +120,8 @@ pub struct Bridge {
     refused: HashSet<String>,
     total: TokenUsage,
     context_window: Option<u64>,
-    /// What the session must know before its first prompt (the skills qcc offers).
+    /// What the session must know before its first prompt: what qcc tells the agent
+    /// at the start of a session (its skills, the project's other folders).
     /// ACP has no system prompt, so it goes in front of the first prompt of a fresh
     /// session; a continued session has it in its history already.
     context: Option<String>,
@@ -110,16 +131,8 @@ pub struct Bridge {
     mcp_param: Value,
 }
 
-fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
-    value.get(name).and_then(Value::as_str).unwrap_or("")
-}
-
 fn first_str<'a>(value: &'a Value, names: &[&str]) -> Option<&'a str> {
     names.iter().find_map(|name| value.get(*name).and_then(Value::as_str))
-}
-
-fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
 }
 
 impl Tool {
@@ -201,27 +214,17 @@ fn is_empty(value: &Value) -> bool {
 }
 
 impl Bridge {
-    /// MCP servers to add to those of the agent's own configuration. Set before
-    /// the handshake goes out.
-    pub fn set_mcp_servers(&mut self, servers: Vec<McpServer>) {
-        self.mcp_servers = servers;
-    }
-
     /// A bridge for a new agent process, and the handshake to send it.
-    pub fn new(
-        cwd: String,
-        model: Option<String>,
-        resume: Option<String>,
-        mode: Option<PermissionMode>,
-    ) -> (Self, Output) {
+    pub fn new(config: Config) -> (Self, Output) {
+        let Config { agent, cwd, model, resume, mode, context, mcp_servers } = config;
         let mut bridge = Self {
+            agent,
             peer: Peer::default(),
             cwd,
             model,
             mode,
             resume,
             session: None,
-            ready: false,
             replaying: false,
             waiting: VecDeque::new(),
             in_flight: false,
@@ -234,8 +237,8 @@ impl Bridge {
             refused: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             context_window: None,
-            context: None,
-            mcp_servers: Vec::new(),
+            context,
+            mcp_servers,
             mcp_param: json!([]),
         };
         let initialize = bridge.peer.request(
@@ -254,11 +257,6 @@ impl Bridge {
         (bridge, Output { writes: vec![initialize], ..Output::default() })
     }
 
-    /// Text the agent gets ahead of the first prompt of a fresh session.
-    pub fn set_context(&mut self, context: Option<String>) {
-        self.context = context;
-    }
-
     /// The user sent a message. It goes out as soon as the agent can take it.
     pub fn prompt(&mut self, text: &str) -> Output {
         self.waiting.push_back(text.to_owned());
@@ -268,7 +266,7 @@ impl Bridge {
     }
 
     fn send_next_prompt(&mut self, output: &mut Output) {
-        if !self.ready || self.in_flight {
+        if self.session.is_none() || self.in_flight {
             return;
         }
         let (Some(text), Some(session)) = (self.waiting.pop_front(), &self.session) else {
@@ -335,51 +333,7 @@ impl Bridge {
 
     /// The session was stopped on request.
     pub fn stopped(&mut self) -> Vec<Delta> {
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Interrupted, None));
-        }
-        deltas.push(Delta::SessionEnded(Some("stopped".into())));
-        deltas
-    }
-
-    /// The process went away by itself.
-    pub fn exited(&mut self, agent: &str, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let reason = exit_reason(agent, code, stderr);
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Failed, Some(reason.clone())));
-        } else if code != Some(0) || !self.waiting.is_empty() {
-            deltas.push(Delta::ProviderError(reason.clone()));
-        }
-        deltas.push(Delta::SessionEnded(Some(reason)));
-        deltas
-    }
-
-    /// One line of the agent's stdout.
-    pub fn on_line(&mut self, line: &str) -> Output {
-        let mut output = Output::default();
-        match self.peer.classify(line) {
-            Incoming::Response { tag, result } => self.response(tag, result, &mut output),
-            Incoming::Notification { method, params } => {
-                if method == "session/update" {
-                    self.update(&params["update"], &mut output.deltas);
-                }
-            }
-            Incoming::Request { id, method, params } => {
-                if method == "session/request_permission" {
-                    self.permission(id, &params, &mut output);
-                } else {
-                    // Never leave a request unanswered: the agent would wait forever.
-                    let refusal = format!("qcc does not provide {method}");
-                    output.writes.push(self.peer.respond_error(&id, METHOD_NOT_FOUND, &refusal));
-                }
-            }
-            Incoming::Unknown(_) => {}
-        }
-        output
+        stdio::stopped(std::mem::take(&mut self.turn_open))
     }
 
     fn response(&mut self, call: Call, result: Result<Value, RpcError>, output: &mut Output) {
@@ -501,7 +455,6 @@ impl Bridge {
             ));
         }
         self.session = Some(session);
-        self.ready = true;
         self.send_next_prompt(output);
     }
 
@@ -527,12 +480,7 @@ impl Bridge {
                 cached_input_tokens: cached,
             };
             // ACP reports per prompt; the session total is ours to keep.
-            self.total.input_tokens += last.input_tokens;
-            self.total.output_tokens += last.output_tokens;
-            if let Some(cached) = cached {
-                self.total.cached_input_tokens =
-                    Some(self.total.cached_input_tokens.unwrap_or(0) + cached);
-            }
+            add_usage(&mut self.total, &last);
             deltas.push(Delta::Usage(UsageSnapshot {
                 total: self.total,
                 last,
@@ -735,9 +683,44 @@ impl Bridge {
     }
 }
 
+impl LineBridge for Bridge {
+    /// One line of the agent's stdout.
+    fn on_line(&mut self, line: &str) -> Output {
+        let mut output = Output::default();
+        match self.peer.classify(line) {
+            Incoming::Response { tag, result } => self.response(tag, result, &mut output),
+            Incoming::Notification { method, params } => {
+                if method == "session/update" {
+                    self.update(&params["update"], &mut output.deltas);
+                }
+            }
+            Incoming::Request { id, method, params } => {
+                if method == "session/request_permission" {
+                    self.permission(id, &params, &mut output);
+                } else {
+                    output.writes.push(self.peer.refuse(&id, &method));
+                }
+            }
+            Incoming::Unknown(_) => {}
+        }
+        output
+    }
+
+    /// A prompt still waiting for the agent is lost with it, which is an error too.
+    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
+        let turn_open = std::mem::take(&mut self.turn_open);
+        let error_if_idle = code != Some(0) || !self.waiting.is_empty();
+        stdio::exited(self.agent, turn_open, error_if_idle, code, stderr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn config() -> Config {
+        Config { agent: "agent", cwd: "/work".into(), ..Config::default() }
+    }
 
     const INIT: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"sessionCapabilities":{"resume":{}}}}}"#;
     const INIT_LOAD_ONLY: &str =
@@ -761,7 +744,7 @@ mod tests {
 
     /// A bridge with a ready session `s` and a running turn (prompt request id 3).
     fn running() -> Bridge {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        let (mut bridge, _) = Bridge::new(config());
         bridge.on_line(INIT);
         bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
@@ -770,7 +753,7 @@ mod tests {
 
     #[test]
     fn a_prompt_waits_for_the_handshake() {
-        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("m1".into()), None, None);
+        let (mut bridge, handshake) = Bridge::new(Config { model: Some("m1".into()), ..config() });
         assert_eq!(methods(&handshake), ["initialize"]);
         // Nothing is sent and no turn opens before the agent has a session.
         assert_eq!(bridge.prompt("hello"), Output::default());
@@ -794,7 +777,7 @@ mod tests {
 
     #[test]
     fn continuing_prefers_resume_then_load_then_a_new_session() {
-        let resume = || Bridge::new("/work".into(), None, Some("old".into()), None).0;
+        let resume = || Bridge::new(Config { resume: Some("old".into()), ..config() }).0;
 
         let mut bridge = resume();
         let request = bridge.on_line(INIT);
@@ -852,16 +835,15 @@ mod tests {
         let request = |line: &str| -> Value { serde_json::from_str(line).unwrap() };
 
         // An agent without HTTP support gets the stdio server and a warning.
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
-        bridge.set_mcp_servers(servers.clone());
+        let (mut bridge, _) = Bridge::new(Config { mcp_servers: servers.clone(), ..config() });
         let new = bridge.on_line(INIT);
         assert_eq!(request(&new.writes[0])["params"]["mcpServers"], json!([docs]));
         assert!(matches!(&new.deltas[..], [Delta::ProviderWarning(w)] if w.contains("web")));
 
         // One that takes HTTP gets both, on a resumed session too.
         let init = r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"sessionCapabilities":{"resume":{}},"mcpCapabilities":{"http":true}}}}"#;
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("s".into()), None);
-        bridge.set_mcp_servers(servers);
+        let (mut bridge, _) =
+            Bridge::new(Config { resume: Some("s".into()), mcp_servers: servers, ..config() });
         let resume = bridge.on_line(init);
         assert_eq!(method(&resume.writes[0]), "session/resume");
         assert_eq!(
@@ -874,7 +856,7 @@ mod tests {
 
     #[test]
     fn a_refused_handshake_ends_the_session() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        let (mut bridge, _) = Bridge::new(config());
         bridge.prompt("hello");
         let refused = bridge.on_line(r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Authentication required"}}"#);
         assert!(refused.fatal);
@@ -958,7 +940,7 @@ mod tests {
             .to_string()
         };
         let with_mode = |mode| {
-            let (mut bridge, _) = Bridge::new("/work".into(), None, None, mode);
+            let (mut bridge, _) = Bridge::new(Config { mode, ..config() });
             bridge.on_line(INIT);
             bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
             bridge.prompt("go");

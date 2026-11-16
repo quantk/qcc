@@ -80,8 +80,7 @@ pub mod codes {
     pub const THREAD_NOT_FOUND: i32 = -32001;
     pub const PROVIDER_NOT_FOUND: i32 = -32002;
     pub const INTERACTION_NOT_PENDING: i32 = -32003;
-    /// The provider plugin refused or failed the request.
-    pub const PROVIDER_ERROR: i32 = -32004;
+    // -32004 was the provider error, which nothing returns any more; not reused.
     /// The thread is in the middle of a turn or of starting its session.
     pub const THREAD_BUSY: i32 = -32005;
     /// The thread's environment could not do what was asked, or the thread has none.

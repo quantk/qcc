@@ -412,7 +412,6 @@ export type ProjectsUpdatedNotification = {
 export type ProviderCapabilities = {
 	/**  A session can be resumed from its provider session handle. */
 	resume: boolean,
-	fork: boolean,
 	/**  Input sent while a turn is running can be fed into that turn. */
 	steer: boolean,
 	/**  The permission modes the provider can enforce. */
@@ -659,8 +658,9 @@ export type Thread = {
 	/**  Put away: it takes no more input and is left out of listings. */
 	archived?: boolean,
 	/**
-	 *  The provider changed since the last session started. The next session has
-	 *  nothing to resume and is told the conversation so far instead.
+	 *  The provider changed, or the thread moved into an environment, since the
+	 *  last session started. The next session has nothing to resume and is told
+	 *  the conversation so far instead.
 	 */
 	handover?: boolean,
 };

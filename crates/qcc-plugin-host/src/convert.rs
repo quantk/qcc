@@ -38,7 +38,6 @@ fn channel(channel: wit::TextChannel) -> TextChannel {
 
 fn item_status(status: wit::ItemStatus) -> ItemStatus {
     match status {
-        wit::ItemStatus::Pending => ItemStatus::Pending,
         wit::ItemStatus::Completed => ItemStatus::Completed,
         wit::ItemStatus::Failed => ItemStatus::Failed,
         wit::ItemStatus::Declined => ItemStatus::Declined,
@@ -187,7 +186,6 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             name: p.name,
             capabilities: ProviderCapabilities {
                 resume: p.capabilities.resume,
-                fork: p.capabilities.fork,
                 steer: p.capabilities.steer,
                 mcp_toggle: p.capabilities.mcp_toggle,
                 compact: p.capabilities.compact,

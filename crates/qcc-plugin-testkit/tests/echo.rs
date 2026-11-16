@@ -47,7 +47,6 @@ fn declares_its_provider_and_its_ui() {
         info.capabilities,
         ProviderCapabilities {
             resume: true,
-            fork: false,
             steer: true,
             permission_modes: PermissionMode::ALL.to_vec(),
             mcp_toggle: true,

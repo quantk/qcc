@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use serde_json::{Value, json};
 
-pub const METHOD_NOT_FOUND: i64 = -32601;
+const METHOD_NOT_FOUND: i64 = -32601;
 
 /// An error a JSON-RPC peer answered with.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +82,12 @@ impl<T> Peer<T> {
 
     pub fn respond_error(&self, id: &Value, code: i64, message: &str) -> String {
         json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}).to_string()
+    }
+
+    /// The answer to a request qcc does not handle. Never leave one unanswered: the
+    /// agent would wait forever.
+    pub fn refuse(&self, id: &Value, method: &str) -> String {
+        self.respond_error(id, METHOD_NOT_FOUND, &format!("qcc does not provide {method}"))
     }
 
     /// Requests are told from responses by the presence of `method`, never by the

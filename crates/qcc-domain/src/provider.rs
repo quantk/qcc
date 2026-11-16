@@ -61,7 +61,6 @@ impl std::str::FromStr for PermissionMode {
 pub struct ProviderCapabilities {
     /// A session can be resumed from its provider session handle.
     pub resume: bool,
-    pub fork: bool,
     /// Input sent while a turn is running can be fed into that turn.
     pub steer: bool,
     /// The permission modes the provider can enforce.

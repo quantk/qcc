@@ -15,10 +15,12 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use qcc_plugin_sdk::jsonrpc::{Incoming, METHOD_NOT_FOUND, Peer, RpcError};
+use qcc_plugin_sdk::json::str_field;
+use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
-use qcc_plugin_sdk::stdio::{LineBridge, exit_reason};
+use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
+use qcc_plugin_sdk::{boundary, option};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -45,6 +47,28 @@ struct Approval {
     id: Value,
 }
 
+/// What a session is started with.
+#[derive(Debug, Default)]
+pub struct Config {
+    pub cwd: String,
+    pub model: Option<String>,
+    /// The thread to resume, if any.
+    pub resume: Option<String>,
+    pub mode: Option<PermissionMode>,
+    /// Developer instructions for the thread: what qcc tells the agent at the start
+    /// of a session. Sent with `thread/start` and `thread/resume`.
+    pub instructions: Option<String>,
+    /// How hard the model reasons. Sent as a config override with `thread/start` and
+    /// `thread/resume`, so it holds for every turn of the session.
+    pub effort: Option<String>,
+    /// More directories the sandbox lets the agent write to: the other folders of
+    /// the thread's project. Sent as a config override.
+    pub writable_roots: Vec<String>,
+    /// MCP servers to add to those of the user's Codex configuration. Sent as a
+    /// config override.
+    pub mcp_servers: Vec<McpServer>,
+}
+
 pub struct Bridge {
     peer: Peer<Call>,
     cwd: String,
@@ -52,8 +76,8 @@ pub struct Bridge {
     mode: Option<PermissionMode>,
     /// The thread being resumed, until the agent accepted or refused it.
     resume: Option<String>,
+    /// The agent's thread, once it is ready for prompts.
     thread: Option<String>,
-    ready: bool,
     /// Prompts not sent yet: the agent is not ready or a turn is running.
     waiting: VecDeque<Waiting>,
     /// The running turn is a compaction we asked for, not one Codex chose to do.
@@ -76,16 +100,9 @@ pub struct Bridge {
     mcp_servers: Vec<McpServer>,
 }
 
-fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
-    value.get(name).and_then(Value::as_str).unwrap_or("")
-}
-
-fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
-}
-
-fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
-    InteractionOption { id: id.into(), label: label.into(), kind }
+/// How qcc introduces itself in `initialize`.
+pub fn client_info() -> Value {
+    json!({"name": "qcc", "title": "qcc", "version": env!("CARGO_PKG_VERSION")})
 }
 
 fn join(values: &Value) -> String {
@@ -151,12 +168,9 @@ fn text_item(item: &Value) -> Option<(TextChannel, String)> {
 
 impl Bridge {
     /// A bridge for a new agent process, and the handshake to send it.
-    pub fn new(
-        cwd: String,
-        model: Option<String>,
-        resume: Option<String>,
-        mode: Option<PermissionMode>,
-    ) -> (Self, Output) {
+    pub fn new(config: Config) -> (Self, Output) {
+        let Config { cwd, model, resume, mode, instructions, effort, writable_roots, mcp_servers } =
+            config;
         let mut bridge = Self {
             peer: Peer::default(),
             cwd,
@@ -164,7 +178,6 @@ impl Bridge {
             mode,
             resume,
             thread: None,
-            ready: false,
             waiting: VecDeque::new(),
             compacting: false,
             in_flight: false,
@@ -174,42 +187,17 @@ impl Bridge {
             steers_pending: Vec::new(),
             interrupted: HashSet::new(),
             approvals: HashMap::new(),
-            instructions: None,
-            effort: None,
-            writable_roots: Vec::new(),
-            mcp_servers: Vec::new(),
+            instructions,
+            effort,
+            writable_roots,
+            mcp_servers,
         };
         let initialize = bridge.peer.request(
             "initialize",
-            json!({"clientInfo": {"name": "qcc", "title": "qcc", "version": env!("CARGO_PKG_VERSION")}}),
+            json!({"clientInfo": client_info()}),
             Call::Initialize,
         );
         (bridge, Output { writes: vec![initialize], ..Output::default() })
-    }
-
-    /// More directories the sandbox lets the agent write to: the other folders of
-    /// the thread's project. Sent as a config override with `thread/start` and
-    /// `thread/resume`.
-    pub fn set_writable_roots(&mut self, roots: Vec<String>) {
-        self.writable_roots = roots;
-    }
-
-    /// Developer instructions for the thread (the skills qcc offers), sent with
-    /// `thread/start` and `thread/resume`.
-    pub fn set_instructions(&mut self, instructions: Option<String>) {
-        self.instructions = instructions;
-    }
-
-    /// How hard the model reasons. Sent as a config override with `thread/start` and
-    /// `thread/resume`, so it holds for every turn of the session.
-    pub fn set_effort(&mut self, effort: Option<String>) {
-        self.effort = effort;
-    }
-
-    /// MCP servers to add to those of the user's Codex configuration. Sent as a
-    /// config override with `thread/start` and `thread/resume`.
-    pub fn set_mcp_servers(&mut self, servers: Vec<McpServer>) {
-        self.mcp_servers = servers;
     }
 
     /// The user sent a message. It goes out as soon as the agent can take it.
@@ -230,7 +218,7 @@ impl Bridge {
     }
 
     fn send_next_prompt(&mut self, output: &mut Output) {
-        if !self.ready || self.in_flight {
+        if self.thread.is_none() || self.in_flight {
             return;
         }
         let (Some(next), Some(thread)) = (self.waiting.pop_front(), &self.thread) else {
@@ -347,43 +335,7 @@ impl Bridge {
 
     /// The session was stopped on request.
     pub fn stopped(&mut self) -> Vec<Delta> {
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Interrupted, None));
-        }
-        deltas.push(Delta::SessionEnded(Some("stopped".into())));
-        deltas
-    }
-
-    /// The process went away by itself.
-    pub fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        let reason = exit_reason("codex", code, stderr);
-        let mut deltas = Vec::new();
-        if self.turn_open {
-            self.turn_open = false;
-            deltas.push(boundary(TurnStatus::Failed, Some(reason.clone())));
-        } else if code != Some(0) || !self.waiting.is_empty() {
-            deltas.push(Delta::ProviderError(reason.clone()));
-        }
-        deltas.push(Delta::SessionEnded(Some(reason)));
-        deltas
-    }
-
-    /// One line of the agent's stdout.
-    pub fn on_line(&mut self, line: &str) -> Output {
-        let mut output = Output::default();
-        match self.peer.classify(line) {
-            Incoming::Response { tag, result } => self.response(tag, result, &mut output),
-            Incoming::Notification { method, params } => {
-                self.notification(&method, &params, &mut output);
-            }
-            Incoming::Request { id, method, params } => {
-                self.request(id, &method, &params, &mut output)
-            }
-            Incoming::Unknown(_) => {}
-        }
-        output
+        stdio::stopped(std::mem::take(&mut self.turn_open))
     }
 
     fn response(&mut self, call: Call, result: Result<Value, RpcError>, output: &mut Output) {
@@ -399,7 +351,6 @@ impl Bridge {
                     output.deltas.push(Delta::SessionIdentity(thread.clone()));
                 }
                 self.thread = Some(thread);
-                self.ready = true;
                 self.send_next_prompt(output);
             }
             (Call::Thread, Err(error)) if self.resume.is_some() => {
@@ -650,9 +601,7 @@ impl Bridge {
             }
             "item/fileChange/requestApproval" => ("Apply these changes?", None),
             _ => {
-                // Never leave a request unanswered: the agent would wait forever.
-                let refusal = format!("qcc does not provide {method}");
-                output.writes.push(self.peer.respond_error(&id, METHOD_NOT_FOUND, &refusal));
+                output.writes.push(self.peer.refuse(&id, method));
                 return;
             }
         };
@@ -694,12 +643,27 @@ fn text_delta(params: &Value, channel: TextChannel, deltas: &mut Vec<Delta>) {
 }
 
 impl LineBridge for Bridge {
+    /// One line of the agent's stdout.
     fn on_line(&mut self, line: &str) -> Output {
-        Bridge::on_line(self, line)
+        let mut output = Output::default();
+        match self.peer.classify(line) {
+            Incoming::Response { tag, result } => self.response(tag, result, &mut output),
+            Incoming::Notification { method, params } => {
+                self.notification(&method, &params, &mut output);
+            }
+            Incoming::Request { id, method, params } => {
+                self.request(id, &method, &params, &mut output)
+            }
+            Incoming::Unknown(_) => {}
+        }
+        output
     }
 
+    /// Input still waiting for the agent is lost with it, which is an error too.
     fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        Bridge::exited(self, code, stderr)
+        let turn_open = std::mem::take(&mut self.turn_open);
+        let error_if_idle = code != Some(0) || !self.waiting.is_empty();
+        stdio::exited("codex", turn_open, error_if_idle, code, stderr)
     }
 }
 
@@ -730,6 +694,10 @@ fn mcp_servers(servers: &[McpServer]) -> Value {
 mod tests {
     use super::*;
 
+    fn config() -> Config {
+        Config { cwd: "/work".into(), ..Config::default() }
+    }
+
     fn methods(output: &Output) -> Vec<String> {
         output
             .writes
@@ -747,7 +715,7 @@ mod tests {
 
     /// A bridge with thread `th` ready and a turn started (`turn/start` is request 3).
     fn started() -> Bridge {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        let (mut bridge, _) = Bridge::new(config());
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
@@ -756,7 +724,7 @@ mod tests {
 
     #[test]
     fn compacting_waits_for_the_thread_and_runs_as_a_turn() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        let (mut bridge, _) = Bridge::new(Config { resume: Some("old".into()), ..config() });
         assert_eq!(bridge.compact(), Output::default(), "held until the thread is resumed");
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         let ready = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"old"}}}"#);
@@ -794,7 +762,8 @@ mod tests {
 
     #[test]
     fn handshake_then_prompt() {
-        let (mut bridge, handshake) = Bridge::new("/work".into(), Some("gpt-x".into()), None, None);
+        let (mut bridge, handshake) =
+            Bridge::new(Config { model: Some("gpt-x".into()), ..config() });
         assert_eq!(methods(&handshake), ["initialize"]);
         assert_eq!(bridge.prompt("hello"), Output::default(), "held until the thread exists");
 
@@ -812,8 +781,11 @@ mod tests {
 
     #[test]
     fn the_effort_holds_for_the_session() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
-        bridge.set_effort(Some("high".into()));
+        let (mut bridge, _) = Bridge::new(Config {
+            resume: Some("old".into()),
+            effort: Some("high".into()),
+            ..config()
+        });
         let resume = bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert_eq!(methods(&resume), ["initialized", "thread/resume"]);
         assert!(resume.writes[1].contains("\"model_reasoning_effort\":\"high\""));
@@ -821,8 +793,8 @@ mod tests {
 
     #[test]
     fn the_project_folders_are_writable_roots() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
-        bridge.set_writable_roots(vec!["/api".into(), "/web".into()]);
+        let (mut bridge, _) =
+            Bridge::new(Config { writable_roots: vec!["/api".into(), "/web".into()], ..config() });
         let initialized = bridge.on_line(r#"{"id":1,"result":{}}"#);
         let start: serde_json::Value = serde_json::from_str(&initialized.writes[1]).unwrap();
         assert_eq!(
@@ -833,7 +805,7 @@ mod tests {
 
     #[test]
     fn mcp_startup_is_reported_between_turns() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, None, None);
+        let (mut bridge, _) = Bridge::new(config());
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         let status = |name: &str, status: &str, error: Value| {
             notify(
@@ -862,25 +834,28 @@ mod tests {
 
     #[test]
     fn mcp_servers_are_a_config_override() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
-        bridge.set_writable_roots(vec!["/api".into()]);
-        bridge.set_mcp_servers(vec![
-            McpServer {
-                name: "docs".into(),
-                transport: McpTransport::Stdio(McpStdio {
-                    command: "npx".into(),
-                    args: vec!["docs-mcp".into()],
-                    env: vec![("TOKEN".into(), "t".into())],
-                }),
-            },
-            McpServer {
-                name: "web".into(),
-                transport: McpTransport::Http(McpHttp {
-                    url: "https://example.com/mcp".into(),
-                    headers: vec![("Authorization".into(), "Bearer x".into())],
-                }),
-            },
-        ]);
+        let (mut bridge, _) = Bridge::new(Config {
+            resume: Some("old".into()),
+            writable_roots: vec!["/api".into()],
+            mcp_servers: vec![
+                McpServer {
+                    name: "docs".into(),
+                    transport: McpTransport::Stdio(McpStdio {
+                        command: "npx".into(),
+                        args: vec!["docs-mcp".into()],
+                        env: vec![("TOKEN".into(), "t".into())],
+                    }),
+                },
+                McpServer {
+                    name: "web".into(),
+                    transport: McpTransport::Http(McpHttp {
+                        url: "https://example.com/mcp".into(),
+                        headers: vec![("Authorization".into(), "Bearer x".into())],
+                    }),
+                },
+            ],
+            ..config()
+        });
         let initialized = bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert_eq!(methods(&initialized), ["initialized", "thread/resume"]);
         let resume: Value = serde_json::from_str(&initialized.writes[1]).unwrap();
@@ -899,7 +874,7 @@ mod tests {
 
     #[test]
     fn resume_falls_back_to_a_new_thread() {
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        let (mut bridge, _) = Bridge::new(Config { resume: Some("old".into()), ..config() });
         let resume = bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert_eq!(methods(&resume), ["initialized", "thread/resume"]);
         assert!(resume.writes[1].contains("\"threadId\":\"old\""));
@@ -914,7 +889,7 @@ mod tests {
         assert_eq!(fresh.deltas, [Delta::SessionIdentity("new".into())]);
 
         // A thread that resumes under its own id announces nothing.
-        let (mut bridge, _) = Bridge::new("/work".into(), None, Some("old".into()), None);
+        let (mut bridge, _) = Bridge::new(Config { resume: Some("old".into()), ..config() });
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert!(bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"old"}}}"#).deltas.is_empty());
     }
@@ -946,7 +921,7 @@ mod tests {
     #[test]
     fn the_permission_mode_sets_sandbox_policy_and_reviewer() {
         let thread_start = |mode| {
-            let (mut bridge, _) = Bridge::new("/work".into(), None, None, mode);
+            let (mut bridge, _) = Bridge::new(Config { mode, ..config() });
             let output = bridge.on_line(r#"{"id":1,"result":{}}"#);
             let request: Value = serde_json::from_str(&output.writes[1]).unwrap();
             request["params"].clone()
@@ -1063,7 +1038,7 @@ mod tests {
         );
         assert_eq!(bridge.on_line(&fatal).deltas, [Delta::ProviderError("nope".into())]);
         // Between turns too.
-        let (mut idle, _) = Bridge::new("/work".into(), None, None, None);
+        let (mut idle, _) = Bridge::new(config());
         let mcp = notify("error", json!({"willRetry": false, "error": {"message": "mcp down"}}));
         assert_eq!(idle.on_line(&mcp).deltas, [Delta::ProviderError("mcp down".into())]);
 

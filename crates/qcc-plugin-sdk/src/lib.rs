@@ -16,10 +16,11 @@
 //!             name: "Hello".into(),
 //!             capabilities: ProviderCapabilities {
 //!                 resume: false,
-//!                 fork: false,
 //!                 steer: false,
 //!                 permission_modes: vec![],
 //!                 mcp_toggle: false,
+//!                 compact: false,
+//!                 list_skills: false,
 //!             },
 //!         }
 //!     }
@@ -61,6 +62,17 @@ pub mod bindings {
     });
 }
 
+#[cfg(feature = "json")]
+pub mod json {
+    //! Small helpers for reading an agent's JSON.
+
+    use serde_json::Value;
+
+    /// A string field of `value`, or `""` when it is missing or not a string.
+    pub fn str_field<'a>(value: &'a Value, name: &str) -> &'a str {
+        value.get(name).and_then(Value::as_str).unwrap_or("")
+    }
+}
 #[cfg(feature = "jsonrpc")]
 pub mod jsonrpc;
 pub mod lines;
@@ -73,20 +85,21 @@ pub use bindings::qcc::plugin::types;
 pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
 
 use types::{
-    AgentSkill, CommandCall, CommandInfo, CommandResult, Contribution, EnvironmentChanges,
+    AgentSkill, CommandCall, CommandInfo, CommandResult, Contribution, Delta, EnvironmentChanges,
     EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery,
-    EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, McpSwitch, ModelInfo, Outcome,
-    ProviderInfo, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
-    SkillInfo, SkillRef, ThreadInput, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, InteractionOption, McpSwitch,
+    ModelInfo, OptionKind, Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted,
+    SettingField, SettledThread, SkillInfo, SkillRef, ThreadInput, TokenUsage, TurnBoundary,
+    TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, completions, deltas,
-        extra_dirs_prompt, kv, log, process, session_context, skills_prompt, threads, timers,
-        with_notes,
+        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage, boundary,
+        completions, deltas, kv, log, option, process, session_context, skills_prompt, threads,
+        timers, with_notes,
     };
 }
 
@@ -244,6 +257,17 @@ pub enum ProcessEvent {
     },
 }
 
+impl ProcessEvent {
+    /// The process the event is about.
+    pub fn process(&self) -> u64 {
+        match self {
+            Self::Stdout { process, .. }
+            | Self::Stderr { process, .. }
+            | Self::Exit { process, .. } => *process,
+        }
+    }
+}
+
 /// The plugin's own views in the app, and how its timeline items are drawn.
 ///
 /// Every answer is a tree of UI nodes as JSON; the `ui` feature has builders for it.
@@ -321,7 +345,7 @@ pub fn with_notes(notes: &[String], text: &str) -> String {
 /// The paragraph that tells an agent about the other folders of its project, or
 /// `None` if there are none. For bridges whose agent has no way to take extra
 /// directories, or to make sure it knows of them.
-pub fn extra_dirs_prompt(dirs: &[String]) -> Option<String> {
+fn extra_dirs_prompt(dirs: &[String]) -> Option<String> {
     if dirs.is_empty() {
         return None;
     }
@@ -333,6 +357,26 @@ pub fn extra_dirs_prompt(dirs: &[String]) -> Option<String> {
         text.push_str(&format!("\n- {dir}"));
     }
     Some(text)
+}
+
+/// The end of the running turn, as a bridge reports it.
+pub fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
+    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
+}
+
+/// One choice of an approval prompt.
+pub fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
+    InteractionOption { id: id.into(), label: label.into(), kind }
+}
+
+/// Add one turn's usage to the session's total, for agents that report per turn.
+/// Cached tokens count once the agent reports any.
+pub fn add_usage(total: &mut TokenUsage, last: &TokenUsage) {
+    total.input_tokens += last.input_tokens;
+    total.output_tokens += last.output_tokens;
+    if let Some(cached) = last.cached_input_tokens {
+        total.cached_input_tokens = Some(total.cached_input_tokens.unwrap_or(0) + cached);
+    }
 }
 
 /// Everything qcc tells an agent at the start of a session that is not the user's

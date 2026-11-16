@@ -8,9 +8,9 @@ pub mod bridge;
 pub mod models;
 
 use qcc_plugin_sdk::prelude::*;
-use qcc_plugin_sdk::stdio::{LineBridge, Output, Probes, Sessions};
+use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
-use bridge::Bridge;
+use bridge::{Bridge, Config};
 
 /// An agent this plugin can run.
 struct Agent {
@@ -38,24 +38,8 @@ struct Acp {
 
 struct AcpProvider {
     agent: &'static Agent,
-    sessions: Sessions<Running>,
+    sessions: Sessions<Bridge>,
     probes: Probes,
-}
-
-/// A bridge and the agent it talks to, which names it when the process dies.
-struct Running {
-    agent: &'static str,
-    bridge: Bridge,
-}
-
-impl LineBridge for Running {
-    fn on_line(&mut self, line: &str) -> Output {
-        self.bridge.on_line(line)
-    }
-
-    fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Vec<Delta> {
-        self.bridge.exited(self.agent, code, stderr)
-    }
 }
 
 impl Provider for AcpProvider {
@@ -65,7 +49,6 @@ impl Provider for AcpProvider {
             name: self.agent.name.into(),
             capabilities: ProviderCapabilities {
                 resume: true,
-                fork: false,
                 // The protocol has no way to add input to a running prompt.
                 steer: false,
                 // ACP has no automatic reviewer for `auto` to hand approvals to; the
@@ -94,23 +77,24 @@ impl Provider for AcpProvider {
             env: start.env,
             cwd: Some(start.cwd.clone()),
         })?;
-        let (mut bridge, handshake) =
-            Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
-        // ACP has no extra directories: the agent is told of them instead.
-        bridge.set_context(context);
-        bridge.set_mcp_servers(start.mcp_servers);
-        self.sessions.insert(&start.thread, process, Running { agent: self.agent.name, bridge });
+        let (bridge, handshake) = Bridge::new(Config {
+            agent: self.agent.name,
+            cwd: start.cwd,
+            model: start.model,
+            resume: start.resume.clone(),
+            mode: start.permission_mode,
+            // ACP has no extra directories: the agent is told of them instead.
+            context,
+            mcp_servers: start.mcp_servers,
+        });
+        self.sessions.insert(&start.thread, process, bridge);
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         self.sessions.apply(&start.thread, handshake)?;
         if let Some(prompt) = &start.prompt {
             // Held by the bridge until the agent finished its handshake.
-            let output = self
-                .sessions
-                .bridge(&start.thread)?
-                .bridge
-                .prompt(&with_notes(&start.prompt_notes, prompt));
-            self.sessions.apply(&start.thread, output)?;
+            let prompt = with_notes(&start.prompt_notes, prompt);
+            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
         }
         // A new session is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
@@ -118,28 +102,24 @@ impl Provider for AcpProvider {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output = self
-            .sessions
-            .bridge(&input.thread)?
-            .bridge
-            .prompt(&with_notes(&input.notes, &input.text));
-        self.sessions.apply(&input.thread, output)
+        let text = with_notes(&input.notes, &input.text);
+        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
-        let Ok(running) = self.sessions.bridge(&thread) else { return Ok(()) };
-        let output = running.bridge.interrupt();
+        let Ok(bridge) = self.sessions.bridge(&thread) else { return Ok(()) };
+        let output = bridge.interrupt();
         self.sessions.apply(&thread, output)
     }
 
     fn stop(&mut self, thread: String) -> Result<(), String> {
-        let Some(mut running) = self.sessions.kill(&thread) else { return Ok(()) };
-        deltas::emit(&thread, &running.bridge.stopped())
+        let Some(mut bridge) = self.sessions.kill(&thread) else { return Ok(()) };
+        deltas::emit(&thread, &bridge.stopped())
     }
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
-        let running = self.sessions.bridge(&answer.thread)?;
-        let output = running.bridge.resolve(&answer.request_id, &answer.resolution)?;
+        let bridge = self.sessions.bridge(&answer.thread)?;
+        let output = bridge.resolve(&answer.request_id, &answer.resolution)?;
         self.sessions.apply(&answer.thread, output)
     }
 
@@ -178,11 +158,7 @@ impl Plugin for Acp {
                 None => return,
             }
         }
-        let process = match &event {
-            ProcessEvent::Stdout { process, .. }
-            | ProcessEvent::Stderr { process, .. }
-            | ProcessEvent::Exit { process, .. } => *process,
-        };
+        let process = event.process();
         if let Some(provider) = self.providers.iter_mut().find(|p| p.sessions.owns(process)) {
             provider.sessions.on_process(event);
         }

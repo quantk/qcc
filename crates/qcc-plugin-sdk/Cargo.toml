@@ -7,8 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
+# Helpers for bridges whose agent speaks JSON.
+json = ["dep:serde_json"]
 # JSON-RPC helpers for bridges whose agent speaks it.
-jsonrpc = ["dep:serde_json"]
+jsonrpc = ["json"]
 # Builders for the UI nodes a plugin draws its views from.
 ui = ["dep:serde_json"]
 

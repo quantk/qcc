@@ -6,12 +6,13 @@
 
 pub mod bridge;
 pub mod models;
+mod probe;
 pub mod skills;
 
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
-use bridge::Bridge;
+use bridge::{Bridge, Config};
 
 const PROGRAM: &str = "codex";
 
@@ -28,7 +29,6 @@ impl Provider for Codex {
             name: "Codex".into(),
             capabilities: ProviderCapabilities {
                 resume: true,
-                fork: false,
                 steer: true,
                 permission_modes: vec![
                     PermissionMode::Ask,
@@ -53,23 +53,24 @@ impl Provider for Codex {
             env: start.env,
             cwd: Some(start.cwd.clone()),
         })?;
-        let (mut bridge, handshake) =
-            Bridge::new(start.cwd, start.model, start.resume.clone(), start.permission_mode);
-        bridge.set_instructions(context);
-        bridge.set_effort(start.effort);
-        bridge.set_writable_roots(start.extra_dirs);
-        bridge.set_mcp_servers(start.mcp_servers);
+        let (bridge, handshake) = Bridge::new(Config {
+            cwd: start.cwd,
+            model: start.model,
+            resume: start.resume.clone(),
+            mode: start.permission_mode,
+            instructions: context,
+            effort: start.effort,
+            writable_roots: start.extra_dirs,
+            mcp_servers: start.mcp_servers,
+        });
         self.sessions.insert(&start.thread, process, bridge);
 
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         self.sessions.apply(&start.thread, handshake)?;
         if let Some(prompt) = &start.prompt {
             // Held by the bridge until the agent finished its handshake.
-            let output = self
-                .sessions
-                .bridge(&start.thread)?
-                .prompt(&with_notes(&start.prompt_notes, prompt));
-            self.sessions.apply(&start.thread, output)?;
+            let prompt = with_notes(&start.prompt_notes, prompt);
+            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
         }
         // A new thread is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
@@ -77,20 +78,17 @@ impl Provider for Codex {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output =
-            self.sessions.bridge(&input.thread)?.prompt(&with_notes(&input.notes, &input.text));
-        self.sessions.apply(&input.thread, output)
+        let text = with_notes(&input.notes, &input.text);
+        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let output =
-            self.sessions.bridge(&input.thread)?.steer(&with_notes(&input.notes, &input.text));
-        self.sessions.apply(&input.thread, output)
+        let text = with_notes(&input.notes, &input.text);
+        self.sessions.run(&input.thread, |bridge| bridge.steer(&text))
     }
 
     fn compact(&mut self, thread: String) -> Result<(), String> {
-        let output = self.sessions.bridge(&thread)?.compact();
-        self.sessions.apply(&thread, output)
+        self.sessions.run(&thread, Bridge::compact)
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
@@ -113,27 +111,28 @@ impl Provider for Codex {
     }
 
     fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
-        let options = process::SpawnOptions {
-            program: PROGRAM.into(),
-            args: vec!["app-server".into()],
-            env: Vec::new(),
-            cwd: None,
-        };
-        let token =
-            self.probes.start(&options, &models::requests(), Box::new(models::ModelsProbe))?;
-        Ok(Reply::Later(token))
+        self.probe(models::requests(), models::probe())
     }
 
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
+        self.probe(skills::requests(), skills::probe())
+    }
+}
+
+impl Codex {
+    /// Ask a short-lived `codex app-server` one question.
+    fn probe<T>(
+        &mut self,
+        stdin: Vec<String>,
+        parser: probe::ListProbe,
+    ) -> Result<Reply<T>, String> {
         let options = process::SpawnOptions {
             program: PROGRAM.into(),
             args: vec!["app-server".into()],
             env: Vec::new(),
             cwd: None,
         };
-        let token =
-            self.probes.start(&options, &skills::requests(), Box::new(skills::SkillsProbe))?;
-        Ok(Reply::Later(token))
+        Ok(Reply::Later(self.probes.start(&options, &stdin, Box::new(parser))?))
     }
 }
 

@@ -127,10 +127,6 @@ fn text_close() -> Delta {
     })
 }
 
-fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
-}
-
 fn completed() -> Delta {
     boundary(TurnStatus::Completed, None)
 }
@@ -142,10 +138,6 @@ fn command_item(command: &str, exit_code: Option<i32>) -> ItemShape {
         output: None,
         exit_code,
     })
-}
-
-fn option(id: &str, label: &str, kind: OptionKind) -> InteractionOption {
-    InteractionOption { id: id.into(), label: label.into(), kind }
 }
 
 fn words(text: &str) -> u64 {
@@ -399,7 +391,6 @@ impl Provider for Echo {
             name: "Echo".into(),
             capabilities: ProviderCapabilities {
                 resume: true,
-                fork: false,
                 steer: true,
                 permission_modes: vec![
                     PermissionMode::Ask,

@@ -9,6 +9,7 @@
 //!
 //! This crate depends on neither an async runtime nor the plugin host.
 
+pub mod comment;
 pub mod delta;
 pub mod event;
 pub mod ids;
@@ -19,9 +20,10 @@ pub mod provider;
 pub mod thread;
 pub mod usage;
 
+pub use comment::{DiffSide, LineComment};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};
-pub use ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
+pub use ids::{CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
 pub use project::{Project, project_of};

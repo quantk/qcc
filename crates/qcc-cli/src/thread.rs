@@ -20,8 +20,8 @@ use qcc_client::protocol::methods::{
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
-    DeliverMode, EventPayload, PermissionMode, ProviderId, ThreadEvent, ThreadId, ThreadState,
-    ThreadStatus, TurnStatus,
+    CommentId, DeliverMode, EventPayload, PermissionMode, ProviderId, ThreadEvent, ThreadId,
+    ThreadState, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
@@ -95,6 +95,10 @@ pub(crate) enum ThreadCommand {
         /// Tell the agent the message is about this thread. Repeatable.
         #[arg(long = "about", value_name = "THREAD")]
         about: Vec<String>,
+        /// Hand the agent this comment on its changes in full (`qcc comment list`).
+        /// Repeatable.
+        #[arg(long = "comment", value_name = "ID")]
+        comments: Vec<String>,
         /// Stream the thread's events until the turn that takes this message settles.
         #[arg(long)]
         follow: bool,
@@ -335,7 +339,7 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Send { thread, text, steer, about, follow } => {
+        ThreadCommand::Send { thread, text, steer, about, comments, follow } => {
             let thread_id = ThreadId::new(thread);
             // Read the cursor first so the stream starts at this message.
             let cursor = client
@@ -352,6 +356,9 @@ pub(crate) async fn run(
                     context: about
                         .into_iter()
                         .map(|thread| MessageContext::Thread { thread_id: ThreadId::new(thread) })
+                        .chain((!comments.is_empty()).then(|| MessageContext::Comments {
+                            comment_ids: comments.into_iter().map(CommentId::new).collect(),
+                        }))
                         .collect(),
                 })
                 .await?;

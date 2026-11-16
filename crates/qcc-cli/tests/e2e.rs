@@ -1528,6 +1528,86 @@ fn a_message_tells_the_agent_what_it_is_about() {
 }
 
 #[test]
+fn comments_on_the_changes_reach_the_agent_and_it_resolves_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("first");
+    daemon.wait_for(&id, "turn/completed");
+
+    let added = daemon.qcc(&[
+        "--json",
+        "comment",
+        "add",
+        "--thread",
+        &id,
+        "src/lib.rs",
+        "12",
+        "Name this better",
+    ]);
+    assert!(added.ok, "{}", added.stderr);
+    let comment = added.json_lines()[0][0]["id"].as_str().unwrap().to_owned();
+    let old = daemon.qcc(&["comment", "add", "--thread", &id, "--old", "a.txt", "3", "Keep it"]);
+    assert!(old.ok, "{}", old.stderr);
+    assert!(old.stdout.contains("a.txt:3 (removed line)"), "{}", old.stdout);
+    let other = old.stdout.split_whitespace().next().unwrap().to_owned();
+    // Empty text and a line 0 are refused.
+    assert!(!daemon.qcc(&["comment", "add", "--thread", &id, "a.txt", "1", " "]).ok);
+    assert!(!daemon.qcc(&["comment", "add", "--thread", &id, "a.txt", "0", "x"]).ok);
+
+    // The agent is handed the comment in full, with how to resolve it.
+    let sent = daemon.qcc(&["thread", "send", &id, "/notes", "--comment", &comment]);
+    assert!(sent.ok, "{}", sent.stderr);
+    let events = daemon.eventually(&id, "ran the second turn", |e| messages(e).len() >= 2);
+    let reply = messages(&events)[1];
+    assert!(reply.contains(&format!("{comment} at src/lib.rs:12")), "{reply}");
+    assert!(reply.contains("Name this better"), "{reply}");
+    assert!(reply.contains("qcc comment resolve"), "{reply}");
+    assert!(!reply.contains(&other), "only the comment sent is handed over: {reply}");
+
+    // From inside its session the agent lists and resolves its thread's comments.
+    let env = [("QCC_THREAD_ID", id.as_str())];
+    let open = daemon.qcc_env(&["comment", "list"], &env);
+    assert!(open.stdout.contains(&comment) && open.stdout.contains(&other), "{}", open.stdout);
+    let resolved = daemon.qcc_env(&["comment", "resolve", &comment, "--note", "Renamed it"], &env);
+    assert!(resolved.ok, "{}", resolved.stderr);
+    let open = daemon.qcc_env(&["comment", "list"], &env).stdout;
+    assert!(!open.contains(&comment) && open.contains(&other), "{open}");
+    let all = daemon.qcc_env(&["comment", "list", "--all"], &env).stdout;
+    assert!(all.contains("(resolved)") && all.contains("resolved: Renamed it"), "{all}");
+    // A wrong id changes nothing, even beside a right one.
+    assert!(!daemon.qcc(&["comment", "resolve", &other, "cmt_nope"]).ok);
+    assert!(daemon.qcc_env(&["comment", "list"], &env).stdout.contains(&other));
+
+    assert!(daemon.qcc(&["comment", "reopen", &comment]).ok);
+    assert!(daemon.qcc(&["comment", "delete", &other]).ok);
+    let open = daemon.qcc_env(&["--json", "comment", "list"], &env).json_lines();
+    assert_eq!(open[0].as_array().unwrap().len(), 1, "{open:?}");
+    assert_eq!(open[0][0]["id"], comment.as_str());
+    assert!(open[0][0].get("resolution").is_none(), "{open:?}");
+
+    // A watching client hears of every change, with all of the thread's comments.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (client, mut notifications) =
+            qcc_client::Client::connect_raw(&daemon.socket).await.unwrap();
+        client.call_raw("thread.watch", serde_json::json!({ "subscription": 3 })).await.unwrap();
+        assert!(daemon.qcc(&["comment", "resolve", &comment]).ok);
+        let notification = loop {
+            let notification = tokio::time::timeout(Duration::from_secs(30), notifications.recv())
+                .await
+                .expect("the watcher is told about the comment")
+                .expect("the connection stays open");
+            if notification.method == "comments.updated" {
+                break notification;
+            }
+        };
+        assert_eq!(notification.params["subscription"], 3);
+        assert_eq!(notification.params["thread_id"], id.as_str());
+        assert!(notification.params["comments"][0]["resolved_at"].is_u64());
+    });
+}
+
+#[test]
 fn a_thread_starts_its_conversation_afresh_and_compacts_its_context() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

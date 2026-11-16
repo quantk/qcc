@@ -4,6 +4,7 @@
 //! and a `qcc thread spawn` run from inside an agent session records that session's
 //! thread as the parent. Plugin commands run as `qcc <plugin> <command>`.
 
+mod comment;
 mod mcp;
 mod project;
 mod render;
@@ -27,6 +28,7 @@ use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
 use serde::Serialize;
 
+use comment::CommentCommand;
 use mcp::McpCommand;
 use project::ProjectCommand;
 use settings::SettingsCommand;
@@ -57,6 +59,10 @@ enum Command {
     /// Create, drive and inspect threads.
     #[command(subcommand)]
     Thread(ThreadCommand),
+    /// Comments on lines of a thread's changes: left by the user, dealt with by
+    /// the agent.
+    #[command(subcommand)]
+    Comment(CommentCommand),
     /// Answer approvals and questions agents are waiting on.
     #[command(subcommand)]
     Interaction(InteractionCommand),
@@ -208,6 +214,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
 
         Command::Project(command) => return project::run(&client, command, json).await,
+
+        Command::Comment(command) => return comment::run(&client, command, json).await,
 
         Command::Settings(command) => return settings::run(&client, command, json).await,
 

@@ -65,3 +65,7 @@ id!(
     /// Minted by the daemon when the user creates a project.
     ProjectId
 );
+id!(
+    /// Minted by the daemon when a comment is left on a thread's changes.
+    CommentId
+);

@@ -68,6 +68,53 @@ export type CommandRunResult = {
 	thread_id?: ThreadId | null,
 };
 
+export type CommentAddParams = {
+	thread_id: ThreadId,
+	/**  The file, as the thread's diff names it. */
+	path: string,
+	/**  1-based, counted on `side`. */
+	line: number,
+	side?: DiffSide,
+	/**  The text of the line, to find it by once the code moves. */
+	quote?: string | null,
+	text: string,
+};
+
+export type CommentDeleteParams = {
+	comment_id: CommentId,
+};
+
+/**  Minted by the daemon when a comment is left on a thread's changes. */
+export type CommentId = string;
+
+export type CommentListParams = {
+	thread_id: ThreadId,
+	/**  Resolved comments too. Absent: only the open ones. */
+	include_resolved?: boolean,
+};
+
+export type CommentListResult = {
+	comments: LineComment[],
+};
+
+export type CommentResolveParams = {
+	comment_ids: CommentId[],
+	/**  What was done about them. */
+	resolution?: string | null,
+	reopen?: boolean,
+};
+
+export type CommentResult = {
+	comment: LineComment,
+};
+
+export type CommentsUpdatedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	thread_id: ThreadId,
+	comments: LineComment[],
+};
+
 /**  The agent summed up its conversation so far to make room in its context. */
 export type Compaction = {
 	/**  The agent did it on its own, its context being full. */
@@ -100,6 +147,13 @@ export type Delivery =
 "steered" | 
 /**  It waits for the running turn to end. */
 "queued";
+
+/**  Which side of a diff a line number counts on. */
+export type DiffSide = 
+/**  The code before the change: a deleted line. */
+"old" | 
+/**  The code after the change: an added or unchanged line. */
+"new";
 
 /**  Parameters or result of a method that carries none. */
 export type Empty = Record<string, never>;
@@ -240,6 +294,29 @@ export type ItemStatus = "pending" | "completed" | "failed" |
 /**  Settled by the core because its turn or session went away. */
 "interrupted";
 
+/**
+ *  A remark on one line of a thread's changes. It stays where it was left while
+ *  the code moves on, so it carries the line's text to be found by.
+ */
+export type LineComment = {
+	id: CommentId,
+	thread_id: ThreadId,
+	/**  The file, as the thread's diff names it: from the top of the checkout. */
+	path: string,
+	/**  1-based, counted on `side`. */
+	line: number,
+	side: DiffSide,
+	/**  The text of the line when the comment was left. */
+	quote?: string | null,
+	text: string,
+	/**  Milliseconds since the Unix epoch. */
+	created_at: number,
+	/**  When it was dealt with; absent while it is open. */
+	resolved_at?: number | null,
+	/**  What was done about it, in the words of whoever resolved it. */
+	resolution?: string | null,
+};
+
 export type McpServerSettings = {
 	transport: McpTransport,
 	/**  Kept in the settings but given to no session. */
@@ -275,7 +352,9 @@ export type McpTransport =
 /**  Something a user's message is about, which the agent is told along with it. */
 export type MessageContext = 
 /**  The user is looking at this thread. */
-{ type: "thread"; thread_id: ThreadId };
+{ type: "thread"; thread_id: ThreadId } | 
+/**  Comments left on the thread's changes: the agent is told them in full. */
+{ type: "comments"; comment_ids: CommentId[] };
 
 export type ModelInfo = {
 	/**  What the agent is started with. */
@@ -1156,6 +1235,10 @@ export type Methods = {
 	"thread.diff": { params: ThreadGetParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
 	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },
+	"comment.list": { params: CommentListParams; result: CommentListResult },
+	"comment.add": { params: CommentAddParams; result: CommentResult },
+	"comment.resolve": { params: CommentResolveParams; result: CommentListResult },
+	"comment.delete": { params: CommentDeleteParams; result: Empty },
 	"thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult },
 	"thread.events": { params: ThreadEventsParams; result: ThreadEventsResult },
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },
@@ -1179,4 +1262,5 @@ export type Notifications = {
 	"thread.event": ThreadEventNotification,
 	"thread.updated": ThreadUpdatedNotification,
 	"projects.updated": ProjectsUpdatedNotification,
+	"comments.updated": CommentsUpdatedNotification,
 };

@@ -515,6 +515,7 @@ impl Core {
                     thread.provider
                 )
             }
+            MessageContext::Comments { comment_ids } => self.comments_note(comment_ids),
         }
     }
 

@@ -5,16 +5,17 @@ use qcc_domain::{Thread, ThreadState};
 use qcc_plugin_host::UiRequest;
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
-    CommandList, CommandRun, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
-    PluginList, ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate,
-    ProviderModels, ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive,
-    ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet,
-    ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename,
-    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
-    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
-    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult,
+    CommandList, CommandRun, CommentAdd, CommentDelete, CommentList, CommentResolve, DaemonStatus,
+    DaemonStatusResult, Empty, InteractionResolve, PluginList, ProjectCreate, ProjectDelete,
+    ProjectList, ProjectListResult, ProjectUpdate, ProviderModels, ProviderSkills, SettingsGet,
+    SettingsSet, SkillList, ThreadArchive, ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff,
+    ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams,
+    ThreadListResult, ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp,
+    ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop,
+    ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
+    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
+    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
+    UsageHistoryResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -72,6 +73,22 @@ impl Core {
             ThreadSetProject::NAME => {
                 let result =
                     params::<ThreadSetProject>(raw).and_then(|p| self.thread_set_project(p));
+                responder.reply(result);
+            }
+            CommentList::NAME => {
+                let result = params::<CommentList>(raw).and_then(|p| self.comment_list(p));
+                responder.reply(result);
+            }
+            CommentAdd::NAME => {
+                let result = params::<CommentAdd>(raw).and_then(|p| self.comment_add(p));
+                responder.reply(result);
+            }
+            CommentResolve::NAME => {
+                let result = params::<CommentResolve>(raw).and_then(|p| self.comment_resolve(p));
+                responder.reply(result);
+            }
+            CommentDelete::NAME => {
+                let result = params::<CommentDelete>(raw).and_then(|p| self.comment_delete(p));
                 responder.reply(result);
             }
             UsageHistory::NAME => {

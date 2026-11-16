@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
-    InteractionResolution, McpTransport, ModelInfo, PermissionMode, Project, ProjectId, ProviderId,
-    ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
-    UsageBucket,
+    AgentSkill, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
+    InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
+    Project, ProjectId, ProviderId, ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId,
+    ThreadState, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -143,6 +143,8 @@ pub struct ThreadSendParams {
 pub enum MessageContext {
     /// The user is looking at this thread.
     Thread { thread_id: ThreadId },
+    /// Comments left on the thread's changes: the agent is told them in full.
+    Comments { comment_ids: Vec<CommentId> },
 }
 
 /// What became of a sent message.
@@ -610,6 +612,89 @@ method!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ProjectDeleteParams {
     pub id: ProjectId,
+}
+
+// ----- comments ---------------------------------------------------------------------
+
+method!(
+    /// The comments left on a thread's changes, oldest first.
+    CommentList, "comment.list", CommentListParams => CommentListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentListParams {
+    pub thread_id: ThreadId,
+    /// Resolved comments too. Absent: only the open ones.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_resolved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentListResult {
+    pub comments: Vec<LineComment>,
+}
+
+method!(
+    /// Leave a comment on a line of a thread's changes, for its agent to act on.
+    CommentAdd, "comment.add", CommentAddParams => CommentResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentAddParams {
+    pub thread_id: ThreadId,
+    /// The file, as the thread's diff names it.
+    pub path: String,
+    /// 1-based, counted on `side`.
+    pub line: u32,
+    #[serde(default)]
+    pub side: DiffSide,
+    /// The text of the line, to find it by once the code moves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quote: Option<String>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentResult {
+    pub comment: LineComment,
+}
+
+method!(
+    /// Mark comments dealt with, saying what was done; or, with `reopen`, open them
+    /// again. Every id must name a comment, or nothing changes.
+    CommentResolve, "comment.resolve", CommentResolveParams => CommentListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentResolveParams {
+    pub comment_ids: Vec<CommentId>,
+    /// What was done about them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reopen: bool,
+}
+
+method!(
+    /// Take a comment back.
+    CommentDelete, "comment.delete", CommentDeleteParams => Empty
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentDeleteParams {
+    pub comment_id: CommentId,
+}
+
+/// Notification to connections that watch threads: the comments on a thread's
+/// changes changed. Carries all of them, resolved ones too.
+pub const COMMENTS_UPDATED: &str = "comments.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentsUpdatedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub thread_id: ThreadId,
+    pub comments: Vec<LineComment>,
 }
 
 // ----- interactions -----------------------------------------------------------------

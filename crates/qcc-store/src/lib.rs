@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
-    EventPayload, Item, ItemShape, Project, ProjectId, Role, Thread, ThreadEvent, ThreadId,
-    ThreadUsage, TranscriptEntry, UsageBucket,
+    CommentId, EventPayload, Item, ItemShape, LineComment, Project, ProjectId, Role, Thread,
+    ThreadEvent, ThreadId, ThreadUsage, TranscriptEntry, UsageBucket,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -61,6 +61,16 @@ const MIGRATIONS: &[&str] = &[
         key         TEXT PRIMARY KEY,
         value       INTEGER NOT NULL
     ) STRICT;
+",
+    "
+    CREATE TABLE comments (
+        id          TEXT PRIMARY KEY,
+        thread_id   TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+        created_at  INTEGER NOT NULL,
+        data        TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX comments_by_thread ON comments (thread_id, created_at);
 ",
 ];
 
@@ -336,6 +346,47 @@ impl Store {
         Ok(())
     }
 
+    /// The comments left on a thread's changes, oldest first. Like projects they are
+    /// not history: a row is replaced when the comment is resolved.
+    pub fn comments(&self, thread: &ThreadId) -> Result<Vec<LineComment>> {
+        let conn = self.lock();
+        let mut statement =
+            conn.prepare("SELECT data FROM comments WHERE thread_id = ?1 ORDER BY created_at, id")?;
+        let rows = statement.query_map([thread.as_str()], |row| row.get::<_, String>(0))?;
+        let mut comments = Vec::new();
+        for data in rows {
+            comments.push(decode(&data?)?);
+        }
+        Ok(comments)
+    }
+
+    pub fn comment(&self, id: &CommentId) -> Result<Option<LineComment>> {
+        let data: Option<String> = self
+            .lock()
+            .query_row("SELECT data FROM comments WHERE id = ?1", [id.as_str()], |row| row.get(0))
+            .optional()?;
+        data.map(|data| decode(&data)).transpose()
+    }
+
+    pub fn save_comment(&self, comment: &LineComment) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO comments (id, thread_id, created_at, data) VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+            params![
+                comment.id.as_str(),
+                comment.thread_id.as_str(),
+                comment.created_at.cast_signed(),
+                encode(comment)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_comment(&self, id: &CommentId) -> Result<()> {
+        self.lock().execute("DELETE FROM comments WHERE id = ?1", [id.as_str()])?;
+        Ok(())
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave a transaction half-applied:
         // rusqlite rolls back on drop.
@@ -439,6 +490,46 @@ mod tests {
         assert_eq!(store.projects().unwrap(), [project.clone()]);
         store.delete_project(&project.id).unwrap();
         assert!(store.projects().unwrap().is_empty());
+    }
+
+    #[test]
+    fn comments_are_kept_per_thread_and_go_with_it() {
+        let store = Store::open_in_memory().unwrap();
+        let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
+        store.append(&scenario(&mut supervisor)).unwrap();
+        let comment = |id: &str, thread: &str, created_at: u64| LineComment {
+            id: CommentId::new(id),
+            thread_id: ThreadId::new(thread),
+            path: "src/lib.rs".into(),
+            line: 3,
+            side: qcc_domain::DiffSide::New,
+            quote: Some("let x = 1;".into()),
+            text: "name it".into(),
+            created_at,
+            resolved_at: None,
+            resolution: None,
+        };
+        let mut first = comment("c1", "a", 10);
+        store.save_comment(&comment("c2", "a", 20)).unwrap();
+        store.save_comment(&first).unwrap();
+        store.save_comment(&comment("c3", "b", 5)).unwrap();
+        first.resolved_at = Some(30);
+        first.resolution = Some("renamed".into());
+        store.save_comment(&first).unwrap();
+
+        let ids = |thread: &str| -> Vec<String> {
+            let comments = store.comments(&thread.into()).unwrap();
+            comments.into_iter().map(|c| c.id.0).collect()
+        };
+        assert_eq!(ids("a"), ["c1", "c2"]);
+        assert_eq!(store.comment(&"c1".into()).unwrap(), Some(first));
+        store.delete_comment(&"c2".into()).unwrap();
+        assert_eq!(ids("a"), ["c1"]);
+        assert_eq!(store.comment(&"zzz".into()).unwrap(), None);
+        // A comment cannot outlive its thread, nor be left on one that is not there.
+        store.lock().execute("DELETE FROM threads WHERE id = 'b'", []).unwrap();
+        assert!(ids("b").is_empty());
+        assert!(store.save_comment(&comment("c4", "nope", 1)).is_err());
     }
 
     fn new_thread(id: &str) -> NewThread {

@@ -64,6 +64,10 @@ fn generate() -> String {
         .method::<ThreadDiff>()
         .method::<ThreadDeliver>()
         .method::<ThreadIsolate>()
+        .method::<CommentList>()
+        .method::<CommentAdd>()
+        .method::<CommentResolve>()
+        .method::<CommentDelete>()
         .method::<ThreadWait>()
         .method::<ThreadEvents>()
         .method::<ThreadUnsubscribe>()
@@ -85,6 +89,7 @@ fn generate() -> String {
         .register::<ThreadEventNotification>()
         .register::<ThreadUpdatedNotification>()
         .register::<ProjectsUpdatedNotification>()
+        .register::<CommentsUpdatedNotification>()
         .register::<RpcError>();
     // Sequence numbers, timestamps and token counts stay far below 2^53.
     let types = Remapper::new().dangerous_bigints_as_number().remap_types(types);
@@ -103,6 +108,7 @@ fn generate() -> String {
     out.push_str(&format!("\t\"{THREAD_EVENT}\": ThreadEventNotification,\n"));
     out.push_str(&format!("\t\"{THREAD_UPDATED}\": ThreadUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{PROJECTS_UPDATED}\": ProjectsUpdatedNotification,\n"));
+    out.push_str(&format!("\t\"{COMMENTS_UPDATED}\": CommentsUpdatedNotification,\n"));
     out.push_str("};\n");
     out
 }

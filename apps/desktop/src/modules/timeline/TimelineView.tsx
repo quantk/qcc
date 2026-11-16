@@ -46,7 +46,11 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
               <BubbleContent className="whitespace-pre-wrap">{entry.text}</BubbleContent>
             </Bubble>
             {entry.notes.map((note, index) => (
-              <MessageFooter key={index} title="What qcc told the agent along with this message">
+              <MessageFooter
+                key={index}
+                className="block whitespace-pre-wrap"
+                title="What qcc told the agent along with this message"
+              >
                 qcc: {note}
               </MessageFooter>
             ))}

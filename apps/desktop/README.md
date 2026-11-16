@@ -59,7 +59,12 @@ directory, dates). The numbers come from `state/stats.ts`, folded from the same 
 as the timeline. `modules/changes` adds Changes there: the diff of a thread's worktree, or of
 the uncommitted work in its own git checkout,
 read again whenever the agent settles an edit or a command, so it keeps up beside the
-timeline. Ctrl+B or the button in the thread header shows and hides the panel;
+timeline. Diffs (`ui/kit/DiffView`) are highlighted with shiki by the language the file
+name suggests (`state/languages.ts`); a view adds its own rows to a diff through a
+`DiffAddon`, which is how `modules/changes/review.tsx` puts comments under lines.
+Where a comment goes once the code has moved is decided in `state/comments.ts`; the
+comments themselves live in the store, read with `comment.list` and kept current by
+`comments.updated`. Ctrl+B or the button in the thread header shows and hides the panel;
 in a window too narrow for it, it opens over the thread and Escape puts it away.
 
 Both sides of the window can be resized by dragging their edge (`ui/kit/ResizeHandle`,

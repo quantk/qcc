@@ -8,9 +8,12 @@ import type {
   AgentSkill,
   CommandRunParams,
   CommandRunResult,
+  CommentAddParams,
+  CommentId,
   DeliverMode,
   InteractionId,
   InteractionResolution,
+  LineComment,
   MessageContext,
   ModelInfo,
   PermissionMode,
@@ -122,6 +125,9 @@ export type AppState = {
   skills: readonly SkillStatus[];
   /** The skills each agent finds by itself, as it reported them. */
   agentSkills: Readonly<Record<ProviderId, AgentSkillList>>;
+  /** Comments on each thread's changes, resolved ones too, oldest first. Read for a
+   * thread when a view asks (`loadComments`), then kept current by the daemon. */
+  comments: Readonly<Record<ThreadId, readonly LineComment[]>>;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -158,6 +164,7 @@ export class AppStore {
     sideOverlay: false,
     skills: [],
     agentSkills: {},
+    comments: {},
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -247,6 +254,9 @@ export class AppStore {
       if (notification.params.subscription === this.watch) this.mergeThreads([notification.params.thread]);
     } else if (notification.method === "projects.updated") {
       if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
+    } else if (notification.method === "comments.updated") {
+      const { subscription, thread_id, comments } = notification.params;
+      if (subscription === this.watch) this.setComments(thread_id, comments);
     } else if (notification.method === "thread.event") {
       const { subscription } = notification.params;
       const live = [...this.followed.values()].find((entry) => entry.live?.id === subscription)?.live;
@@ -525,6 +535,46 @@ export class AppStore {
       this.api.call("thread.send", { thread_id: threadId, text, delivery, context }),
     );
     return result !== null;
+  }
+
+  // ----- comments on changes ----------------------------------------------------
+
+  private setComments(threadId: ThreadId, comments: readonly LineComment[]) {
+    this.set({ comments: { ...this.state.comments, [threadId]: comments } });
+  }
+
+  /** Read the comments on a thread's changes; the daemon keeps them current after. */
+  async loadComments(threadId: ThreadId): Promise<void> {
+    const result = await this.attempt(() =>
+      this.api.call("comment.list", { thread_id: threadId, include_resolved: true }),
+    );
+    if (result) this.setComments(threadId, result.comments);
+  }
+
+  /** Resolves to whether the daemon kept it. */
+  async addComment(params: CommentAddParams): Promise<boolean> {
+    const result = await this.attempt(() => this.api.call("comment.add", params));
+    if (!result) return false;
+    const known = this.state.comments[params.thread_id] ?? [];
+    if (!known.some((comment) => comment.id === result.comment.id)) {
+      this.setComments(params.thread_id, [...known, result.comment]);
+    }
+    return true;
+  }
+
+  async resolveComments(threadId: ThreadId, ids: CommentId[], reopen = false): Promise<void> {
+    const result = await this.attempt(() => this.api.call("comment.resolve", { comment_ids: ids, reopen }));
+    if (!result) return;
+    const changed = new Map(result.comments.map((comment) => [comment.id, comment]));
+    const known = this.state.comments[threadId] ?? [];
+    this.setComments(threadId, known.map((comment) => changed.get(comment.id) ?? comment));
+  }
+
+  async deleteComment(threadId: ThreadId, id: CommentId): Promise<void> {
+    const result = await this.attempt(() => this.api.call("comment.delete", { comment_id: id }));
+    if (!result) return;
+    const known = this.state.comments[threadId] ?? [];
+    this.setComments(threadId, known.filter((comment) => comment.id !== id));
   }
 
   /** Take a queued message back. Resolves to its text, or null if it was gone. */

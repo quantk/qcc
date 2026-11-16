@@ -2,16 +2,21 @@ import { RefreshCwIcon } from "lucide-react";
 import { useRef } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
+import type { DiffFile } from "../../state/diff";
 import { plural } from "../../util/format";
 import { DiffView, scrollToFile } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
 import { DeliverButtons } from "./DeliverButtons";
+import { ReviewBar, useReview } from "./review";
 import { useChanges } from "./useChanges";
+
+const NO_FILES: DiffFile[] = [];
 
 export function ChangesView({ thread }: { thread: Thread }) {
   const { loaded, error, loading, active, totals, reload } = useChanges(thread);
   const body = useRef<HTMLDivElement>(null);
+  const review = useReview(thread, loaded?.files ?? NO_FILES);
 
   return (
     <div className="changes">
@@ -59,10 +64,11 @@ export function ChangesView({ thread }: { thread: Thread }) {
           ) : (
             <ChangedFiles changes={loaded.changes} open={(path) => scrollToFile(body.current, path)} />
           )}
+          <ReviewBar thread={thread} review={review} />
           {loaded.truncated && (
             <div className="notice warning">The diff is too large to show in full; what follows is cut short.</div>
           )}
-          <DiffView files={loaded.files} />
+          <DiffView files={loaded.files} addon={review.addon} />
         </div>
       )}
     </div>

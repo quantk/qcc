@@ -1,9 +1,10 @@
-import { ChevronRightIcon } from "lucide-react";
-import { type ReactNode, memo, useEffect, useMemo, useState } from "react";
+import { ChevronRightIcon, MessageSquarePlusIcon } from "lucide-react";
+import { Fragment, type ReactNode, memo, useEffect, useMemo, useState } from "react";
 
 import { type DiffFile, highlightRuns } from "../../state/diff";
 import { languageOfPath } from "../../state/languages";
 import { loadHighlighter } from "@/lib/highlighter";
+import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 /** Files longer than this start folded: a huge diff must not freeze the window. */
@@ -11,6 +12,20 @@ const FOLD_ABOVE = 400;
 
 /** Past this many lines a file is shown plain: highlighting it would stall the window. */
 const HIGHLIGHT_UP_TO = 3000;
+
+/**
+ * What a view adds to a diff of its own: comments under lines and a way to start
+ * one. The diff itself knows nothing about comments.
+ */
+export type DiffAddon = {
+  /** Drawn above the file's lines. */
+  head?(file: DiffFile): ReactNode;
+  /** Drawn under the line at `index` of `file.lines`. */
+  below?(file: DiffFile, index: number): ReactNode;
+  /** Offered on the lines `canPick` allows: the user picked the line at `index`. */
+  pick?(file: DiffFile, index: number): void;
+  canPick?(file: DiffFile, index: number): boolean;
+};
 
 const statusLabel = { added: "new", deleted: "deleted", modified: "" } as const;
 
@@ -73,7 +88,30 @@ function useHighlightedLines(file: DiffFile, open: boolean): (ReactNode[] | unde
   }, [file, highlighter]);
 }
 
-const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile; bare: boolean }) {
+/** A row across the whole diff that stays in view when the code scrolls sideways. */
+function HeadRow({ children }: { children: ReactNode }) {
+  return children ? <AddonRow>{children}</AddonRow> : null;
+}
+
+function AddonRow({ children }: { children: ReactNode }) {
+  return (
+    <tr className="diff-addon">
+      <td colSpan={3} className="border-y bg-background p-0 font-sans whitespace-normal">
+        <div className="sticky left-0 max-w-2xl p-2">{children}</div>
+      </td>
+    </tr>
+  );
+}
+
+const DiffFileView = memo(function DiffFileView({
+  file,
+  bare,
+  addon,
+}: {
+  file: DiffFile;
+  bare: boolean;
+  addon?: DiffAddon;
+}) {
   const [open, setOpen] = useState(file.lines.length <= FOLD_ABOVE);
   const highlighted = useHighlightedLines(file, open || bare);
   return (
@@ -95,23 +133,45 @@ const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile
       <CollapsibleContent>
         <table className="diff-lines">
           <tbody>
-            {file.lines.map((line, index) =>
-              line.kind === "hunk" || line.kind === "note" ? (
-                <tr key={index} className={line.kind}>
-                  <td className="no" colSpan={2} />
-                  <td className="code">{line.text}</td>
-                </tr>
-              ) : (
-                <tr key={index} className={line.kind}>
-                  <td className="no">{line.oldNo}</td>
-                  <td className="no">{line.newNo}</td>
-                  <td className="code">
-                    <span className="sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
-                    {highlighted?.[index] ?? line.text}
-                  </td>
-                </tr>
-              ),
-            )}
+            {addon?.head && <HeadRow>{addon.head(file)}</HeadRow>}
+            {file.lines.map((line, index) => {
+              const below = addon?.below?.(file, index);
+              const pickable = addon?.pick && (addon.canPick?.(file, index) ?? true);
+              return (
+                <Fragment key={index}>
+                  {line.kind === "hunk" || line.kind === "note" ? (
+                    <tr className={line.kind}>
+                      <td className="no" colSpan={2} />
+                      <td className="code">{line.text}</td>
+                    </tr>
+                  ) : (
+                    <tr className={`${line.kind} group/line`}>
+                      <td className="no relative">
+                        {pickable && (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="absolute top-0 left-0.5 size-[1.45em] bg-muted opacity-0 group-hover/line:opacity-100 focus-visible:opacity-100"
+                            title="Comment on this line"
+                            aria-label="Comment on this line"
+                            onClick={() => addon.pick!(file, index)}
+                          >
+                            <MessageSquarePlusIcon />
+                          </Button>
+                        )}
+                        {line.oldNo}
+                      </td>
+                      <td className="no">{line.newNo}</td>
+                      <td className="code">
+                        <span className="sign">{line.kind === "add" ? "+" : line.kind === "del" ? "−" : " "}</span>
+                        {highlighted?.[index] ?? line.text}
+                      </td>
+                    </tr>
+                  )}
+                  {below ? <AddonRow>{below}</AddonRow> : null}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </CollapsibleContent>
@@ -120,11 +180,11 @@ const DiffFileView = memo(function DiffFileView({ file, bare }: { file: DiffFile
 });
 
 /** `bare` drops the per-file headers: for the diff of one file shown under its name. */
-export function DiffView({ files, bare = false }: { files: DiffFile[]; bare?: boolean }) {
+export function DiffView({ files, bare = false, addon }: { files: DiffFile[]; bare?: boolean; addon?: DiffAddon }) {
   return (
     <div className="diff">
       {files.map((file, index) => (
-        <DiffFileView key={`${index}:${file.path}`} file={file} bare={bare} />
+        <DiffFileView key={`${index}:${file.path}`} file={file} bare={bare} addon={addon} />
       ))}
     </div>
   );

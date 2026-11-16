@@ -1,20 +1,25 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useRef } from "react";
 
+import type { DiffFile } from "../../state/diff";
 import type { ThreadContext } from "../../ui/registry";
 import { DiffStat, DiffView, scrollToFile } from "../../ui/kit";
 import { plural } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
+import { ReviewBar, useReview } from "./review";
 import { useChanges } from "./useChanges";
 
 /**
  * The diff beside the timeline: what the agent has changed so far, kept current while
  * it works. Delivering the changes stays in the Changes tab, where there is room.
  */
+const NO_FILES: DiffFile[] = [];
+
 export function ChangesPanel({ thread }: ThreadContext) {
   const { loaded, error, loading, totals, reload } = useChanges(thread);
   const body = useRef<HTMLDivElement>(null);
+  const review = useReview(thread, loaded?.files ?? NO_FILES);
   const files = loaded?.changes.files ?? [];
 
   return (
@@ -48,8 +53,9 @@ export function ChangesPanel({ thread }: ThreadContext) {
           ) : (
             <ChangedFiles changes={loaded.changes} open={(path) => scrollToFile(body.current, path)} />
           )}
+          <ReviewBar thread={thread} review={review} compact />
           {loaded.truncated && <div className="notice warning">The diff is too large to show in full; it is cut short.</div>}
-          <DiffView files={loaded.files} />
+          <DiffView files={loaded.files} addon={review.addon} />
         </div>
       )}
     </div>

@@ -55,9 +55,13 @@ function restarted(previous: TokenUsage, next: TokenUsage): boolean {
   );
 }
 
-/** Tokens the context held in the last request: fresh input and what came from the cache. */
+/**
+ * Tokens the context holds. The bridge says when it can; reports from before it did
+ * are read as the last request's fresh and cached input, which is right for agents
+ * that count them apart and for a report of one request.
+ */
 export function contextUsed(usage: UsageSnapshot): number {
-  return usage.last.input_tokens + (usage.last.cached_input_tokens ?? 0);
+  return usage.context_used ?? usage.last.input_tokens + (usage.last.cached_input_tokens ?? 0);
 }
 
 /** Fold one event in. The timeline decides which events are new, so this does not. */

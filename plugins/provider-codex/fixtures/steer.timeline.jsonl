@@ -5,7 +5,7 @@
 {"type":"turn/started","turn_id":"turn_1"}
 {"type":"thread/status","status":"active"}
 {"type":"input/submitted","text":"Also end your answer with the word BANANA.","steered":true}
-{"type":"usage/updated","usage":{"total":{"input_tokens":23419,"output_tokens":1,"cached_input_tokens":12160},"last":{"input_tokens":23419,"output_tokens":1,"cached_input_tokens":12160},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":23419,"output_tokens":1,"cached_input_tokens":12160},"last":{"input_tokens":23419,"output_tokens":1,"cached_input_tokens":12160},"model_context_window":475000,"context_used":23420}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_1","text":"I"}
 {"type":"item/text/delta","item_id":"item_1","text":"’ll"}
@@ -28,7 +28,7 @@
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'cat note.txt'","cwd":"/work","output":"hello fixture\n","exit_code":0}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'cat other.txt'","cwd":"/work"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'cat other.txt'","cwd":"/work","output":"second file\n","exit_code":0}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":46852,"output_tokens":84,"cached_input_tokens":35456},"last":{"input_tokens":23433,"output_tokens":83,"cached_input_tokens":23296},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":46852,"output_tokens":84,"cached_input_tokens":35456},"last":{"input_tokens":23433,"output_tokens":83,"cached_input_tokens":23296},"model_context_window":475000,"context_used":23516}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_4","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_4","text":"1"}
 {"type":"item/text/delta","item_id":"item_4","text":"\n"}
@@ -93,6 +93,6 @@
 {"type":"item/text/delta","item_id":"item_4","text":"BAN"}
 {"type":"item/text/delta","item_id":"item_4","text":"ANA"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_4","status":"completed","type":"agentMessage","text":"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n\nBANANA"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":70397,"output_tokens":150,"cached_input_tokens":58752},"last":{"input_tokens":23545,"output_tokens":66,"cached_input_tokens":23296},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":70397,"output_tokens":150,"cached_input_tokens":58752},"last":{"input_tokens":23545,"output_tokens":66,"cached_input_tokens":23296},"model_context_window":475000,"context_used":23611}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}
 {"type":"thread/status","status":"idle"}

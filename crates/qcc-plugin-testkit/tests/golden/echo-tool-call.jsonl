@@ -16,5 +16,5 @@
 {"type":"item/started","turn_id":"turn_2","item":{"id":"item_4","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_4","text":"thanks"}
 {"type":"item/completed","turn_id":"turn_2","item":{"id":"item_4","status":"completed","type":"agentMessage","text":"thanks"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":1,"output_tokens":1},"last":{"input_tokens":1,"output_tokens":1}}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":1,"output_tokens":1},"last":{"input_tokens":1,"output_tokens":1},"context_used":1}}
 {"type":"turn/completed","turn_id":"turn_2","status":"completed"}

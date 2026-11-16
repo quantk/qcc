@@ -158,7 +158,8 @@ impl Session {
             output_tokens: self.output_tokens,
             cached_input_tokens: None,
         };
-        Delta::Usage(UsageSnapshot { total, last, model_context_window: None })
+        let context_used = Some(last.input_tokens);
+        Delta::Usage(UsageSnapshot { total, last, model_context_window: None, context_used })
     }
 
     fn request_id(&mut self) -> String {

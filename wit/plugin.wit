@@ -34,6 +34,11 @@ interface types {
     total: token-usage,
     last: token-usage,
     model-context-window: option<u64>,
+    /// Tokens the context holds now, when the agent says or the bridge can tell.
+    /// Token counts differ in meaning between agents (whether cached input is part
+    /// of input, whether a report covers one request or several), so only the
+    /// bridge knows how full the context is.
+    context-used: option<u64>,
   }
 
   /// Provider-side identity of an item within a session.

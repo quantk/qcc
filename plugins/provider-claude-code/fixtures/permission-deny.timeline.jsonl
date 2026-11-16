@@ -28,6 +28,6 @@
 {"type":"item/text/delta","item_id":"item_2","text":" such"}
 {"type":"item/text/delta","item_id":"item_2","text":" as Bash."}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"I didn't create `made.txt`. The Write call was declined, so I haven't retried it or tried another method. Not done.\n\nIf you want the file created, approve the Write again, or tell me to use a different method such as Bash."}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":551,"cached_input_tokens":50725},"last":{"input_tokens":4,"output_tokens":551,"cached_input_tokens":50725},"model_context_window":1000000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":551,"cached_input_tokens":50725},"last":{"input_tokens":2,"output_tokens":326,"cached_input_tokens":26501},"model_context_window":1000000,"context_used":26503}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}
 {"type":"thread/status","status":"idle"}

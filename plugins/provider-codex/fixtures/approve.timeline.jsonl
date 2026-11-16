@@ -16,10 +16,10 @@
 {"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_2","request":{"type":"approval","title":"May I run the requested command to create made.txt?","detail":"/run/current-system/sw/bin/zsh -lc 'touch made.txt'","options":[{"id":"accept","label":"Allow","kind":"allow"},{"id":"acceptForSession","label":"Allow for this session","kind":"allow"},{"id":"decline","label":"Deny","kind":"deny"}]}}
 {"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"accept"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"command","command":"/run/current-system/sw/bin/zsh -lc 'touch made.txt'","cwd":"/work","exit_code":0}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":22299,"output_tokens":146,"cached_input_tokens":12160},"last":{"input_tokens":22299,"output_tokens":146,"cached_input_tokens":12160},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":22299,"output_tokens":146,"cached_input_tokens":12160},"last":{"input_tokens":22299,"output_tokens":146,"cached_input_tokens":12160},"model_context_window":475000,"context_used":22445}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_3","text":"done"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"done"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":44772,"output_tokens":151,"cached_input_tokens":34304},"last":{"input_tokens":22473,"output_tokens":5,"cached_input_tokens":22144},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":44772,"output_tokens":151,"cached_input_tokens":34304},"last":{"input_tokens":22473,"output_tokens":5,"cached_input_tokens":22144},"model_context_window":475000,"context_used":22478}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}
 {"type":"thread/status","status":"idle"}

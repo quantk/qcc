@@ -1058,6 +1058,11 @@ export type UsageSnapshot = {
 	total: TokenUsage,
 	last: TokenUsage,
 	model_context_window?: number | null,
+	/**
+	 *  Tokens the context holds now. Only the bridge knows how its agent's counts
+	 *  add up to that; absent when it cannot tell.
+	 */
+	context_used?: number | null,
 };
 
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };

@@ -8,6 +8,6 @@
 {"type":"interaction/requested","interaction_id":"int_1","turn_id":"turn_1","item_id":"item_1","request":{"type":"approval","title":"Allow edit?","detail":"/work/made.txt","options":[{"id":"once","label":"Allow once","kind":"allow"},{"id":"always","label":"Always allow","kind":"allow"},{"id":"reject","label":"Reject","kind":"deny"}]}}
 {"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"reject"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"declined","type":"fileChange","path":"/work/made.txt","diff":"Index: /work/made.txt\n===================================================================\n--- /work/made.txt\n+++ /work/made.txt\n@@ -0,0 +1,1 @@\n+ok\n"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"last":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"model_context_window":200000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"last":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"model_context_window":200000,"context_used":17817}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}
 {"type":"thread/status","status":"idle"}

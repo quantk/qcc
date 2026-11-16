@@ -63,7 +63,7 @@
 {"type":"item/started","turn_id":"turn_2","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_2","text":"still here"}
 {"type":"item/completed","turn_id":"turn_2","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"still here"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"model_context_window":1000000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"model_context_window":1000000,"context_used":26663}}
 {"type":"turn/completed","turn_id":"turn_2","status":"completed"}
 {"type":"thread/status","status":"idle"}
 {"type":"session/ended","reason":"stopped"}
@@ -74,6 +74,6 @@
 {"type":"item/started","turn_id":"turn_3","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_3","text":"still here"}
 {"type":"item/completed","turn_id":"turn_3","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"still here"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"model_context_window":1000000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"model_context_window":1000000,"context_used":27122}}
 {"type":"turn/completed","turn_id":"turn_3","status":"completed"}
 {"type":"thread/status","status":"idle"}

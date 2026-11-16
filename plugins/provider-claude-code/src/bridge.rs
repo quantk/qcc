@@ -49,6 +49,9 @@ pub struct Bridge {
     /// Tool calls the user refused: they settle as declined, not failed.
     denied: HashSet<String>,
     total: TokenUsage,
+    /// The main agent's latest request of the running turn. Its input is what the
+    /// context holds; the turn's `result` sums every request and says nothing of that.
+    last_request: Option<TokenUsage>,
     interrupts: u32,
     /// MCP status requests sent, which names them.
     mcp_queries: u32,
@@ -64,6 +67,19 @@ fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
     match parent {
         Some(parent) => ItemKey::Anonymous(format!("{channel}:{parent}")),
         None => ItemKey::Anonymous(channel.to_owned()),
+    }
+}
+
+/// Claude's usage block in the one dialect: what was read from the cache and what was
+/// written to it both count as cached input.
+fn usage_of(usage: &Value) -> TokenUsage {
+    let tokens = |name: &str| usage.get(name).and_then(Value::as_u64).unwrap_or(0);
+    TokenUsage {
+        input_tokens: tokens("input_tokens"),
+        output_tokens: tokens("output_tokens"),
+        cached_input_tokens: Some(
+            tokens("cache_read_input_tokens") + tokens("cache_creation_input_tokens"),
+        ),
     }
 }
 
@@ -154,6 +170,7 @@ impl Bridge {
             approvals: HashMap::new(),
             denied: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
+            last_request: None,
             interrupts: 0,
             mcp_queries: 0,
             mcp_polls: 0,
@@ -243,6 +260,11 @@ impl Bridge {
     }
 
     fn stream_event(&mut self, event: &Value, parent: Option<&str>, deltas: &mut Vec<Delta>) {
+        // The closing count of a request, with all of its output.
+        if str_field(event, "type") == "message_delta" {
+            self.note_request(&event["usage"], parent);
+            return;
+        }
         if str_field(event, "type") != "content_block_delta" {
             return;
         }
@@ -421,25 +443,37 @@ impl Bridge {
         }
     }
 
+    /// Remember the usage of one of the main agent's requests. A sub-agent's requests
+    /// carry a context of their own, so they say nothing of how full this one is.
+    fn note_request(&mut self, usage: &Value, parent: Option<&str>) {
+        if parent.is_none() && usage.is_object() {
+            self.last_request = Some(usage_of(usage));
+        }
+    }
+
     /// The end of a turn.
     fn result(&mut self, message: &Value, deltas: &mut Vec<Delta>) {
-        let usage = &message["usage"];
-        let tokens = |name: &str| usage.get(name).and_then(Value::as_u64).unwrap_or(0);
-        let cached = tokens("cache_read_input_tokens") + tokens("cache_creation_input_tokens");
-        let last = TokenUsage {
-            input_tokens: tokens("input_tokens"),
-            output_tokens: tokens("output_tokens"),
-            cached_input_tokens: Some(cached),
-        };
-        // Claude reports per turn; the session total is ours to keep.
-        add_usage(&mut self.total, &last);
+        // Claude reports per turn, summed over every request of it; the session total
+        // is ours to keep.
+        let turn = usage_of(&message["usage"]);
+        add_usage(&mut self.total, &turn);
+        // Without a request seen (a turn that failed before one), the turn is the best
+        // there is.
+        let last = self.last_request.take().unwrap_or(turn);
         let model_context_window = message["modelUsage"]
             .as_object()
             .into_iter()
             .flat_map(|models| models.values())
             .filter_map(|model| model.get("contextWindow").and_then(Value::as_u64))
             .max();
-        deltas.push(Delta::Usage(UsageSnapshot { total: self.total, last, model_context_window }));
+        // Everything the last request sent, from the cache or not, is in the context.
+        let context_used = Some(last.input_tokens + last.cached_input_tokens.unwrap_or(0));
+        deltas.push(Delta::Usage(UsageSnapshot {
+            total: self.total,
+            last,
+            model_context_window,
+            context_used,
+        }));
 
         let failed = message.get("is_error").and_then(Value::as_bool).unwrap_or(false)
             || str_field(message, "subtype") != "success";
@@ -560,6 +594,7 @@ impl LineBridge for Bridge {
         match kind {
             "stream_event" => self.stream_event(&message["event"], parent, &mut output.deltas),
             "assistant" => {
+                self.note_request(&message["message"]["usage"], parent);
                 for block in message["message"]["content"].as_array().into_iter().flatten() {
                     self.assistant_block(block, parent, &mut output.deltas);
                 }
@@ -719,6 +754,38 @@ mod tests {
         assert_eq!((usage.total.input_tokens, usage.last.input_tokens), (4, 2));
         assert_eq!(usage.total.cached_input_tokens, Some(30));
         assert_eq!(usage.model_context_window, Some(1000));
+    }
+
+    #[test]
+    fn the_context_is_the_last_request_not_the_whole_turn() {
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("go");
+        let request = |cached: u64, parent: Value| {
+            json!({
+                "type": "assistant", "parent_tool_use_id": parent,
+                "message": {"content": [], "usage": {"input_tokens": 1, "output_tokens": 7,
+                    "cache_read_input_tokens": cached, "cache_creation_input_tokens": 0}},
+            })
+            .to_string()
+        };
+        bridge.on_line(&request(100, Value::Null));
+        bridge.on_line(&request(200, Value::Null));
+        // A sub-agent's request has a context of its own.
+        bridge.on_line(&request(9, json!("toolu_1")));
+        // The result sums all requests: 100 + 200 + 9 cached, and more.
+        let Delta::Usage(usage) = &bridge.on_line(&result(json!({}))).deltas[0] else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.last.cached_input_tokens, Some(200));
+        assert_eq!((usage.last.input_tokens, usage.last.output_tokens), (1, 7));
+        assert_eq!(usage.total.cached_input_tokens, Some(15));
+
+        // The next turn starts without a request of its own seen: the result stands in.
+        bridge.prompt("again");
+        let Delta::Usage(usage) = &bridge.on_line(&result(json!({}))).deltas[0] else {
+            panic!("expected usage");
+        };
+        assert_eq!(usage.last.cached_input_tokens, Some(15));
     }
 
     #[test]

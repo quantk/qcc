@@ -16,4 +16,8 @@ pub struct UsageSnapshot {
     pub last: TokenUsage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_context_window: Option<u64>,
+    /// Tokens the context holds now. Only the bridge knows how its agent's counts
+    /// add up to that; absent when it cannot tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_used: Option<u64>,
 }

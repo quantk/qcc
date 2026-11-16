@@ -7,6 +7,6 @@
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_1","text":"pong"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"pong"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"model_context_window":1000000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"model_context_window":1000000,"context_used":22665}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}
 {"type":"thread/status","status":"idle"}

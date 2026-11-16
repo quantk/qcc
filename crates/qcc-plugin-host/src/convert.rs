@@ -141,6 +141,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                 total: token_usage(u.total),
                 last: token_usage(u.last),
                 model_context_window: u.model_context_window,
+                context_used: u.context_used,
             },
         },
         wit::Delta::InteractionRequest(ask) => Delta::InteractionRequest {

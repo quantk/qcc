@@ -240,7 +240,7 @@
 {"type":"item/text/delta","item_id":"item_2","text":"still"}
 {"type":"item/text/delta","item_id":"item_2","text":" here"}
 {"type":"item/completed","turn_id":"turn_2","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"still here"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"last":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"last":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"model_context_window":475000,"context_used":28259}}
 {"type":"turn/completed","turn_id":"turn_2","status":"completed"}
 {"type":"thread/status","status":"idle"}
 {"type":"session/ended","reason":"stopped"}
@@ -248,11 +248,11 @@
 {"type":"session/started","provider_session":"01a1de77-21a3-7032-9431-eaa2a173f987","resumed":true}
 {"type":"turn/started","turn_id":"turn_3"}
 {"type":"thread/status","status":"active"}
-{"type":"usage/updated","usage":{"total":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"last":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"last":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"model_context_window":475000,"context_used":28259}}
 {"type":"item/started","turn_id":"turn_3","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_3","text":"still"}
 {"type":"item/text/delta","item_id":"item_3","text":" here"}
 {"type":"item/completed","turn_id":"turn_3","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"still here"}}
-{"type":"usage/updated","usage":{"total":{"input_tokens":61304,"output_tokens":12,"cached_input_tokens":50176},"last":{"input_tokens":33051,"output_tokens":6,"cached_input_tokens":28032},"model_context_window":475000}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":61304,"output_tokens":12,"cached_input_tokens":50176},"last":{"input_tokens":33051,"output_tokens":6,"cached_input_tokens":28032},"model_context_window":475000,"context_used":33057}}
 {"type":"turn/completed","turn_id":"turn_3","status":"completed"}
 {"type":"thread/status","status":"idle"}

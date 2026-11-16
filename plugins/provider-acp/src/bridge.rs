@@ -120,6 +120,9 @@ pub struct Bridge {
     refused: HashSet<String>,
     total: TokenUsage,
     context_window: Option<u64>,
+    /// How much of the context the agent last said was taken. The usage of a prompt
+    /// sums every request it made, so it cannot tell.
+    context_used: Option<u64>,
     /// What the session must know before its first prompt: what qcc tells the agent
     /// at the start of a session (its skills, the project's other folders).
     /// ACP has no system prompt, so it goes in front of the first prompt of a fresh
@@ -237,6 +240,7 @@ impl Bridge {
             refused: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             context_window: None,
+            context_used: None,
             context,
             mcp_servers,
             mcp_param: json!([]),
@@ -485,6 +489,7 @@ impl Bridge {
                 total: self.total,
                 last,
                 model_context_window: self.context_window,
+                context_used: self.context_used,
             }));
         }
         match str_field(&result, "stopReason") {
@@ -545,6 +550,9 @@ impl Bridge {
             "usage_update" => {
                 if let Some(size) = update.get("size").and_then(Value::as_u64) {
                     self.context_window = Some(size);
+                }
+                if let Some(used) = update.get("used").and_then(Value::as_u64) {
+                    self.context_used = Some(used);
                 }
             }
             // Catalogues and echoes the timeline has no use for.

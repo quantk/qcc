@@ -559,10 +559,19 @@ impl Bridge {
                     cached_input_tokens: part.get("cachedInputTokens").and_then(Value::as_u64),
                 };
                 // Codex keeps exact cumulative totals; both go through as reported.
+                let last = breakdown(&usage["last"]);
+                // Its cached input is part of its input, and what the last request
+                // read and wrote is what the next one carries: Codex itself counts
+                // the context as the last request's total.
+                let context_used = usage["last"]
+                    .get("totalTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(last.input_tokens + last.output_tokens);
                 deltas.push(Delta::Usage(UsageSnapshot {
                     total: breakdown(&usage["total"]),
-                    last: breakdown(&usage["last"]),
+                    last,
                     model_context_window: usage.get("modelContextWindow").and_then(Value::as_u64),
+                    context_used: Some(context_used),
                 }));
             }
             "turn/completed" => {

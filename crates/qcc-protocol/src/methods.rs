@@ -6,6 +6,7 @@ use qcc_domain::{
     AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo, InteractionId,
     InteractionResolution, McpTransport, ModelInfo, PermissionMode, Project, ProjectId, ProviderId,
     ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState, UiViewInfo,
+    UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -531,6 +532,19 @@ pub struct ThreadSetParentParams {
 }
 
 // ----- projects ---------------------------------------------------------------------
+
+method!(
+    /// What every thread spent and how its turns went, hour by hour, oldest first,
+    /// archived threads included. Hours with nothing in them are left out.
+    UsageHistory, "usage.history", Empty => UsageHistoryResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UsageHistoryResult {
+    /// How long each bucket is, in milliseconds.
+    pub bucket_ms: u64,
+    pub buckets: Vec<UsageBucket>,
+}
 
 method!(
     /// Every project, oldest first.

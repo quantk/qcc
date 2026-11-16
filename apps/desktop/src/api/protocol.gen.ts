@@ -636,6 +636,8 @@ export type Thread = {
 	 *  client compares with what the user has seen.
 	 */
 	last_turn_at?: number | null,
+	/**  Tokens spent, how full the context is, how turns ended. */
+	usage?: ThreadUsage,
 	/**
 	 *  The MCP servers of the current session as its agent reports them, in the
 	 *  order they were first reported. Empty until it says and for agents that do not.
@@ -938,6 +940,32 @@ export type ThreadUpdatedNotification = {
 	thread: Thread,
 };
 
+/**
+ *  What a thread has spent and how it is doing, over all its sessions: the numbers
+ *  worth seeing without reading its timeline. Part of the thread's projection.
+ */
+export type ThreadUsage = {
+	/**  Tokens every session of the thread spent, in the providers' own counts. */
+	spent: TokenUsage,
+	/**
+	 *  The current session's total as last reported, which the next report counts
+	 *  on from.
+	 */
+	session: TokenUsage,
+	/**
+	 *  Tokens the context holds, as the bridge last said. Absent before it said and
+	 *  after the conversation started afresh.
+	 */
+	context_used?: number | null,
+	context_window?: number | null,
+	/**  Turns that ended, by how. */
+	turns_completed: number,
+	turns_failed: number,
+	turns_interrupted: number,
+	/**  Milliseconds spent in turns that ended. */
+	working_ms: number,
+};
+
 export type ThreadWaitParams = {
 	thread_ids: ThreadId[],
 	/**  Return when any of them settles instead of all. */
@@ -1053,6 +1081,25 @@ export type UiViewInfo = {
 	web?: string | null,
 };
 
+/**  What one thread spent and how its turns went in one span of time. */
+export type UsageBucket = {
+	thread_id: ThreadId,
+	/**  Start of the span, in milliseconds since the Unix epoch. */
+	hour: number,
+	spent: TokenUsage,
+	turns_completed: number,
+	turns_failed: number,
+	turns_interrupted: number,
+	/**  Time in turns that ended within the span. */
+	working_ms: number,
+};
+
+export type UsageHistoryResult = {
+	/**  How long each bucket is, in milliseconds. */
+	bucket_ms: number,
+	buckets: UsageBucket[],
+};
+
 /**  The one usage dialect: cumulative session total plus the last request. */
 export type UsageSnapshot = {
 	total: TokenUsage,
@@ -1091,6 +1138,7 @@ export type Methods = {
 	"thread.set_parent": { params: ThreadSetParentParams; result: ThreadResult },
 	"thread.rename": { params: ThreadRenameParams; result: ThreadResult },
 	"project.list": { params: Empty; result: ProjectListResult },
+	"usage.history": { params: Empty; result: UsageHistoryResult },
 	"project.create": { params: ProjectCreateParams; result: ProjectResult },
 	"project.update": { params: ProjectUpdateParams; result: ProjectResult },
 	"project.delete": { params: ProjectDeleteParams; result: Empty },

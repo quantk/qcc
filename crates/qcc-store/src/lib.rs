@@ -10,7 +10,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
     EventPayload, Item, ItemShape, Project, ProjectId, Role, Thread, ThreadEvent, ThreadId,
-    TranscriptEntry,
+    ThreadUsage, TranscriptEntry, UsageBucket,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -56,7 +56,22 @@ const MIGRATIONS: &[&str] = &[
         data        TEXT NOT NULL
     ) STRICT;
 ",
+    "
+    CREATE TABLE meta (
+        key         TEXT PRIMARY KEY,
+        value       INTEGER NOT NULL
+    ) STRICT;
+",
 ];
+
+/// The version of what [`Thread::apply`] folds into a projection. Raise it when the
+/// fold learns something new from old events: on open, every stored projection is
+/// then folded again from the journal, so threads made before carry it too.
+const PROJECTION_VERSION: i64 = 1;
+
+/// The span of one bucket of [`Store::usage_history`]: an hour, so a client can
+/// group them into days of its own time zone.
+pub const USAGE_BUCKET_MS: u64 = 3_600_000;
 
 pub struct Store {
     conn: Mutex<Connection>,
@@ -86,7 +101,72 @@ impl Store {
             tx.pragma_update(None, "user_version", index as u32 + 1)?;
             tx.commit()?;
         }
+        let projected: i64 = conn
+            .query_row("SELECT value FROM meta WHERE key = 'projection'", [], |row| row.get(0))
+            .optional()?
+            .unwrap_or(0);
+        if projected < PROJECTION_VERSION {
+            let tx = conn.transaction()?;
+            rebuild_projections(&tx)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('projection', ?1)",
+                [PROJECTION_VERSION],
+            )?;
+            tx.commit()?;
+        }
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// What every thread spent and how its turns went, hour by hour, oldest first;
+    /// hours with nothing in them are left out. Folded from the journal with the
+    /// same [`ThreadUsage`] fold as the projection, so the hours of a thread add up
+    /// to its projection's numbers.
+    pub fn usage_history(&self) -> Result<Vec<UsageBucket>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT thread_id, ts, payload FROM events \
+             WHERE json_extract(payload, '$.type') IN \
+                   ('usage/updated', 'turn/started', 'turn/completed', 'thread/reset') \
+             ORDER BY thread_id, seq",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+        })?;
+        let mut buckets: Vec<UsageBucket> = Vec::new();
+        let mut thread: Option<(String, ThreadUsage, Option<u64>)> = None;
+        for row in rows {
+            let (thread_id, ts, payload) = row?;
+            let ts = ts.cast_unsigned();
+            if thread.as_ref().is_none_or(|(id, ..)| *id != thread_id) {
+                thread = Some((thread_id.clone(), ThreadUsage::default(), None));
+            }
+            let Some((_, usage, turn_started)) = thread.as_mut() else { continue };
+            let before = *usage;
+            match decode::<EventPayload>(&payload)? {
+                EventPayload::UsageUpdated { usage: report } => {
+                    usage.report(&report);
+                }
+                EventPayload::TurnStarted { .. } => *turn_started = Some(ts),
+                EventPayload::TurnCompleted { status, .. } => {
+                    usage.turn_ended(status, turn_started.take(), ts);
+                }
+                EventPayload::ConversationReset => usage.reset(),
+                _ => {}
+            }
+            let change =
+                UsageBucket::between(&thread_id, ts - ts % USAGE_BUCKET_MS, &before, usage);
+            if change.is_empty() {
+                continue;
+            }
+            match buckets.last_mut() {
+                Some(last) if last.thread_id.as_str() == thread_id && last.hour == change.hour => {
+                    last.add(&change);
+                }
+                _ => buckets.push(change),
+            }
+        }
+        buckets.sort_by_key(|bucket| bucket.hour);
+        Ok(buckets)
     }
 
     /// Append events and update the projections atomically: either the whole batch
@@ -271,6 +351,46 @@ fn decode<T: serde::de::DeserializeOwned>(text: &str) -> Result<T> {
     serde_json::from_str(text).map_err(StoreError::Corrupt)
 }
 
+/// Fold every thread's projection again from its journal.
+fn rebuild_projections(tx: &Transaction<'_>) -> Result<()> {
+    let ids: Vec<String> = {
+        let mut statement = tx.prepare("SELECT id FROM threads")?;
+        statement.query_map([], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?
+    };
+    let mut statement =
+        tx.prepare("SELECT seq, ts, payload FROM events WHERE thread_id = ?1 ORDER BY seq")?;
+    for id in ids {
+        let thread_id = ThreadId::new(id.as_str());
+        let mut thread: Option<Thread> = None;
+        let rows = statement.query_map([id.as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+        })?;
+        for row in rows {
+            let (seq, ts, payload) = row?;
+            let event = ThreadEvent {
+                thread_id: thread_id.clone(),
+                seq: seq.cast_unsigned(),
+                ts: ts.cast_unsigned(),
+                payload: decode(&payload)?,
+            };
+            if thread.is_none()
+                && let EventPayload::ThreadCreated { thread: created } = &event.payload
+            {
+                let mut created = created.as_ref().clone();
+                created.last_seq = 0;
+                thread = Some(created);
+            }
+            // A journal that does not start with its creation keeps the stored projection.
+            let Some(thread) = thread.as_mut() else { break };
+            thread.apply(&event);
+        }
+        if let Some(thread) = thread {
+            save_thread(tx, &thread)?;
+        }
+    }
+    Ok(())
+}
+
 fn load_thread(tx: &Transaction<'_>, id: &ThreadId) -> Result<Option<Thread>> {
     let data: Option<String> = tx
         .query_row("SELECT data FROM threads WHERE id = ?1", [id.as_str()], |row| row.get(0))
@@ -443,5 +563,84 @@ mod tests {
         assert_eq!(store.events(&"b".into(), 0).unwrap().len(), 7);
         // Nothing follows a position past the end, however far past.
         assert_eq!(store.events(&"b".into(), u64::MAX).unwrap().len(), 0);
+    }
+
+    /// A turn of `a` that spends tokens, an hour after the scenario.
+    fn spending(supervisor: &mut Supervisor, ts: u64) -> Vec<ThreadEvent> {
+        let engine = supervisor.engine(&"a".into()).unwrap();
+        let total = qcc_domain::TokenUsage {
+            input_tokens: 100,
+            output_tokens: 7,
+            cached_input_tokens: None,
+        };
+        let mut events = engine.submit_input("more".to_owned().into(), ts);
+        events.extend(engine.apply_deltas([Delta::TurnOpen], ts));
+        events.extend(engine.apply_deltas(
+            [
+                Delta::Usage {
+                    usage: qcc_domain::UsageSnapshot {
+                        total,
+                        last: total,
+                        model_context_window: Some(1000),
+                        context_used: Some(100),
+                    },
+                },
+                Delta::TurnBoundary {
+                    status: TurnStatus::Failed,
+                    error: None,
+                    claim_if_idle: false,
+                },
+            ],
+            ts + 500,
+        ));
+        events
+    }
+
+    #[test]
+    fn spending_is_projected_and_kept_by_the_hour() {
+        let store = Store::open_in_memory().unwrap();
+        let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
+        store.append(&scenario(&mut supervisor)).unwrap();
+        store.append(&spending(&mut supervisor, USAGE_BUCKET_MS + 40)).unwrap();
+
+        let a = store.thread(&"a".into()).unwrap().unwrap();
+        assert_eq!(Some(&a), supervisor.thread(&"a".into()), "projection drifted");
+        assert_eq!(a.usage.spent.input_tokens, 100);
+        assert_eq!((a.usage.context_used, a.usage.context_window), (Some(100), Some(1000)));
+        assert_eq!((a.usage.turns_completed, a.usage.turns_failed), (1, 1));
+
+        let history = store.usage_history().unwrap();
+        // The scenario's turn in the first hour, the spending in the second; `b` is
+        // still in its first turn.
+        let hours: Vec<_> = history.iter().map(|b| (b.thread_id.as_str(), b.hour)).collect();
+        assert_eq!(hours, [("a", 0), ("a", USAGE_BUCKET_MS)]);
+        assert_eq!(history[1].spent.input_tokens, 100);
+        assert_eq!((history[1].turns_failed, history[1].working_ms), (1, 500));
+    }
+
+    #[test]
+    fn projections_made_by_an_older_fold_are_folded_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("qcc.db");
+        let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
+        let store = Store::open(&path).unwrap();
+        store.append(&scenario(&mut supervisor)).unwrap();
+        store.append(&spending(&mut supervisor, 100)).unwrap();
+        // As an older build left it: a projection without usage, and no version.
+        {
+            let mut conn = store.lock();
+            let tx = conn.transaction().unwrap();
+            let mut stale = load_thread(&tx, &"a".into()).unwrap().unwrap();
+            stale.usage = ThreadUsage::default();
+            save_thread(&tx, &stale).unwrap();
+            tx.execute("DELETE FROM meta", []).unwrap();
+            tx.commit().unwrap();
+        }
+        drop(store);
+
+        let store = Store::open(&path).unwrap();
+        for id in ["a", "b"] {
+            assert_eq!(store.thread(&id.into()).unwrap().as_ref(), supervisor.thread(&id.into()));
+        }
     }
 }

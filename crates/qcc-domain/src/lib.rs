@@ -35,4 +35,4 @@ pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,
     ThreadEnvironment, ThreadState, ThreadStatus, TranscriptEntry, TurnStatus,
 };
-pub use usage::{TokenUsage, UsageSnapshot};
+pub use usage::{ThreadUsage, TokenUsage, UsageBucket, UsageSnapshot};

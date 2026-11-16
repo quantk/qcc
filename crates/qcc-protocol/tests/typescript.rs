@@ -51,6 +51,7 @@ fn generate() -> String {
         .method::<ThreadSetParent>()
         .method::<ThreadRename>()
         .method::<ProjectList>()
+        .method::<UsageHistory>()
         .method::<ProjectCreate>()
         .method::<ProjectUpdate>()
         .method::<ProjectDelete>()

@@ -14,7 +14,7 @@ use qcc_protocol::methods::{
     ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
     ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
     UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams,
+    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -72,6 +72,17 @@ impl Core {
             ThreadSetProject::NAME => {
                 let result =
                     params::<ThreadSetProject>(raw).and_then(|p| self.thread_set_project(p));
+                responder.reply(result);
+            }
+            UsageHistory::NAME => {
+                let result = self
+                    .store
+                    .usage_history()
+                    .map(|buckets| UsageHistoryResult {
+                        bucket_ms: qcc_store::USAGE_BUCKET_MS,
+                        buckets,
+                    })
+                    .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()));
                 responder.reply(result);
             }
             ProjectList::NAME => {

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use qcc_domain::{
     EventPayload, PermissionMode, ProjectId, ProviderId, Thread, ThreadEnvironment, ThreadEvent,
-    ThreadId, ThreadStatus,
+    ThreadId, ThreadStatus, ThreadUsage,
 };
 
 use crate::engine::{ThreadEngine, sorted};
@@ -65,6 +65,7 @@ impl NewThread {
             turn_started_at: None,
             last_turn_status: None,
             last_turn_at: None,
+            usage: ThreadUsage::default(),
             archived: false,
             handover: false,
         }

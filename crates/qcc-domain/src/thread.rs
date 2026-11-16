@@ -5,6 +5,7 @@ use crate::ids::{InteractionId, ProjectId, ProviderId, ThreadId};
 use crate::interaction::InteractionRequest;
 use crate::item::{Item, ItemShape, ItemStatus};
 use crate::provider::{McpServerStatus, PermissionMode};
+use crate::usage::ThreadUsage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
@@ -223,6 +224,9 @@ pub struct Thread {
     /// client compares with what the user has seen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_at: Option<u64>,
+    /// Tokens spent, how full the context is, how turns ended.
+    #[serde(default, skip_serializing_if = "ThreadUsage::is_empty")]
+    pub usage: ThreadUsage,
     /// The MCP servers of the current session as its agent reports them, in the
     /// order they were first reported. Empty until it says and for agents that do not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -324,7 +328,7 @@ impl Thread {
                 self.last_turn_status = None;
             }
             EventPayload::TurnCompleted { status, .. } => {
-                self.turn_started_at = None;
+                self.usage.turn_ended(*status, self.turn_started_at.take(), event.ts);
                 self.last_turn_status = Some(*status);
                 self.last_turn_at = Some(event.ts);
             }
@@ -358,7 +362,11 @@ impl Thread {
                 self.skills_enabled.clone_from(enabled);
                 self.skills_disabled.clone_from(disabled);
             }
+            EventPayload::UsageUpdated { usage } => {
+                self.usage.report(usage);
+            }
             EventPayload::ConversationReset => {
+                self.usage.reset();
                 self.provider_session = None;
                 self.handover = false;
                 self.conversations += 1;
@@ -411,6 +419,7 @@ mod tests {
             turn_started_at: None,
             last_turn_status: None,
             last_turn_at: None,
+            usage: ThreadUsage::default(),
             archived: false,
             handover: false,
         }

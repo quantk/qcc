@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="320" viewBox="0 0 1200 320" role="img" aria-labelledby="title desc">
+  <title id="title">qcc</title>
+  <desc id="desc">A control center for coding agents: Claude Code, Codex and opencode side by side.</desc>
+  <defs>
+    <radialGradient id="glow" cx="0.2" cy="0.45" r="0.6">
+      <stop offset="0" stop-color="#eaa953" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#eaa953" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3bf72"/>
+      <stop offset="1" stop-color="#e09a3e"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>
+    </pattern>
+    <style>
+      .title { font: 700 96px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif; fill: #f2f3f6; letter-spacing: -2px; }
+      .tag { font: 500 30px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif; fill: #a3a9b8; }
+      .chip { font: 600 20px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif; fill: #e2e4e9; }
+      .state { font: 500 20px ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, Roboto, sans-serif; }
+      .pulse { animation: pulse 1.6s ease-in-out infinite; }
+      .pulse2 { animation: pulse 1.6s ease-in-out 0.8s infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    </style>
+  </defs>
+
+  <rect width="1200" height="320" rx="24" fill="#15171c"/>
+  <rect width="1200" height="320" rx="24" fill="url(#grid)"/>
+  <rect width="1200" height="320" rx="24" fill="url(#glow)"/>
+  <rect x="0.5" y="0.5" width="1199" height="319" rx="23.5" fill="none" stroke="#2c313c"/>
+
+  <!-- The app's mark: a ring with a tail. -->
+  <g transform="translate(118 160)">
+    <rect x="-82" y="-82" width="164" height="164" rx="36" fill="#1d212a" stroke="#2c313c"/>
+    <circle r="46" fill="none" stroke="url(#ring)" stroke-width="18"/>
+    <path d="M24 24 L52 52" stroke="url(#ring)" stroke-width="18" stroke-linecap="butt"/>
+  </g>
+
+  <text x="250" y="150" class="title">qcc</text>
+  <text x="254" y="200" class="tag">A control center for coding agents</text>
+
+  <!-- Agents at work, in the app's colors for their states. -->
+  <g transform="translate(254 236)">
+    <rect width="260" height="44" rx="22" fill="#1d212a" stroke="#3a2d18"/>
+    <circle cx="24" cy="22" r="7" fill="#eaa953" class="pulse"/>
+    <text x="42" y="29" class="chip">Claude Code</text>
+    <text x="172" y="29" class="state" fill="#eaa953">working</text>
+  </g>
+  <g transform="translate(530 236)">
+    <rect width="230" height="44" rx="22" fill="#1d212a" stroke="#1f3350"/>
+    <circle cx="24" cy="22" r="7" fill="#74aaf2" class="pulse2"/>
+    <text x="42" y="29" class="chip">Codex</text>
+    <text x="114" y="29" class="state" fill="#74aaf2">needs you</text>
+  </g>
+  <g transform="translate(776 236)">
+    <rect width="210" height="44" rx="22" fill="#1d212a" stroke="#17301f"/>
+    <circle cx="24" cy="22" r="7" fill="#6cc083"/>
+    <text x="42" y="29" class="chip">opencode</text>
+    <text x="146" y="29" class="state" fill="#6cc083">done</text>
+  </g>
+
+  <!-- A small tree of agents on the right: a lead and its children. -->
+  <g transform="translate(1040 70)" stroke="#3b4150" stroke-width="2" fill="none">
+    <path d="M20 26 V150 M20 66 H52 M20 108 H52 M20 150 H52"/>
+  </g>
+  <g transform="translate(1040 70)">
+    <circle cx="20" cy="20" r="11" fill="#eaa953"/>
+    <circle cx="66" cy="66" r="9" fill="#6cc083"/>
+    <circle cx="66" cy="108" r="9" fill="#eaa953" class="pulse"/>
+    <circle cx="66" cy="150" r="9" fill="#74aaf2" class="pulse2"/>
+  </g>
+</svg>

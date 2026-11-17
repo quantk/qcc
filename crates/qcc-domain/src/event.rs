@@ -186,6 +186,11 @@ pub enum EventPayload {
     #[serde(rename = "usage/updated")]
     UsageUpdated { usage: UsageSnapshot },
 
+    /// What the context window of the session holds, part by part. Replaces the
+    /// breakdown before.
+    #[serde(rename = "context/usage")]
+    ContextUsageUpdated { context: crate::context::ContextUsage },
+
     /// The agent summed up the conversation so far to make room in its context.
     #[serde(rename = "session/compacted")]
     ContextCompacted { compaction: crate::delta::Compaction },

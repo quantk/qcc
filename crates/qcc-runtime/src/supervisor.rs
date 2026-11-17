@@ -66,6 +66,7 @@ impl NewThread {
             last_turn_status: None,
             last_turn_at: None,
             usage: ThreadUsage::default(),
+            context: None,
             archived: false,
             handover: false,
         }

@@ -191,6 +191,48 @@ interface types {
     tokens-after: option<u64>,
   }
 
+  /// What a part of the context window is: only `used` parts are in the context.
+  enum context-kind {
+    used,
+    /// What is left of the window.
+    free,
+    /// Room the agent keeps for compacting.
+    buffer,
+    /// Known to the agent but loaded only when needed; not in the window now.
+    deferred,
+  }
+
+  /// One part of the context window.
+  record context-category {
+    /// Well-known ids: `system_prompt`, `system_tools`, `mcp_tools`, `memory_files`,
+    /// `skills`, `custom_agents`, `messages`, `autocompact_buffer`, `free_space`.
+    id: string,
+    /// How the agent names the part.
+    name: string,
+    tokens: u64,
+    kind: context-kind,
+  }
+
+  /// One thing within a part: a memory file, an MCP tool, a skill.
+  record context-entry {
+    /// The id of the part it belongs to.
+    category: string,
+    name: string,
+    tokens: u64,
+  }
+
+  /// What the context window holds, part by part.
+  record context-usage {
+    /// Tokens the context holds: the `used` parts together.
+    used: u64,
+    window: option<u64>,
+    /// The parts are reckoned by the bridge rather than counted by the agent.
+    estimated: bool,
+    categories: list<context-category>,
+    /// What the larger parts are made of, largest first within a part.
+    entries: list<context-entry>,
+  }
+
   variant delta {
     /// The provider took a prompt. Items never open a turn; only this does.
     turn-open,
@@ -212,6 +254,9 @@ interface types {
     /// How one MCP server of the session is doing now, the agent's own servers
     /// included. A fresh session (`session-reset`) starts with none known.
     mcp-status(mcp-status),
+    /// What the context window holds now, part by part. Only from a provider that
+    /// declares `context-usage`.
+    context-usage(context-usage),
     /// The agent compacted its context, asked to (`compact`) or on its own.
     context-compacted(compaction),
     provider-error(string),
@@ -250,6 +295,9 @@ interface types {
     compact: bool,
     /// The provider can tell which skills its agent finds by itself (`list-skills`).
     list-skills: bool,
+    /// The provider reports what its agent's context window holds, part by part
+    /// (`context-usage` deltas).
+    context-usage: bool,
   }
 
   record provider-info {

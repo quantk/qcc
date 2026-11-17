@@ -243,6 +243,9 @@ impl DeltaAssembler {
                 out.push(EventPayload::ItemCompleted { turn_id, item });
             }
             Delta::Usage { usage } => out.push(EventPayload::UsageUpdated { usage }),
+            Delta::ContextUsage { context } => {
+                out.push(EventPayload::ContextUsageUpdated { context });
+            }
             Delta::ContextCompacted { compaction } => {
                 out.push(EventPayload::ContextCompacted { compaction });
             }

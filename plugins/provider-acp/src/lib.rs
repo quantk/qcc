@@ -65,6 +65,7 @@ impl Provider for AcpProvider {
                 // The protocol's command list mixes skills with commands, and
                 // `opencode debug skill` loses output written into a pipe.
                 list_skills: false,
+                context_usage: false,
             },
         }
     }

@@ -12,7 +12,9 @@
 //! * a tool call is a `tool_use` block, its outcome a `tool_result` block in a `user`
 //!   message;
 //! * with `--permission-prompt-tool stdio` a permission prompt is a `control_request`
-//!   of subtype `can_use_tool`, answered by a `control_response`.
+//!   of subtype `can_use_tool`, answered by a `control_response`;
+//! * a `control_request` of subtype `get_context_usage` is answered with what
+//!   `/context` shows, at any time and without a request to the model.
 
 use std::collections::{HashMap, HashSet};
 
@@ -27,6 +29,11 @@ use serde_json::{Value, json};
 const MCP_QUERY: &str = "qcc-mcp-";
 /// The prefix of the ids of our requests that turn a server on or off.
 const MCP_SWITCH: &str = "qcc-switch-";
+/// The prefix of the ids of our context breakdown requests.
+const CONTEXT_QUERY: &str = "qcc-context-";
+/// Entries kept per part of the context: the largest, which are the ones worth
+/// knowing about.
+const CONTEXT_ENTRIES: usize = 20;
 /// How often, and for how long, servers still connecting are asked after.
 const MCP_POLL_MS: u64 = 1000;
 const MCP_POLLS: u32 = 30;
@@ -60,6 +67,8 @@ pub struct Bridge {
     /// Switches sent and not yet answered, by request id: the server and whether it
     /// was being turned on.
     mcp_switches: HashMap<String, (String, bool)>,
+    /// Context breakdown requests sent, which names them.
+    context_queries: u32,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -175,6 +184,7 @@ impl Bridge {
             mcp_queries: 0,
             mcp_polls: 0,
             mcp_switches: HashMap::new(),
+            context_queries: 0,
         }
     }
 
@@ -400,7 +410,30 @@ impl Bridge {
         Output { writes: vec![switch.to_string(), self.mcp_status_request()], ..Output::default() }
     }
 
+    /// Ask the agent what its context window holds. `summary` answers from the
+    /// last request's usage and local counts, without asking the model anything.
+    pub fn query_context(&mut self) -> Output {
+        Output { writes: vec![self.context_request()], ..Output::default() }
+    }
+
+    fn context_request(&mut self) -> String {
+        self.context_queries += 1;
+        let request_id = format!("{CONTEXT_QUERY}{}", self.context_queries);
+        json!({"type": "control_request", "request_id": request_id,
+               "request": {"subtype": "get_context_usage", "detail": "summary"}})
+        .to_string()
+    }
+
     fn control_response(&mut self, response: &Value, output: &mut Output) {
+        if str_field(response, "request_id").starts_with(CONTEXT_QUERY) {
+            // An agent too old to tell answers with an error, which is ignored.
+            if str_field(response, "subtype") == "success"
+                && let Some(context) = context_usage(&response["response"])
+            {
+                output.deltas.push(Delta::ContextUsage(context));
+            }
+            return;
+        }
         if let Some((name, enabled)) = self.mcp_switches.remove(str_field(response, "request_id")) {
             if str_field(response, "subtype") != "success" {
                 let verb = if enabled { "on" } else { "off" };
@@ -612,6 +645,8 @@ impl LineBridge for Bridge {
                 // A turn may have started, lost or signed in to a server.
                 self.mcp_polls = 0;
                 output.writes.push(self.mcp_status_request());
+                // The turn filled the context; `/compact` emptied it.
+                output.writes.push(self.context_request());
             }
             // Bookkeeping the timeline has no use for.
             "rate_limit_event" | "keep_alive" => {}
@@ -628,6 +663,98 @@ impl LineBridge for Bridge {
     fn on_wake(&mut self) -> Output {
         self.query_mcp()
     }
+}
+
+/// The answer to `get_context_usage` in the one dialect, or nothing if it is not one.
+fn context_usage(response: &Value) -> Option<ContextUsage> {
+    let categories: Vec<ContextCategory> = response["categories"]
+        .as_array()?
+        .iter()
+        .filter_map(|category| {
+            let name = category["name"].as_str()?.to_owned();
+            let id = match category["id"].as_str() {
+                Some(id) => id.to_owned(),
+                None => name.to_lowercase().replace(' ', "_"),
+            };
+            let kind = match category["kind"].as_str() {
+                Some("free") => ContextKind::Free,
+                Some("buffer") => ContextKind::Buffer,
+                Some("deferred") => ContextKind::Deferred,
+                Some(_) => ContextKind::Used,
+                // Older agents do not say; their ids and flags do.
+                None if id == "free_space" => ContextKind::Free,
+                None if id.ends_with("_buffer") => ContextKind::Buffer,
+                None if category["isDeferred"] == true => ContextKind::Deferred,
+                None => ContextKind::Used,
+            };
+            Some(ContextCategory { id, name, tokens: category["tokens"].as_u64()?, kind })
+        })
+        .collect();
+    let used = categories
+        .iter()
+        .filter(|category| category.kind == ContextKind::Used)
+        .map(|category| category.tokens)
+        .sum();
+    let mut entries = Vec::new();
+    let mut part = |category: &str, list: &Value, name: &dyn Fn(&Value) -> Option<String>| {
+        let mut found: Vec<ContextEntry> = list
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|entry| {
+                Some(ContextEntry {
+                    category: category.to_owned(),
+                    name: name(entry)?,
+                    tokens: entry["tokens"].as_u64()?,
+                })
+            })
+            .filter(|entry| entry.tokens > 0)
+            .collect();
+        found.sort_by(|a, b| b.tokens.cmp(&a.tokens).then_with(|| a.name.cmp(&b.name)));
+        entries.extend(found.into_iter().take(CONTEXT_ENTRIES));
+    };
+    let field = |name: &'static str| move |entry: &Value| entry[name].as_str().map(str::to_owned);
+    part("system_tools", &response["systemTools"], &field("name"));
+    part("memory_files", &response["memoryFiles"], &field("path"));
+    part("skills", &response["skills"]["skillFrontmatter"], &field("name"));
+    part("custom_agents", &response["agents"], &field("agentType"));
+    // Loaded MCP tools are in the window; the others wait, deferred, to be looked up.
+    let (loaded, deferred): (Vec<Value>, Vec<Value>) = response["mcpTools"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .cloned()
+        .partition(|tool| tool["isLoaded"] != false);
+    let mcp_tool = |tool: &Value| {
+        let name = tool["name"].as_str()?;
+        // `mcp__server__tool`: the server is said apart.
+        let short = name.rsplit("__").next().unwrap_or(name);
+        Some(match tool["serverName"].as_str() {
+            Some(server) => format!("{server}: {short}"),
+            None => name.to_owned(),
+        })
+    };
+    part("mcp_tools", &Value::Array(loaded), &mcp_tool);
+    part("mcp_tools_deferred", &Value::Array(deferred), &mcp_tool);
+    let messages = &response["messageBreakdown"];
+    let message_parts: Vec<Value> = [
+        ("Tool calls", "toolCallTokens"),
+        ("Tool results", "toolResultTokens"),
+        ("Attachments", "attachmentTokens"),
+        ("Agent messages", "assistantMessageTokens"),
+        ("Your messages", "userMessageTokens"),
+    ]
+    .iter()
+    .map(|(name, field)| json!({"name": name, "tokens": messages[*field]}))
+    .collect();
+    part("messages", &Value::Array(message_parts), &field("name"));
+    Some(ContextUsage {
+        used,
+        window: response["maxTokens"].as_u64().filter(|window| *window > 0),
+        estimated: false,
+        categories,
+        entries,
+    })
 }
 
 /// The value of `--mcp-config` that adds qcc's MCP servers to the user's own, or
@@ -1046,5 +1173,82 @@ mod tests {
             matches!(&warned.deltas[..], [Delta::ProviderWarning(w)] if w.contains("nope on: Server not found")),
             "{warned:?}"
         );
+    }
+
+    #[test]
+    fn the_context_is_asked_after_every_turn_and_read_part_by_part() {
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("hi");
+        let done = bridge.on_line(&result(json!({})));
+        let request = done
+            .writes
+            .iter()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|request| request["request"]["subtype"] == "get_context_usage")
+            .expect("a context request");
+        assert_eq!(request["request"]["detail"], "summary");
+
+        // Trimmed from what Claude Code 2.1.325 answered.
+        let answer = json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": request["request_id"], "response": {
+            "categories": [
+                {"id": "system_prompt", "name": "System prompt", "tokens": 3506, "kind": "used"},
+                {"id": "system_tools_deferred", "name": "System tools (deferred)",
+                 "tokens": 15338, "isDeferred": true, "kind": "deferred"},
+                {"id": "skills", "name": "Skills", "tokens": 5826, "kind": "used"},
+                {"name": "Messages", "tokens": 120},
+                {"id": "autocompact_buffer", "name": "Autocompact buffer", "tokens": 33000,
+                 "kind": "buffer"},
+                {"id": "free_space", "name": "Free space", "tokens": 942548, "kind": "free"}],
+            "totalTokens": 9452, "maxTokens": 1000000,
+            "memoryFiles": [{"path": "/w/CLAUDE.md", "type": "Project", "tokens": 40}],
+            "mcpTools": [
+                {"name": "mcp__docs__search", "serverName": "docs", "tokens": 90, "isLoaded": true},
+                {"name": "mcp__docs__fetch", "serverName": "docs", "tokens": 70, "isLoaded": false}],
+            "skills": {"totalSkills": 2, "includedSkills": 2, "tokens": 5826, "skillFrontmatter": [
+                {"name": "tdd", "source": "userSettings", "tokens": 23},
+                {"name": "docs", "source": "userSettings", "tokens": 33}]},
+            "messageBreakdown": {"toolCallTokens": 0, "toolResultTokens": 80,
+                "attachmentTokens": 0, "assistantMessageTokens": 30, "userMessageTokens": 10}
+        }}});
+        let [Delta::ContextUsage(context)] = &bridge.on_line(&answer.to_string()).deltas[..] else {
+            panic!("expected a context breakdown");
+        };
+        assert_eq!((context.used, context.window, context.estimated), (9452, Some(1000000), false));
+        let kinds: Vec<_> = context.categories.iter().map(|c| (c.id.as_str(), c.kind)).collect();
+        assert_eq!(
+            kinds,
+            [
+                ("system_prompt", ContextKind::Used),
+                ("system_tools_deferred", ContextKind::Deferred),
+                ("skills", ContextKind::Used),
+                ("messages", ContextKind::Used),
+                ("autocompact_buffer", ContextKind::Buffer),
+                ("free_space", ContextKind::Free),
+            ]
+        );
+        let entries: Vec<_> = context
+            .entries
+            .iter()
+            .map(|e| (e.category.as_str(), e.name.as_str(), e.tokens))
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("memory_files", "/w/CLAUDE.md", 40),
+                ("skills", "docs", 33),
+                ("skills", "tdd", 23),
+                ("mcp_tools", "docs: search", 90),
+                ("mcp_tools_deferred", "docs: fetch", 70),
+                ("messages", "Tool results", 80),
+                ("messages", "Agent messages", 30),
+                ("messages", "Your messages", 10),
+            ]
+        );
+
+        // An agent that cannot tell says nothing.
+        let refused = json!({"type": "control_response", "response": {"subtype": "error",
+            "request_id": "qcc-context-9", "error": "unknown subtype"}});
+        assert!(bridge.on_line(&refused.to_string()).deltas.is_empty());
     }
 }

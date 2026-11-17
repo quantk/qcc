@@ -120,6 +120,10 @@ pub enum Delta {
     #[serde(rename = "mcp.status")]
     McpStatus { server: McpServerStatus },
 
+    /// What the context window holds now, part by part.
+    #[serde(rename = "context.usage")]
+    ContextUsage { context: crate::context::ContextUsage },
+
     /// The agent compacted its context, asked to or on its own.
     #[serde(rename = "context.compacted")]
     ContextCompacted { compaction: Compaction },

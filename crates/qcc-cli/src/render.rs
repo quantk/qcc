@@ -2,9 +2,9 @@
 
 use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
-    ChangeKind, EnvironmentChanges, EnvironmentState, EventPayload, InteractionRequest, Item,
-    ItemShape, ItemStatus, McpState, SettingKind, Thread, ThreadEvent, ThreadId, ThreadState,
-    ThreadStatus, TurnStatus,
+    ChangeKind, ContextKind, EnvironmentChanges, EnvironmentState, EventPayload,
+    InteractionRequest, Item, ItemShape, ItemStatus, McpState, SettingKind, Thread, ThreadEvent,
+    ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -151,6 +151,48 @@ pub fn thread_details(thread: &Thread) -> String {
 
 /// The MCP servers of the thread's session, then those it keeps off that the
 /// session does not report. Empty when there are none.
+/// What the context window holds, one part per line, with its share of the window.
+pub fn context(thread: &Thread) -> String {
+    let percent = |tokens: u64, window: Option<u64>| match window {
+        Some(window) if window > 0 => format!("{:>5.1}%", tokens as f64 * 100.0 / window as f64),
+        _ => String::new(),
+    };
+    let Some(context) = &thread.context else {
+        return match (thread.usage.context_used, thread.usage.context_window) {
+            (Some(used), Some(window)) => format!(
+                "context  {used} of {window} tokens ({})\n(the agent does not break it down)",
+                percent(used, Some(window)).trim()
+            ),
+            (Some(used), None) => format!("context  {used} tokens, the window unknown"),
+            _ => "the agent has not said how full its context is".to_owned(),
+        };
+    };
+    let mut lines = vec![match context.window {
+        Some(window) => format!(
+            "context  {} of {window} tokens ({}){}",
+            context.used,
+            percent(context.used, Some(window)).trim(),
+            if context.estimated { ", estimated" } else { "" }
+        ),
+        None => format!("context  {} tokens", context.used),
+    }];
+    for category in &context.categories {
+        let note = match category.kind {
+            ContextKind::Used => "",
+            ContextKind::Free => "  (free)",
+            ContextKind::Buffer => "  (reserved)",
+            ContextKind::Deferred => "  (deferred, not in the window)",
+        };
+        lines.push(format!(
+            "  {:<28} {:>9} {}{note}",
+            clip(&category.name, 28),
+            category.tokens,
+            percent(category.tokens, context.window)
+        ));
+    }
+    lines.join("\n")
+}
+
 pub fn mcp_servers(thread: &Thread) -> String {
     let mut lines = Vec::new();
     let mut add = |name: &str, state: &str| {
@@ -433,6 +475,7 @@ pub fn event(event: &ThreadEvent) -> Option<String> {
         | EventPayload::ItemStarted { .. }
         | EventPayload::ItemTextDelta { .. }
         | EventPayload::UsageUpdated { .. }
+        | EventPayload::ContextUsageUpdated { .. }
         // `thread show` lists the servers; every change of one is not news.
         | EventPayload::McpServersChanged { .. }
         | EventPayload::InteractionResolved { .. }

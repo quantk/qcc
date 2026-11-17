@@ -124,6 +124,64 @@ export type Compaction = {
 	tokens_after?: number | null,
 };
 
+/**  One part of the context window. */
+export type ContextCategory = {
+	/**
+	 *  What the part is. Agents share the well-known ids (`system_prompt`,
+	 *  `system_tools`, `mcp_tools`, `memory_files`, `skills`, `custom_agents`,
+	 *  `messages`, `autocompact_buffer`, `free_space`); a bridge may use its own.
+	 */
+	id: string,
+	/**  How the agent names the part. */
+	name: string,
+	tokens: number,
+	kind: ContextKind,
+};
+
+/**  One thing within a category: a memory file, an MCP tool, a skill. */
+export type ContextEntry = {
+	/**  The id of the category it belongs to. */
+	category: string,
+	name: string,
+	tokens: number,
+};
+
+/**
+ *  What a part of the context window is, which says how it adds up: only `Used`
+ *  parts are in the context; the rest of the window is `Free` or held back.
+ */
+export type ContextKind = 
+/**  Content the context holds. */
+"used" | 
+/**  What is left of the window. */
+"free" | 
+/**  Room the agent keeps for compacting; not available to the conversation. */
+"buffer" | 
+/**  Known to the agent but loaded only when needed, so not in the window now. */
+"deferred";
+
+/**
+ *  What the context window of a session holds, part by part, as its agent last
+ *  said or its bridge reckoned.
+ */
+export type ContextUsage = {
+	/**  Tokens the context holds: the `Used` parts together. */
+	used: number,
+	window?: number | null,
+	/**  The parts are reckoned rather than counted by the agent. */
+	estimated?: boolean,
+	/**
+	 *  The parts in the agent's order. Their tokens add up to the window when the
+	 *  agent reports free space, and to `used` when it does not.
+	 */
+	categories: ContextCategory[],
+	/**
+	 *  What the larger parts are made of, largest first within a category. Kept
+	 *  in the timeline only; a thread's projection leaves them out.
+	 */
+	entries?: ContextEntry[],
+};
+
 export type DaemonStatusResult = {
 	version: string,
 	protocol: number,
@@ -232,6 +290,11 @@ queue_id?: string | null } |
 { type: "item/started"; turn_id: TurnId; item: Item } | { type: "item/text/delta"; item_id: ItemId; text: string } | 
 /**  Carries the full terminal item. */
 { type: "item/completed"; turn_id: TurnId; item: Item } | { type: "usage/updated"; usage: UsageSnapshot } | 
+/**
+ *  What the context window of the session holds, part by part. Replaces the
+ *  breakdown before.
+ */
+{ type: "context/usage"; context: ContextUsage } | 
 /**  The agent summed up the conversation so far to make room in its context. */
 { type: "session/compacted"; compaction: Compaction } | 
 /**
@@ -509,6 +572,11 @@ export type ProviderCapabilities = {
 	compact?: boolean,
 	/**  The provider can tell which skills its agent finds by itself. */
 	list_skills?: boolean,
+	/**
+	 *  The provider reports what its agent's context window holds, part by part
+	 *  (`context.usage` deltas). Without it, only how full the window is is known.
+	 */
+	context_usage?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -722,6 +790,12 @@ export type Thread = {
 	last_turn_at?: number | null,
 	/**  Tokens spent, how full the context is, how turns ended. */
 	usage?: ThreadUsage,
+	/**
+	 *  What the context window holds, part by part, as the agent last said; without
+	 *  the entries of each part. Absent for agents that do not say and after the
+	 *  conversation started afresh.
+	 */
+	context?: ContextUsage | null,
 	/**
 	 *  The MCP servers of the current session as its agent reports them, in the
 	 *  order they were first reported. Empty until it says and for agents that do not.

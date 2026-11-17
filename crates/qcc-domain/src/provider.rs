@@ -76,6 +76,10 @@ pub struct ProviderCapabilities {
     /// The provider can tell which skills its agent finds by itself.
     #[serde(default)]
     pub list_skills: bool,
+    /// The provider reports what its agent's context window holds, part by part
+    /// (`context.usage` deltas). Without it, only how full the window is is known.
+    #[serde(default)]
+    pub context_usage: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

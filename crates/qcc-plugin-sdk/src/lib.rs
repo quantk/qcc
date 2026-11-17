@@ -21,6 +21,7 @@
 //!                 mcp_toggle: false,
 //!                 compact: false,
 //!                 list_skills: false,
+//!                 context_usage: false,
 //!             },
 //!         }
 //!     }

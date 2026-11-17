@@ -9,6 +9,7 @@ use qcc_domain::{
     ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
     UiViewInfo, UsageSnapshot, UserInput,
 };
+use qcc_domain::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
@@ -167,6 +168,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                 error: status.error,
             },
         },
+        wit::Delta::ContextUsage(c) => Delta::ContextUsage { context: context_usage(c) },
         wit::Delta::ContextCompacted(c) => Delta::ContextCompacted {
             compaction: Compaction {
                 automatic: c.automatic,
@@ -180,6 +182,38 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
     })
 }
 
+fn context_usage(context: wit::ContextUsage) -> ContextUsage {
+    ContextUsage {
+        used: context.used,
+        window: context.window,
+        estimated: context.estimated,
+        categories: context
+            .categories
+            .into_iter()
+            .map(|category| ContextCategory {
+                id: category.id,
+                name: category.name,
+                tokens: category.tokens,
+                kind: match category.kind {
+                    wit::ContextKind::Used => ContextKind::Used,
+                    wit::ContextKind::Free => ContextKind::Free,
+                    wit::ContextKind::Buffer => ContextKind::Buffer,
+                    wit::ContextKind::Deferred => ContextKind::Deferred,
+                },
+            })
+            .collect(),
+        entries: context
+            .entries
+            .into_iter()
+            .map(|entry| ContextEntry {
+                category: entry.category,
+                name: entry.name,
+                tokens: entry.tokens,
+            })
+            .collect(),
+    }
+}
+
 pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
     match contribution {
         wit::Contribution::Provider(p) => Contribution::Provider(ProviderInfo {
@@ -191,6 +225,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 mcp_toggle: p.capabilities.mcp_toggle,
                 compact: p.capabilities.compact,
                 list_skills: p.capabilities.list_skills,
+                context_usage: p.capabilities.context_usage,
                 permission_modes: p
                     .capabilities
                     .permission_modes

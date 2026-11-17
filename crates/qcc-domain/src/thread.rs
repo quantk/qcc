@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::context::ContextUsage;
 use crate::event::{EventPayload, ThreadEvent};
 use crate::ids::{InteractionId, ProjectId, ProviderId, ThreadId};
 use crate::interaction::InteractionRequest;
@@ -227,6 +228,11 @@ pub struct Thread {
     /// Tokens spent, how full the context is, how turns ended.
     #[serde(default, skip_serializing_if = "ThreadUsage::is_empty")]
     pub usage: ThreadUsage,
+    /// What the context window holds, part by part, as the agent last said; without
+    /// the entries of each part. Absent for agents that do not say and after the
+    /// conversation started afresh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context: Option<ContextUsage>,
     /// The MCP servers of the current session as its agent reports them, in the
     /// order they were first reported. Empty until it says and for agents that do not.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -365,8 +371,12 @@ impl Thread {
             EventPayload::UsageUpdated { usage } => {
                 self.usage.report(usage);
             }
+            EventPayload::ContextUsageUpdated { context } => {
+                self.context = Some(context.summary());
+            }
             EventPayload::ConversationReset => {
                 self.usage.reset();
+                self.context = None;
                 self.provider_session = None;
                 self.handover = false;
                 self.conversations += 1;
@@ -420,6 +430,7 @@ mod tests {
             last_turn_status: None,
             last_turn_at: None,
             usage: ThreadUsage::default(),
+            context: None,
             archived: false,
             handover: false,
         }

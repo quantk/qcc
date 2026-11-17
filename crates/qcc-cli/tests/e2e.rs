@@ -1654,6 +1654,34 @@ fn a_thread_starts_its_conversation_afresh_and_compacts_its_context() {
 }
 
 #[test]
+fn the_agent_says_what_its_context_holds() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("one two three");
+    daemon.wait_for(&id, "turn/completed");
+    // Only how full it is until the agent breaks it down.
+    let plain = daemon.qcc(&["thread", "context", &id]).stdout;
+    assert!(plain.contains("tokens"), "{plain}");
+
+    assert!(daemon.qcc(&["thread", "send", &id, "/context"]).ok);
+    let events = daemon
+        .eventually(&id, "a context breakdown", |events| types(events).contains(&"context/usage"));
+    let event = events.iter().find(|e| e["type"] == "context/usage").unwrap();
+    assert_eq!(event["context"]["entries"][0]["name"], "echo-demo", "{event}");
+
+    // The projection keeps the parts, not what each is made of.
+    let thread = daemon.thread(&id);
+    assert_eq!(thread["context"]["window"], 10_000, "{thread}");
+    assert!(thread["context"].get("entries").is_none(), "{thread}");
+    let shown = daemon.qcc(&["thread", "context", &id]).stdout;
+    assert!(shown.contains("System prompt") && shown.contains("(free)"), "{shown}");
+
+    // A new conversation has an empty context.
+    assert!(daemon.qcc(&["thread", "reset", &id]).ok);
+    assert!(daemon.thread(&id).get("context").is_none());
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

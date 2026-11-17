@@ -19,6 +19,7 @@
 //! | `/agent`             | says the model and effort the session was started with       |
 //! | `/notes`             | says what qcc told it along with the message                 |
 //! | `/settings`          | lists the plugin's own settings as the daemon told them      |
+//! | `/context`           | reports a made-up breakdown of its context window            |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -160,6 +161,43 @@ impl Session {
         };
         let context_used = Some(last.input_tokens);
         Delta::Usage(UsageSnapshot { total, last, model_context_window: None, context_used })
+    }
+
+    /// A breakdown of a made-up window: fixed parts, and the session's words as its
+    /// messages.
+    fn context(&self) -> ContextUsage {
+        const WINDOW: u64 = 10_000;
+        let messages = self.input_tokens + self.output_tokens;
+        let category = |id: &str, name: &str, tokens: u64, kind: ContextKind| ContextCategory {
+            id: id.into(),
+            name: name.into(),
+            tokens,
+            kind,
+        };
+        let used = 1_000 + 500 + 200 + messages;
+        ContextUsage {
+            used,
+            window: Some(WINDOW),
+            estimated: false,
+            categories: vec![
+                category("system_prompt", "System prompt", 1_000, ContextKind::Used),
+                category("system_tools", "System tools", 500, ContextKind::Used),
+                category("skills", "Skills", 200, ContextKind::Used),
+                category("messages", "Messages", messages, ContextKind::Used),
+                category("autocompact_buffer", "Autocompact buffer", 1_000, ContextKind::Buffer),
+                category(
+                    "free_space",
+                    "Free space",
+                    WINDOW.saturating_sub(used + 1_000),
+                    ContextKind::Free,
+                ),
+            ],
+            entries: vec![ContextEntry {
+                category: "skills".into(),
+                name: "echo-demo".into(),
+                tokens: 200,
+            }],
+        }
     }
 
     fn request_id(&mut self) -> String {
@@ -340,6 +378,14 @@ impl Echo {
                 out.push(session.usage(prompt, &reply));
                 out.push(completed());
             }
+            "/context" => {
+                let reply = "context reported".to_owned();
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(Delta::ContextUsage(session.context()));
+                out.push(completed());
+            }
             "/skills" => {
                 let reply = session.skills.clone().unwrap_or_else(|| "no skills".into());
                 out.push(text(reply.clone()));
@@ -402,6 +448,7 @@ impl Provider for Echo {
                 mcp_toggle: true,
                 compact: true,
                 list_skills: true,
+                context_usage: true,
             },
         }
     }

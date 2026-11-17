@@ -52,6 +52,7 @@ fn declares_its_provider_and_its_ui() {
             mcp_toggle: true,
             compact: true,
             list_skills: true,
+            context_usage: true,
         }
     );
     assert_eq!(harness.handle().id(), "provider-echo");

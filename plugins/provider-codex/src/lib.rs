@@ -41,6 +41,7 @@ impl Provider for Codex {
                 mcp_toggle: false,
                 compact: true,
                 list_skills: true,
+                context_usage: false,
             },
         }
     }

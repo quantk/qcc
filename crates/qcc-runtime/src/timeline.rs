@@ -202,6 +202,7 @@ impl Timeline {
             | EventPayload::McpDisabledChanged { .. }
             | EventPayload::SkillsChanged { .. }
             | EventPayload::ContextCompacted { .. }
+            | EventPayload::ContextUsageUpdated { .. }
             | EventPayload::ConversationReset
             | EventPayload::ProviderError { .. }
             | EventPayload::ProviderWarning { .. }

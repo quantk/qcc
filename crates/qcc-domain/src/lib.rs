@@ -10,6 +10,7 @@
 //! This crate depends on neither an async runtime nor the plugin host.
 
 pub mod comment;
+pub mod context;
 pub mod delta;
 pub mod event;
 pub mod ids;
@@ -21,6 +22,7 @@ pub mod thread;
 pub mod usage;
 
 pub use comment::{DiffSide, LineComment};
+pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};
 pub use ids::{CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};

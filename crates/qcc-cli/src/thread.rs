@@ -136,6 +136,9 @@ pub(crate) enum ThreadCommand {
     /// Start the conversation afresh in the same thread: the next message starts a
     /// new session. What came before stays in the timeline as an earlier conversation.
     Reset { thread: String },
+    /// Show what the agent's context window holds, part by part, as it last said;
+    /// for agents that do not break it down, only how full it is.
+    Context { thread: String },
     /// Ask the agent to compact its context: to sum up the conversation so far and
     /// go on from the summary. Only for agents that can (`qcc plugin list`).
     Compact {
@@ -392,6 +395,22 @@ pub(crate) async fn run(
                 .await?;
             if json {
                 print_json(&result)?;
+            }
+        }
+
+        ThreadCommand::Context { thread } => {
+            let thread = client
+                .call::<ThreadGet>(ThreadGetParams { thread_id: ThreadId::new(thread) })
+                .await?
+                .thread;
+            if json {
+                print_json(&serde_json::json!({
+                    "context": thread.context,
+                    "context_used": thread.usage.context_used,
+                    "context_window": thread.usage.context_window,
+                }))?;
+            } else {
+                out(render::context(&thread));
             }
         }
 

@@ -39,6 +39,7 @@ impl Provider for ClaudeCode {
                 mcp_toggle: true,
                 compact: true,
                 list_skills: true,
+                context_usage: true,
             },
         }
     }
@@ -109,7 +110,9 @@ impl Provider for ClaudeCode {
         // After the prompt, which must not wait on it; the agent answers either way.
         // Only a status: an agent already gone is reported by its exit, not here.
         if let Ok(bridge) = self.sessions.bridge(&start.thread) {
-            let query = bridge.query_mcp();
+            let mut query = bridge.query_mcp();
+            // What the context holds before a word is said: prompts, tools, memory.
+            query.writes.extend(bridge.query_context().writes);
             if let Err(error) = self.sessions.apply(&start.thread, query) {
                 log::debug(format!("thread {}: cannot ask for MCP status: {error}", start.thread));
             }

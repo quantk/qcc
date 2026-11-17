@@ -1,45 +1,44 @@
 import { RefreshCwIcon } from "lucide-react";
-import { useRef } from "react";
+import { useMemo } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
-import type { DiffFile } from "../../state/diff";
+import { readFiles } from "../../state/changes";
 import { plural } from "../../util/format";
-import { DiffView, scrollToFile } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
+import { ChangesDiff } from "./ChangesDiff";
 import { DeliverButtons } from "./DeliverButtons";
 import { ReviewBar, useReview } from "./review";
 import { useChanges } from "./useChanges";
 
-const NO_FILES: DiffFile[] = [];
-
 export function ChangesView({ thread }: { thread: Thread }) {
-  const { loaded, error, loading, active, totals, reload } = useChanges(thread);
-  const body = useRef<HTMLDivElement>(null);
-  const review = useReview(thread, loaded?.files ?? NO_FILES);
+  const { reader, state, changes, error, loading, active, totals, reload } = useChanges(thread);
+  const files = useMemo(() => readFiles(state), [state]);
+  const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
+  const review = useReview(thread, files, paths);
 
   return (
     <div className="changes">
       <div className="changes-head flex-wrap gap-y-2">
-        {loaded ? (
+        {changes ? (
           <span>
-            {plural(loaded.changes.files.length, "file")} changed
-            {loaded.changes.files.length > 0 && (
+            {plural(changes.files.length, "file")} changed
+            {changes.files.length > 0 && (
               <span className="diff-stat">
                 {" "}
                 <span className="add">+{totals.additions}</span> <span className="del">−{totals.deletions}</span>
               </span>
             )}
-            {loaded.changes.branch && (
+            {changes.branch && (
               <>
                 {" "}
-                on <code>{loaded.changes.branch}</code>
+                on <code>{changes.branch}</code>
               </>
             )}
-            {loaded.changes.base && (
+            {changes.base && (
               <>
                 {" "}
-                since <code title={loaded.changes.base}>{loaded.changes.base.slice(0, 10)}</code>
+                since <code title={changes.base}>{changes.base.slice(0, 10)}</code>
               </>
             )}
           </span>
@@ -49,7 +48,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
         <span className="flex-1" />
         {/* Only work in an environment has somewhere to go back to. */}
         {thread.environment && (
-          <DeliverButtons thread={thread} disabled={active || !loaded?.changes.files.length} done={reload} />
+          <DeliverButtons thread={thread} disabled={active || !changes?.files.length} done={reload} />
         )}
         <Button variant="outline" size="sm" disabled={loading} onClick={reload}>
           <RefreshCwIcon className={loading ? "animate-spin" : undefined} />
@@ -57,19 +56,24 @@ export function ChangesView({ thread }: { thread: Thread }) {
         </Button>
       </div>
       {error && <div className="notice error">{error}</div>}
-      {loaded && (
-        <div className="changes-body" ref={body}>
-          {loaded.changes.files.length === 0 ? (
-            <p className="hint">The agent has not changed any files.</p>
-          ) : (
-            <ChangedFiles changes={loaded.changes} open={(path) => scrollToFile(body.current, path)} />
+      {changes && (
+        <ChangesDiff
+          key={thread.id}
+          reader={reader}
+          state={state}
+          review={review}
+          inset={20}
+          lead={(jump) => (
+            <div className="flex flex-col gap-3">
+              {changes.files.length === 0 ? (
+                <p className="hint">The agent has not changed any files.</p>
+              ) : (
+                <ChangedFiles changes={changes} open={jump} />
+              )}
+              <ReviewBar thread={thread} review={review} />
+            </div>
           )}
-          <ReviewBar thread={thread} review={review} />
-          {loaded.truncated && (
-            <div className="notice warning">The diff is too large to show in full; what follows is cut short.</div>
-          )}
-          <DiffView files={loaded.files} addon={review.addon} />
-        </div>
+        />
       )}
     </div>
   );

@@ -65,4 +65,10 @@ describe("placeComments", () => {
     expect(placed.adrift.get("src/a.rs")!.map((c) => c.id)).toEqual(["a"]);
     expect(placed.elsewhere.map((c) => c.id)).toEqual(["b"]);
   });
+
+  it("waits for the diff of a changed file that is not read yet", () => {
+    const placed = placeComments([], [comment("a", { line: 11 }), comment("b", { path: "gone.rs" })], new Set(["src/a.rs"]));
+    expect(placed.elsewhere.map((c) => c.id)).toEqual(["b"]);
+    expect(placed.byFile.size + placed.adrift.size).toBe(0);
+  });
 });

@@ -1,12 +1,13 @@
 import { RefreshCwIcon } from "lucide-react";
-import { useRef } from "react";
+import { useMemo } from "react";
 
-import type { DiffFile } from "../../state/diff";
+import { readFiles } from "../../state/changes";
 import type { ThreadContext } from "../../ui/registry";
-import { DiffStat, DiffView, scrollToFile } from "../../ui/kit";
+import { DiffStat } from "../../ui/kit";
 import { plural } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
+import { ChangesDiff } from "./ChangesDiff";
 import { ReviewBar, useReview } from "./review";
 import { useChanges } from "./useChanges";
 
@@ -14,28 +15,27 @@ import { useChanges } from "./useChanges";
  * The diff beside the timeline: what the agent has changed so far, kept current while
  * it works. Delivering the changes stays in the Changes tab, where there is room.
  */
-const NO_FILES: DiffFile[] = [];
-
 export function ChangesPanel({ thread }: ThreadContext) {
-  const { loaded, error, loading, totals, reload } = useChanges(thread);
-  const body = useRef<HTMLDivElement>(null);
-  const review = useReview(thread, loaded?.files ?? NO_FILES);
-  const files = loaded?.changes.files ?? [];
+  const { reader, state, changes, error, loading, totals, reload } = useChanges(thread);
+  const files = useMemo(() => readFiles(state), [state]);
+  const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
+  const review = useReview(thread, files, paths);
+  const count = changes?.files.length ?? 0;
 
   return (
-    <div ref={body} className="flex flex-col">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-muted py-1.5 pr-2 pl-4 text-sm">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-none items-center gap-2 border-b bg-muted py-1.5 pr-2 pl-4 text-sm">
         <span className="min-w-0 flex-1 truncate">
-          {loaded ? (
+          {changes ? (
             <>
-              {plural(files.length, "file")}
-              {files.length > 0 && (
+              {plural(count, "file")}
+              {count > 0 && (
                 <>
                   {" "}
                   <DiffStat additions={totals.additions} deletions={totals.deletions} />
                 </>
               )}
-              {loaded.changes.branch && <span className="text-muted-foreground"> on {loaded.changes.branch}</span>}
+              {changes.branch && <span className="text-muted-foreground"> on {changes.branch}</span>}
             </>
           ) : (
             <span className="text-muted-foreground">{loading ? "Reading changes…" : ""}</span>
@@ -46,17 +46,24 @@ export function ChangesPanel({ thread }: ThreadContext) {
         </Button>
       </div>
       {error && <div className="notice error m-3">{error}</div>}
-      {loaded && (
-        <div className="flex flex-col gap-3 p-3">
-          {files.length === 0 ? (
-            <p className="text-sm text-muted-foreground">The agent has not changed any files.</p>
-          ) : (
-            <ChangedFiles changes={loaded.changes} open={(path) => scrollToFile(body.current, path)} />
+      {changes && (
+        <ChangesDiff
+          key={thread.id}
+          reader={reader}
+          state={state}
+          review={review}
+          inset={12}
+          lead={(jump) => (
+            <div className="flex flex-col gap-3">
+              {count === 0 ? (
+                <p className="text-sm text-muted-foreground">The agent has not changed any files.</p>
+              ) : (
+                <ChangedFiles changes={changes} open={jump} />
+              )}
+              <ReviewBar thread={thread} review={review} compact />
+            </div>
           )}
-          <ReviewBar thread={thread} review={review} compact />
-          {loaded.truncated && <div className="notice warning">The diff is too large to show in full; it is cut short.</div>}
-          <DiffView files={loaded.files} addon={review.addon} />
-        </div>
+        />
       )}
     </div>
   );

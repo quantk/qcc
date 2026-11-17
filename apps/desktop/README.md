@@ -134,6 +134,19 @@ read again whenever the agent settles an edit or a command, so it keeps up besid
 timeline. Diffs (`ui/kit/DiffView`) are highlighted with shiki by the language the file
 name suggests (`state/languages.ts`); a view adds its own rows to a diff through a
 `DiffAddon`, which is how `modules/changes/review.tsx` puts comments under lines.
+
+Changes stay fast however much the agent changed. The tab and the panel share one reader
+per thread (`state/changes.ts`): it reads the list of files (`thread.changes`) and then
+the diff of only the files in view, a batch at a time (`thread.diff` with `paths`), keeps
+what it read while the agent works and reads a file again only when it is back in view,
+keeping the very object on screen when nothing in it changed. Lockfiles, build output and
+files with more than 400 changed lines start folded; binary files are not read at all.
+`modules/changes/ChangesDiff.tsx` draws the diff as one virtualized list of rows
+(`state/diffRows.ts`: file headers, lines of a fixed height, comments, notes) that scrolls
+sideways as one, and keeps the row at the top in place while diffs above it come in. The
+lines in view are highlighted by a worker (`lib/diffHighlights.ts`,
+`lib/highlight.worker.ts`), a hunk side at a time; long lines and files over 10 000 lines
+stay plain. `bench/` measures it in headless Chrome (see `bench/README.md`).
 Where a comment goes once the code has moved is decided in `state/comments.ts`; the
 comments themselves live in the store, read with `comment.list` and kept current by
 `comments.updated`. Ctrl+B or the button in the thread header shows and hides the panel;

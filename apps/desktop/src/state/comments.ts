@@ -27,8 +27,14 @@ export type Placement = {
  * Put each comment under its line: the one at its number if the text still
  * matches, else the nearest line on the same side with the same text. A comment
  * whose line is found nowhere is adrift in its file, or elsewhere without one.
+ * With `changed`, the paths of every changed file, a comment on a file whose diff
+ * is not read yet waits for it rather than counting as elsewhere.
  */
-export function placeComments(files: readonly DiffFile[], comments: readonly LineComment[]): Placement {
+export function placeComments(
+  files: readonly DiffFile[],
+  comments: readonly LineComment[],
+  changed?: ReadonlySet<string>,
+): Placement {
   const byPath = new Map(files.map((file) => [file.path, file]));
   const byFile = new Map<string, Map<number, LineComment[]>>();
   const adrift = new Map<string, LineComment[]>();
@@ -41,7 +47,7 @@ export function placeComments(files: readonly DiffFile[], comments: readonly Lin
   for (const comment of comments) {
     const file = byPath.get(comment.path);
     if (!file) {
-      elsewhere.push(comment);
+      if (!changed?.has(comment.path)) elsewhere.push(comment);
       continue;
     }
     const index = findLine(file, comment);

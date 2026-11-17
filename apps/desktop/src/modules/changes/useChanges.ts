@@ -1,68 +1,62 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import type { EnvironmentChanges, Thread } from "../../api/protocol.gen";
-import { type DiffFile, parseDiff } from "../../state/diff";
+import type { Thread } from "../../api/protocol.gen";
+import { ChangesReaders, ThreadChangesReader, totals } from "../../state/changes";
 import { settledEdits } from "../../state/stats";
 import { store, useApp } from "../../state/store";
 import { errorMessage } from "../../util/format";
 
-export type Loaded = { changes: EnvironmentChanges; files: DiffFile[]; truncated: boolean };
-
 /** Edits in a burst land within moments of each other; one read covers them. */
 const SETTLE_MS = 800;
 
+/** A view that opens within this of the last read shows what that read found. */
+const FRESH_MS = 2000;
+
+const readers = new ChangesReaders(
+  (threadId) =>
+    new ThreadChangesReader(
+      threadId,
+      {
+        changes: (id) => store().api.call("thread.changes", { thread_id: id }).then(({ changes }) => changes),
+        diff: (params) => store().api.call("thread.diff", params),
+      },
+      errorMessage,
+    ),
+);
+
+/** The reader of a thread's changes, shared with every other view of it while held. */
+function useReader(threadId: string): ThreadChangesReader {
+  const reader = readers.get(threadId);
+  useEffect(() => readers.hold(threadId)[1], [threadId]);
+  return reader;
+}
+
 /**
- * What the agent changed in its working directory, read from the daemon. It is read
- * again when the agent settles an edit or a command, when a turn ends, and on
- * `reload`, so a view beside a working agent keeps up with it.
+ * What the agent changed in its working directory: the list of files, read again
+ * when the agent settles an edit or a command, when a turn ends, and on `reload`;
+ * the diff of each file is read when a view shows it (`reader.want`).
  */
 export function useChanges(thread: Thread) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [refresh, setRefresh] = useState(0);
+  const reader = useReader(thread.id);
+  const state = useSyncExternalStore(reader.subscribe, reader.getState);
   const active = thread.status === "active";
-  const entries = useApp((state) => state.timelines[thread.id]?.entries);
+  const entries = useApp((app) => app.timelines[thread.id]?.entries);
   const edits = useMemo(() => settledEdits(entries ?? []), [entries]);
 
-  useEffect(() => {
-    let stale = false;
-    // The first read is at once; later ones wait for a burst of edits to pass.
-    const timer = setTimeout(
-      () => {
-        setLoading(true);
-        const { api } = store();
-        const params = { thread_id: thread.id };
-        Promise.all([api.call("thread.changes", params), api.call("thread.diff", params)])
-          .then(([{ changes }, { diff, truncated }]) => {
-            if (stale) return;
-            setLoaded({ changes, files: parseDiff(diff), truncated: truncated ?? false });
-            setError(null);
-          })
-          .catch((error: unknown) => {
-            if (!stale) setError(errorMessage(error));
-          })
-          .finally(() => {
-            if (!stale) setLoading(false);
-          });
-      },
-      loaded ? SETTLE_MS : 0,
-    );
-    return () => {
-      stale = true;
-      clearTimeout(timer);
-    };
-    // `loaded` only picks the delay; reading again because it changed would loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [thread.id, active, edits, refresh]);
+  // A view opening reads the list afresh, unless another view just did.
+  useEffect(() => reader.refresh(FRESH_MS), [reader]);
+  // Later reads wait for a burst of edits to pass; views that saw the same edits read once.
+  useEffect(() => reader.follow(`${active}:${edits}`, SETTLE_MS), [reader, active, edits]);
 
-  const totals = useMemo(() => {
-    const files = loaded?.changes.files ?? [];
-    return {
-      additions: files.reduce((sum, file) => sum + (file.additions ?? 0), 0),
-      deletions: files.reduce((sum, file) => sum + (file.deletions ?? 0), 0),
-    };
-  }, [loaded]);
-
-  return { loaded, error, loading, active, totals, reload: () => setRefresh((count) => count + 1) };
+  const sum = useMemo(() => totals(state.changes), [state.changes]);
+  return {
+    reader,
+    state,
+    changes: state.changes,
+    error: state.error,
+    loading: state.loading,
+    active,
+    totals: sum,
+    reload: () => reader.reload(),
+  };
 }

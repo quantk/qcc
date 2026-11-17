@@ -25,10 +25,17 @@ export type Review = {
   /** Comments on files that are no longer changed. */
   elsewhere: LineComment[];
   addon: DiffAddon;
+  /** Files with comments adrift in them, shown above their lines. */
+  heads: ReadonlySet<string>;
+  /** By file, the lines with comments or a draft under them. */
+  below: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
-/** The comments on a thread's changes, laid out over its diff. */
-export function useReview(thread: Thread, files: readonly DiffFile[]): Review {
+/**
+ * The comments on a thread's changes, laid out over the diffs read so far (`files`)
+ * of the files it changed (`changed`).
+ */
+export function useReview(thread: Thread, files: readonly DiffFile[], changed?: ReadonlySet<string>): Review {
   const comments = useApp((state) => state.comments[thread.id]) ?? NO_COMMENTS;
   const [draft, setDraft] = useState<{ path: string; index: number } | null>(null);
 
@@ -37,7 +44,18 @@ export function useReview(thread: Thread, files: readonly DiffFile[]): Review {
     setDraft(null);
   }, [thread.id]);
 
-  const placement = useMemo(() => placeComments(files, comments), [files, comments]);
+  const placement = useMemo(() => placeComments(files, comments, changed), [files, comments, changed]);
+
+  const marks = useMemo(() => {
+    const below = new Map<string, Set<number>>();
+    for (const [path, lines] of placement.byFile) below.set(path, new Set(lines.keys()));
+    if (draft) {
+      const lines = below.get(draft.path) ?? new Set<number>();
+      lines.add(draft.index);
+      below.set(draft.path, lines);
+    }
+    return { heads: new Set(placement.adrift.keys()), below };
+  }, [placement, draft]);
 
   const addon = useMemo<DiffAddon>(
     () => ({
@@ -83,7 +101,7 @@ export function useReview(thread: Thread, files: readonly DiffFile[]): Review {
   );
 
   const open = useMemo(() => comments.filter((comment) => comment.resolved_at == null), [comments]);
-  return { comments, open, elsewhere: placement.elsewhere, addon };
+  return { comments, open, elsewhere: placement.elsewhere, addon, ...marks };
 }
 
 /** How many comments are open, a way to hand them to the agent, and those left without a file. */

@@ -165,8 +165,12 @@ impl Timeline {
                 }
                 Ok(())
             }
-            EventPayload::InputQueued { queue_id, text, notes } => {
-                let input = UserInput { text: text.clone(), notes: notes.clone() };
+            EventPayload::InputQueued { queue_id, text, notes, attachments } => {
+                let input = UserInput {
+                    text: text.clone(),
+                    notes: notes.clone(),
+                    attachments: attachments.clone(),
+                };
                 self.queued.push((queue_id.clone(), input));
                 Ok(())
             }

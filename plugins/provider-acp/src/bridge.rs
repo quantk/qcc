@@ -19,7 +19,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{add_usage, boundary};
+use qcc_plugin_sdk::{add_usage, base64, boundary};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -94,6 +94,15 @@ pub struct Config {
     pub mcp_servers: Vec<McpServer>,
 }
 
+/// A user message as the bridge holds it until the agent can take it.
+#[derive(Debug, Clone, Default)]
+pub struct Prompt {
+    pub text: String,
+    /// What qcc tells the agent along with it.
+    pub notes: Vec<String>,
+    pub attachments: Vec<Attachment>,
+}
+
 pub struct Bridge {
     agent: &'static str,
     peer: Peer<Call>,
@@ -107,7 +116,9 @@ pub struct Bridge {
     /// `session/load` replays the old conversation as updates; they are not news.
     replaying: bool,
     /// Prompts not sent yet: the agent is not ready or another prompt is in flight.
-    waiting: VecDeque<String>,
+    waiting: VecDeque<Prompt>,
+    /// The agent said it takes image content in prompts.
+    images: bool,
     in_flight: bool,
     turn_open: bool,
     /// The in-flight prompt was cancelled and settled; its response is to be ignored.
@@ -232,6 +243,7 @@ impl Bridge {
             session: None,
             replaying: false,
             waiting: VecDeque::new(),
+            images: false,
             in_flight: false,
             turn_open: false,
             cancelled: false,
@@ -265,7 +277,13 @@ impl Bridge {
 
     /// The user sent a message. It goes out as soon as the agent can take it.
     pub fn prompt(&mut self, text: &str) -> Output {
-        self.waiting.push_back(text.to_owned());
+        self.prompt_with(Prompt { text: text.to_owned(), ..Prompt::default() })
+    }
+
+    /// [`Bridge::prompt`] with what qcc tells the agent and the attached files. How
+    /// images go depends on the agent, which says so only during the handshake.
+    pub fn prompt_with(&mut self, prompt: Prompt) -> Output {
+        self.waiting.push_back(prompt);
         let mut output = Output::default();
         self.send_next_prompt(&mut output);
         output
@@ -275,14 +293,20 @@ impl Bridge {
         if self.session.is_none() || self.in_flight {
             return;
         }
-        let (Some(text), Some(session)) = (self.waiting.pop_front(), &self.session) else {
+        let (Some(next), Some(session)) = (self.waiting.pop_front(), &self.session) else {
             return;
         };
+        let message =
+            qcc_plugin_sdk::message(&next.text, &next.notes, &next.attachments, self.images);
         let mut prompt = Vec::new();
         if let Some(context) = self.context.take() {
             prompt.push(json!({"type": "text", "text": context}));
         }
-        prompt.push(json!({"type": "text", "text": text}));
+        for image in &message.images {
+            let Some(data) = &image.data else { continue };
+            prompt.push(json!({"type": "image", "mimeType": image.mime, "data": base64(data)}));
+        }
+        prompt.push(json!({"type": "text", "text": message.text}));
         output.writes.push(self.peer.request(
             "session/prompt",
             json!({"sessionId": session, "prompt": prompt}),
@@ -349,6 +373,8 @@ impl Bridge {
                 let can_resume = capabilities["sessionCapabilities"].get("resume").is_some();
                 let can_load = capabilities["loadSession"].as_bool().unwrap_or(false);
                 let http = capabilities["mcpCapabilities"]["http"].as_bool().unwrap_or(false);
+                self.images =
+                    capabilities["promptCapabilities"]["image"].as_bool().unwrap_or(false);
                 self.mcp_param = self.session_mcp_servers(http, &mut output.deltas);
                 let request = match &self.resume {
                     Some(session) if can_resume || can_load => {
@@ -983,5 +1009,58 @@ mod tests {
         assert!(refused.writes[0].contains("-32601"));
         assert!(refused.deltas.is_empty());
         assert!(bridge.resolve("nope", &InteractionResolution::Cancelled).is_err());
+    }
+
+    fn attachment(name: &str, mime: &str, data: Option<&[u8]>) -> Attachment {
+        Attachment {
+            name: name.into(),
+            mime: mime.into(),
+            path: format!("/data/attachments/{name}"),
+            size: 3,
+            data: data.map(<[u8]>::to_vec),
+        }
+    }
+
+    fn prompt_of(output: &Output) -> Value {
+        let line = output.writes.iter().find(|line| method(line) == "session/prompt").unwrap();
+        serde_json::from_str::<Value>(line).unwrap()["params"]["prompt"].clone()
+    }
+
+    #[test]
+    fn images_go_as_image_content_only_to_an_agent_that_takes_them() {
+        let attachments = vec![
+            attachment("shot.png", "image/png", Some(b"abc")),
+            attachment("a.txt", "text/plain", None),
+        ];
+        let prompt =
+            || Prompt { text: "look".into(), notes: Vec::new(), attachments: attachments.clone() };
+
+        let (mut bridge, _) = Bridge::new(config());
+        bridge.prompt_with(prompt());
+        bridge.on_line(
+            r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"promptCapabilities":{"image":true}}}}"#,
+        );
+        let ready = bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
+        let sent = prompt_of(&ready);
+        assert_eq!(sent[0], json!({"type": "image", "mimeType": "image/png", "data": "YWJj"}));
+        let text = sent[1]["text"].as_str().unwrap();
+        assert!(
+            text.contains("a.txt (text/plain, 3 bytes)") && !text.contains("shot.png"),
+            "{text}"
+        );
+
+        // An agent that does not say it takes images is told where they are.
+        let (mut bridge, _) = Bridge::new(config());
+        bridge.prompt_with(prompt());
+        bridge.on_line(INIT_BARE);
+        let ready = bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
+        let sent = prompt_of(&ready);
+        assert_eq!(sent.as_array().unwrap().len(), 1);
+        let text = sent[0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("shot.png (image/png, 3 bytes): /data/attachments/shot.png"),
+            "{text}"
+        );
+        assert!(text.ends_with("look"), "{text}");
     }
 }

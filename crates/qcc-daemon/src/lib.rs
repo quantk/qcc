@@ -56,6 +56,11 @@ impl Config {
         self.data_dir.join("settings.json")
     }
 
+    /// Copies of the files attached to messages, a folder per thread.
+    pub fn attachments_dir(&self) -> PathBuf {
+        self.data_dir.join("attachments")
+    }
+
     pub fn database(&self) -> PathBuf {
         self.data_dir.join("qcc.db")
     }

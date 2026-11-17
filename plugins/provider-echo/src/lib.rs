@@ -18,6 +18,7 @@
 //! | `/mcp`               | lists the MCP servers the session was given                  |
 //! | `/agent`             | says the model and effort the session was started with       |
 //! | `/notes`             | says what qcc told it along with the message                 |
+//! | `/attachments`       | lists the files attached to the message and how each came    |
 //! | `/settings`          | lists the plugin's own settings as the daemon told them      |
 //! | `/context`           | reports a made-up breakdown of its context window            |
 //! | `/crash`             | the plugin traps                                             |
@@ -206,9 +207,27 @@ impl Session {
     }
 }
 
+/// One line of `/attachments`: what the file is and whether its bytes came along.
+fn describe_attachment(attachment: &Attachment) -> String {
+    let how = match &attachment.data {
+        Some(data) => format!("image, {} bytes inline", data.len()),
+        None => "by path".to_owned(),
+    };
+    format!(
+        "{} ({}, {} bytes) {how}: {}",
+        attachment.name, attachment.mime, attachment.size, attachment.path
+    )
+}
+
 impl Echo {
     /// Run one prompt. Opens a turn and either settles it or leaves it waiting.
-    fn run(&mut self, thread: &str, prompt: &str, notes: &[String]) -> Result<(), String> {
+    fn run(
+        &mut self,
+        thread: &str,
+        prompt: &str,
+        notes: &[String],
+        attachments: &[Attachment],
+    ) -> Result<(), String> {
         let session = self.sessions.get_mut(thread).ok_or("the session was not started")?;
         if session.turn.is_some() {
             return Err("a turn is already running".into());
@@ -378,6 +397,18 @@ impl Echo {
                 out.push(session.usage(prompt, &reply));
                 out.push(completed());
             }
+            "/attachments" => {
+                let reply = if attachments.is_empty() {
+                    "no attachments".to_owned()
+                } else {
+                    let lines: Vec<String> = attachments.iter().map(describe_attachment).collect();
+                    lines.join("\n")
+                };
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/agent" => {
                 let reply = session.agent.clone();
                 out.push(text(reply.clone()));
@@ -456,6 +487,7 @@ impl Provider for Echo {
                 compact: true,
                 list_skills: true,
                 context_usage: true,
+                images: true,
             },
         }
     }
@@ -498,7 +530,7 @@ impl Provider for Echo {
         self.sessions.get_mut(&start.thread).expect("just inserted").mcp_on = mcp_on;
         deltas::emit(&start.thread, &reset)?;
         if let Some(prompt) = &start.prompt {
-            self.run(&start.thread, prompt, &start.prompt_notes)?;
+            self.run(&start.thread, prompt, &start.prompt_notes, &start.prompt_attachments)?;
         }
         Ok(SessionStarted {
             provider_session: Some(start.resume.unwrap_or(format!("echo-{}", start.thread))),
@@ -506,7 +538,7 @@ impl Provider for Echo {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        self.run(&input.thread, &input.text, &input.notes)
+        self.run(&input.thread, &input.text, &input.notes, &input.attachments)
     }
 
     /// A turn that sums up nothing: the tokens so far go down to none.

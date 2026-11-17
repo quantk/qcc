@@ -80,6 +80,10 @@ pub struct ProviderCapabilities {
     /// (`context.usage` deltas). Without it, only how full the window is is known.
     #[serde(default)]
     pub context_usage: bool,
+    /// The agent looks at attached images (PNG, JPEG, GIF, WebP) as images. Without
+    /// it, it is told where they are saved, like any other attached file.
+    #[serde(default)]
+    pub images: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

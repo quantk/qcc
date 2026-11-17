@@ -40,6 +40,7 @@ fn generate() -> String {
         .method::<ThreadSpawn>()
         .method::<ThreadSend>()
         .method::<ThreadUnqueue>()
+        .method::<ThreadAttachment>()
         .method::<ThreadSetMode>()
         .method::<ThreadSetMcp>()
         .method::<ThreadSetSkill>()

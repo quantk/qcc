@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::attachment::Attachment;
 use crate::ids::{InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
 use crate::interaction::{InteractionRequest, InteractionResolution};
 use crate::item::Item;
@@ -19,11 +20,13 @@ pub struct UserInput {
     /// not the user: what the user is looking at, a skill offered since the session
     /// started. The bridge hands them over the way its agent takes them.
     pub notes: Vec<String>,
+    /// Files the user attached, already copied where qcc keeps them.
+    pub attachments: Vec<Attachment>,
 }
 
 impl From<String> for UserInput {
     fn from(text: String) -> Self {
-        Self { text, notes: Vec::new() }
+        Self { text, notes: Vec::new(), attachments: Vec::new() }
     }
 }
 
@@ -139,6 +142,9 @@ pub enum EventPayload {
         /// What qcc told the agent along with the message (see [`UserInput::notes`]).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         notes: Vec<String>,
+        /// Files the user attached to the message.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<Attachment>,
         /// Fed into the running turn instead of starting one.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         steered: bool,
@@ -154,6 +160,8 @@ pub enum EventPayload {
         text: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         notes: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<Attachment>,
     },
 
     /// A queued message was discarded before delivery: the thread was stopped, or the

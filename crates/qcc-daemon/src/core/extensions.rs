@@ -196,6 +196,7 @@ impl Core {
                         environment: spawn.environment,
                         base: spawn.base,
                         prompt: spawn.prompt,
+                        attachments: Vec::new(),
                         model: spawn.model,
                         effort: spawn.effort,
                         parent: spawn.parent,
@@ -215,6 +216,7 @@ impl Core {
                     text,
                     delivery: SendMode::Queue,
                     context: Vec::new(),
+                    attachments: Vec::new(),
                 })
                 .map(|_| ThreadsAnswer::Done)
                 .map_err(|error| error.message),

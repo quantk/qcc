@@ -5,8 +5,8 @@
 use std::path::PathBuf;
 
 use qcc_domain::{
-    EventPayload, InteractionResolution, ItemStatus, PermissionMode, ProviderCapabilities,
-    TurnStatus,
+    Attachment, EventPayload, InteractionResolution, ItemStatus, PermissionMode,
+    ProviderCapabilities, TurnStatus, UserInput,
 };
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{Contribution, Grant, Outcome, Permissions, PluginError, ProviderRequest};
@@ -53,6 +53,7 @@ fn declares_its_provider_and_its_ui() {
             compact: true,
             list_skills: true,
             context_usage: true,
+            images: true,
         }
     );
     assert_eq!(harness.handle().id(), "provider-echo");
@@ -335,4 +336,52 @@ fn the_permission_mode_decides_whether_the_user_is_asked() {
         assert_eq!(harness.count(|p| matches!(p, EventPayload::InteractionRequested { .. })), 0);
         assert_eq!(harness.completed_items()[0].status, ItemStatus::Completed);
     }
+}
+
+#[test]
+fn images_reach_a_provider_that_looks_at_them_with_their_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let image = dir.path().join("shot.png");
+    std::fs::write(&image, b"\x89PNG\r\n\x1a\nfake").unwrap();
+    let notes = dir.path().join("notes.md");
+    std::fs::write(&notes, "# notes").unwrap();
+    let attachment = |path: &std::path::Path, mime: &str, size: u64| Attachment {
+        name: path.file_name().unwrap().to_string_lossy().into_owned(),
+        mime: mime.into(),
+        path: path.display().to_string(),
+        size,
+    };
+    let mut harness = echo();
+    harness.start(None).unwrap();
+    harness
+        .input_with(UserInput {
+            text: "/attachments".into(),
+            notes: Vec::new(),
+            attachments: vec![
+                attachment(&image, "image/png", 12),
+                attachment(&notes, "text/markdown", 7),
+            ],
+        })
+        .unwrap();
+    harness.wait_turns(1);
+    harness.assert_conformant();
+    assert_eq!(
+        harness.agent_messages(),
+        [format!(
+            "shot.png (image/png, 12 bytes) image, 12 bytes inline: {}\n\
+             notes.md (text/markdown, 7 bytes) by path: {}",
+            image.display(),
+            notes.display()
+        )]
+    );
+    // The attachments are part of the message in the timeline.
+    let submitted = harness
+        .events()
+        .iter()
+        .find_map(|event| match &event.payload {
+            EventPayload::InputSubmitted { attachments, .. } => Some(attachments.len()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(submitted, 2);
 }

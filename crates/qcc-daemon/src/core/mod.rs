@@ -27,6 +27,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{Config, plugins, settings};
 
+mod attachments;
 mod comments;
 mod configuration;
 mod environments;

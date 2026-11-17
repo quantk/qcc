@@ -20,7 +20,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{boundary, option};
+use qcc_plugin_sdk::{Message, boundary, option};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -37,8 +37,21 @@ enum Call {
 }
 
 /// What waits for the agent to take it: a prompt, or a request to compact.
+/// The `input` of a turn: the images, which Codex reads from their files, then the
+/// text.
+fn input(message: &Message) -> Value {
+    let mut input: Vec<Value> = message
+        .images
+        .iter()
+        .map(|image| json!({"type": "localImage", "path": image.path}))
+        .collect();
+    input.push(json!({"type": "text", "text": message.text, "text_elements": []}));
+    Value::Array(input)
+}
+
 enum Waiting {
-    Prompt(String),
+    /// The `input` of a `turn/start`.
+    Prompt(Value),
     Compact,
 }
 
@@ -90,7 +103,7 @@ pub struct Bridge {
     /// An interrupt was asked for before the turn had an id to interrupt.
     interrupt_pending: bool,
     /// Messages for the running turn, held until it has an id to steer.
-    steers_pending: Vec<String>,
+    steers_pending: Vec<Value>,
     /// Turns settled by an interrupt: what the agent still says about them is ignored.
     interrupted: HashSet<String>,
     approvals: HashMap<String, Approval>,
@@ -206,7 +219,12 @@ impl Bridge {
 
     /// The user sent a message. It goes out as soon as the agent can take it.
     pub fn prompt(&mut self, text: &str) -> Output {
-        self.waiting.push_back(Waiting::Prompt(text.to_owned()));
+        self.prompt_message(&Message { text: text.to_owned(), images: Vec::new() })
+    }
+
+    /// [`Bridge::prompt`] with images to look at.
+    pub fn prompt_message(&mut self, message: &Message) -> Output {
+        self.waiting.push_back(Waiting::Prompt(input(message)));
         let mut output = Output::default();
         self.send_next_prompt(&mut output);
         output
@@ -229,12 +247,9 @@ impl Bridge {
             return;
         };
         let request = match next {
-            Waiting::Prompt(text) => self.peer.request(
+            Waiting::Prompt(input) => self.peer.request(
                 "turn/start",
-                json!({
-                    "threadId": thread,
-                    "input": [{"type": "text", "text": text, "text_elements": []}],
-                }),
+                json!({"threadId": thread, "input": input}),
                 Call::TurnStart,
             ),
             Waiting::Compact => {
@@ -254,12 +269,17 @@ impl Bridge {
 
     /// The user sent a message for the running turn.
     pub fn steer(&mut self, text: &str) -> Output {
+        self.steer_message(&Message { text: text.to_owned(), images: Vec::new() })
+    }
+
+    /// [`Bridge::steer`] with images to look at.
+    pub fn steer_message(&mut self, message: &Message) -> Output {
         if !self.turn_open {
             // The turn ended while the message was on its way: it starts the next one.
-            return self.prompt(text);
+            return self.prompt_message(message);
         }
         let mut output = Output::default();
-        self.steers_pending.push(text.to_owned());
+        self.steers_pending.push(input(message));
         self.send_steers(&mut output);
         output
     }
@@ -270,14 +290,10 @@ impl Bridge {
         let (Some(turn), Some(thread)) = (&self.turn_id, &self.thread) else {
             return;
         };
-        for text in std::mem::take(&mut self.steers_pending) {
+        for input in std::mem::take(&mut self.steers_pending) {
             output.writes.push(self.peer.request(
                 "turn/steer",
-                json!({
-                    "threadId": thread,
-                    "expectedTurnId": turn,
-                    "input": [{"type": "text", "text": text, "text_elements": []}],
-                }),
+                json!({"threadId": thread, "expectedTurnId": turn, "input": input}),
                 Call::Steer,
             ));
         }
@@ -1068,5 +1084,34 @@ mod tests {
             &bridge.on_line(&failed).deltas[..],
             [Delta::TurnBoundary(b)] if b.error.as_deref() == Some("model overloaded")
         ));
+    }
+
+    fn attachment(name: &str, mime: &str, data: Option<&[u8]>) -> Attachment {
+        Attachment {
+            name: name.into(),
+            mime: mime.into(),
+            path: format!("/data/attachments/{name}"),
+            size: 3,
+            data: data.map(<[u8]>::to_vec),
+        }
+    }
+
+    #[test]
+    fn images_are_read_by_codex_from_their_files() {
+        let attachments = [attachment("shot.png", "image/png", Some(b"abc"))];
+        let message = qcc_plugin_sdk::message("look", &[], &attachments, true);
+        let (mut bridge, _) = Bridge::new(config());
+        bridge.on_line(r#"{"id":1,"result":{}}"#);
+        bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"th"}}}"#);
+        let output = bridge.prompt_message(&message);
+        assert_eq!(methods(&output), ["turn/start"]);
+        let request: Value = serde_json::from_str(&output.writes[0]).unwrap();
+        assert_eq!(
+            request["params"]["input"],
+            json!([
+                {"type": "localImage", "path": "/data/attachments/shot.png"},
+                {"type": "text", "text": "look", "text_elements": []},
+            ])
+        );
     }
 }

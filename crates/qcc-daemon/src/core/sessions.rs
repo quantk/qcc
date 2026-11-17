@@ -59,8 +59,8 @@ impl Core {
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
         let prompt = match prompt {
-            Some(UserInput { text, notes }) if thread.handover => {
-                Some(UserInput { text: self.handover_prompt(id, text), notes })
+            Some(UserInput { text, notes, attachments }) if thread.handover => {
+                Some(UserInput { text: self.handover_prompt(id, text), notes, attachments })
             }
             prompt => prompt,
         };

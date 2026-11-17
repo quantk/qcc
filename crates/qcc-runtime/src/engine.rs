@@ -109,24 +109,35 @@ impl ThreadEngine {
     pub fn submit_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
         self.assembler.note_input();
         self.awaiting_turn = !self.turn_open();
-        let UserInput { text, notes } = input;
-        let submitted =
-            EventPayload::InputSubmitted { text, notes, steered: false, queue_id: None };
+        let UserInput { text, notes, attachments } = input;
+        let submitted = EventPayload::InputSubmitted {
+            text,
+            notes,
+            attachments,
+            steered: false,
+            queue_id: None,
+        };
         self.emit(vec![submitted], now)
     }
 
     /// A user message fed into the running turn.
     pub fn steer_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
-        let UserInput { text, notes } = input;
-        let submitted = EventPayload::InputSubmitted { text, notes, steered: true, queue_id: None };
+        let UserInput { text, notes, attachments } = input;
+        let submitted = EventPayload::InputSubmitted {
+            text,
+            notes,
+            attachments,
+            steered: true,
+            queue_id: None,
+        };
         self.emit(vec![submitted], now)
     }
 
     /// A user message that waits for the running turn to end.
     pub fn queue_input(&mut self, input: UserInput, now: u64) -> Vec<ThreadEvent> {
         let queue_id = self.assembler.mint_queue_id();
-        let UserInput { text, notes } = input;
-        self.emit(vec![EventPayload::InputQueued { queue_id, text, notes }], now)
+        let UserInput { text, notes, attachments } = input;
+        self.emit(vec![EventPayload::InputQueued { queue_id, text, notes, attachments }], now)
     }
 
     /// Take the oldest queued message off the queue if the thread can start a turn.
@@ -148,6 +159,7 @@ impl ThreadEngine {
         let submitted = EventPayload::InputSubmitted {
             text: input.text.clone(),
             notes: input.notes.clone(),
+            attachments: input.attachments.clone(),
             steered: false,
             queue_id: Some(queue_id),
         };
@@ -167,11 +179,11 @@ impl ThreadEngine {
 
     /// Take one message off the queue before it is delivered. Returns its text, or
     /// `None` when nothing with that id is queued (it may have been delivered).
-    pub fn unqueue(&mut self, queue_id: &str, now: u64) -> Option<(String, Vec<ThreadEvent>)> {
+    pub fn unqueue(&mut self, queue_id: &str, now: u64) -> Option<(UserInput, Vec<ThreadEvent>)> {
         let (_, input) =
             self.timeline.queued_inputs().iter().find(|(id, _)| id == queue_id)?.clone();
         let dropped = EventPayload::InputDropped { queue_id: queue_id.to_owned() };
-        Some((input.text, self.emit(vec![dropped], now)))
+        Some((input, self.emit(vec![dropped], now)))
     }
 
     /// The provider was asked to compact the session's context, which it does in a

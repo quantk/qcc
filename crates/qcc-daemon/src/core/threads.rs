@@ -139,6 +139,8 @@ impl Core {
         };
 
         let id = ThreadId(format!("thr_{}", uuid::Uuid::now_v7().simple()));
+        let attachments = std::mem::take(&mut p.attachments);
+        let attachments = self.store_attachments(&id, attachments)?;
         let now = now_ms();
         let mut events = self
             .supervisor
@@ -161,7 +163,12 @@ impl Core {
                 now,
             )
             .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
-        let prompt = p.prompt.map(UserInput::from);
+        let prompt = match (p.prompt, attachments) {
+            (None, attachments) if attachments.is_empty() => None,
+            (text, attachments) => {
+                Some(UserInput { text: text.unwrap_or_default(), notes: Vec::new(), attachments })
+            }
+        };
         if let Some(prompt) = &prompt
             && let Ok(engine) = self.supervisor.engine(&id)
         {
@@ -229,9 +236,14 @@ impl Core {
         &mut self,
         p: ThreadSendParams,
     ) -> Result<ThreadSendResult, RpcError> {
-        let ThreadSendParams { thread_id, text, delivery, context } = p;
+        let ThreadSendParams { thread_id, text, delivery, context, attachments } = p;
+        if text.trim().is_empty() && attachments.is_empty() {
+            return Err(RpcError::new(codes::INVALID_PARAMS, "the message is empty"));
+        }
         let notes = context.iter().map(|context| self.context_note(context)).collect();
-        let input = UserInput { text, notes };
+        self.check_open(&thread_id)?;
+        let attachments = self.store_attachments(&thread_id, attachments)?;
+        let input = UserInput { text, notes, attachments };
         let provider = self.supervisor.thread(&thread_id).map(|thread| thread.provider.clone());
         let can_steer = provider
             .and_then(|provider| self.host.provider(&provider))
@@ -430,7 +442,7 @@ impl Core {
         let ThreadUnqueueParams { thread_id, queue_id } = p;
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
-        let Some((text, events)) = engine.unqueue(&queue_id, now_ms()) else {
+        let Some((input, events)) = engine.unqueue(&queue_id, now_ms()) else {
             return Err(RpcError::new(
                 codes::INVALID_PARAMS,
                 format!("no message {queue_id:?} is queued; it may have been delivered already"),
@@ -440,7 +452,7 @@ impl Core {
             self.queued.remove(&thread_id);
         }
         self.commit(events);
-        Ok(ThreadUnqueueResult { text })
+        Ok(ThreadUnqueueResult { text: input.text, attachments: input.attachments })
     }
 
     /// The provider session is starting or stopping: input waits, and nothing else

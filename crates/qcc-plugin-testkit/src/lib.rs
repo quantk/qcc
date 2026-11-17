@@ -251,10 +251,15 @@ impl Harness {
     }
 
     pub fn input(&mut self, text: &str) -> Result<(), PluginError> {
-        let events = self.engine.submit_input(text.into(), 0);
+        self.input_with(text.into())
+    }
+
+    /// Send a message with everything a message can carry: notes, attachments.
+    pub fn input_with(&mut self, input: UserInput) -> Result<(), PluginError> {
+        let events = self.engine.submit_input(input.clone(), 0);
         self.events.extend(events);
         let thread = self.thread_id.clone();
-        self.call(ProviderRequest::Input { thread, input: text.into() })?;
+        self.call(ProviderRequest::Input { thread, input })?;
         self.pump();
         Ok(())
     }

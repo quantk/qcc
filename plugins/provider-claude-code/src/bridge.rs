@@ -22,7 +22,7 @@ use qcc_plugin_sdk::json::str_field;
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{add_usage, boundary, option};
+use qcc_plugin_sdk::{Message, add_usage, base64, boundary, option};
 use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
@@ -204,7 +204,12 @@ impl Bridge {
 
     /// The user sent a message that starts a turn.
     pub fn prompt(&mut self, text: &str) -> Output {
-        let mut output = self.steer(text);
+        self.prompt_message(&Message { text: text.to_owned(), images: Vec::new() })
+    }
+
+    /// [`Bridge::prompt`] with images to look at.
+    pub fn prompt_message(&mut self, message: &Message) -> Output {
+        let mut output = self.steer_message(message);
         if !self.turn_open {
             self.turn_open = true;
             output.deltas.push(Delta::TurnOpen);
@@ -221,7 +226,13 @@ impl Bridge {
     /// The user sent a message for the running turn. On the wire it is the same
     /// message as a prompt: the agent takes it into the turn at its next step.
     pub fn steer(&mut self, text: &str) -> Output {
-        let message = json!({"type": "user", "message": {"role": "user", "content": text}});
+        self.steer_message(&Message { text: text.to_owned(), images: Vec::new() })
+    }
+
+    /// [`Bridge::steer`] with images to look at.
+    pub fn steer_message(&mut self, message: &Message) -> Output {
+        let message =
+            json!({"type": "user", "message": {"role": "user", "content": content(message)}});
         Output { writes: vec![message.to_string()], ..Output::default() }
     }
 
@@ -561,6 +572,27 @@ fn success(request_id: &str, response: &Value) -> Value {
         "type": "control_response",
         "response": {"subtype": "success", "request_id": request_id, "response": response},
     })
+}
+
+/// The content of a user message: plain text, or image blocks followed by the text
+/// when there are images to look at.
+fn content(message: &Message) -> Value {
+    if message.images.is_empty() {
+        return Value::String(message.text.clone());
+    }
+    let mut blocks: Vec<Value> = message
+        .images
+        .iter()
+        .filter_map(|image| {
+            let data = image.data.as_deref()?;
+            Some(json!({
+                "type": "image",
+                "source": {"type": "base64", "media_type": image.mime, "data": base64(data)},
+            }))
+        })
+        .collect();
+    blocks.push(json!({"type": "text", "text": message.text}));
+    Value::Array(blocks)
 }
 
 /// No to a permission prompt.
@@ -1276,5 +1308,37 @@ mod tests {
         assert_eq!(tool("Skill", json!({"skill": "tdd"})), (None, Some("tdd".into())));
         assert_eq!(tool("mcp__broken", json!({})), (None, None));
         assert_eq!(tool("TodoWrite", json!({})), (None, None));
+    }
+
+    fn attachment(name: &str, mime: &str, data: Option<&[u8]>) -> Attachment {
+        Attachment {
+            name: name.into(),
+            mime: mime.into(),
+            path: format!("/data/attachments/{name}"),
+            size: 3,
+            data: data.map(<[u8]>::to_vec),
+        }
+    }
+
+    #[test]
+    fn images_go_as_image_blocks_and_other_files_by_path() {
+        let attachments = [
+            attachment("shot.png", "image/png", Some(b"abc")),
+            attachment("a.txt", "text/plain", None),
+        ];
+        let message = qcc_plugin_sdk::message("look", &[], &attachments, true);
+        let mut bridge = Bridge::new(None);
+        let output = bridge.prompt_message(&message);
+        assert_eq!(kinds(&output.deltas), ["turn.open"]);
+        let written: Value = serde_json::from_str(&output.writes[0]).unwrap();
+        let content = written["message"]["content"].as_array().unwrap();
+        assert_eq!(
+            content[0],
+            json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "YWJj"}})
+        );
+        let text = content[1]["text"].as_str().unwrap();
+        assert!(text.contains("a.txt (text/plain, 3 bytes): /data/attachments/a.txt"), "{text}");
+        assert!(!text.contains("shot.png"), "{text}");
+        assert!(text.ends_with("look"), "{text}");
     }
 }

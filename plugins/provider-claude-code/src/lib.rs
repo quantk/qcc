@@ -40,6 +40,7 @@ impl Provider for ClaudeCode {
                 compact: true,
                 list_skills: true,
                 context_usage: true,
+                images: true,
             },
         }
     }
@@ -104,8 +105,8 @@ impl Provider for ClaudeCode {
             self.sessions.run(&start.thread, |bridge| bridge.switch_mcp(name, false))?;
         }
         if let Some(prompt) = &start.prompt {
-            let prompt = with_notes(&start.prompt_notes, prompt);
-            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
+            let prompt = message(prompt, &start.prompt_notes, &start.prompt_attachments, true);
+            self.sessions.run(&start.thread, |bridge| bridge.prompt_message(&prompt))?;
         }
         // After the prompt, which must not wait on it; the agent answers either way.
         // Only a status: an agent already gone is reported by its exit, not here.
@@ -123,8 +124,8 @@ impl Provider for ClaudeCode {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let text = with_notes(&input.notes, &input.text);
-        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
+        let message = message(&input.text, &input.notes, &input.attachments, true);
+        self.sessions.run(&input.thread, |bridge| bridge.prompt_message(&message))
     }
 
     fn compact(&mut self, thread: String) -> Result<(), String> {
@@ -132,8 +133,8 @@ impl Provider for ClaudeCode {
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let text = with_notes(&input.notes, &input.text);
-        self.sessions.run(&input.thread, |bridge| bridge.steer(&text))
+        let message = message(&input.text, &input.notes, &input.attachments, true);
+        self.sessions.run(&input.thread, |bridge| bridge.steer_message(&message))
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {

@@ -9,6 +9,7 @@
 //!
 //! This crate depends on neither an async runtime nor the plugin host.
 
+pub mod attachment;
 pub mod comment;
 pub mod context;
 pub mod delta;
@@ -22,6 +23,7 @@ pub mod stats;
 pub mod thread;
 pub mod usage;
 
+pub use attachment::{Attachment, guess_mime, is_image_mime};
 pub use comment::{DiffSide, LineComment};
 pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};

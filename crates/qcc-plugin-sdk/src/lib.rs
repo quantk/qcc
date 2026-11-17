@@ -86,21 +86,21 @@ pub use bindings::qcc::plugin::types;
 pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
 
 use types::{
-    AgentSkill, CommandCall, CommandInfo, CommandResult, Contribution, Delta, EnvironmentChanges,
-    EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare, EnvironmentQuery,
-    EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer, InteractionOption, McpSwitch,
-    ModelInfo, OptionKind, Outcome, ProviderInfo, ProviderRequest, SessionStart, SessionStarted,
-    SettingField, SettledThread, SkillInfo, SkillRef, ThreadInput, TokenUsage, TurnBoundary,
-    TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution, Delta,
+    EnvironmentChanges, EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
+    EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
+    InteractionOption, McpSwitch, ModelInfo, OptionKind, Outcome, ProviderInfo, ProviderRequest,
+    SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo, SkillRef, ThreadInput,
+    TokenUsage, TurnBoundary, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
 pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
-        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage, boundary,
-        completions, deltas, kv, log, option, process, session_context, skills_prompt, threads,
-        timers, with_notes,
+        Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
+        attachments_note, boundary, completions, deltas, kv, log, message, option, process,
+        session_context, skills_prompt, threads, timers, with_notes,
     };
 }
 
@@ -341,6 +341,57 @@ pub fn with_notes(notes: &[String], text: &str) -> String {
     message.push_str("</qcc-notes>\n\n");
     message.push_str(text);
     message
+}
+
+/// A user message as a bridge hands it to its agent: the text, with qcc's notes in
+/// front ([`with_notes`]), and the attached images the agent is to look at.
+#[derive(Debug, Clone)]
+pub struct Message<'a> {
+    pub text: String,
+    /// Attachments that came with their bytes (`attachment.data`), in order. Empty
+    /// unless the bridge asked for pictures.
+    pub images: Vec<&'a Attachment>,
+}
+
+/// Put a message together the way most bridges hand one over. With `pictures`,
+/// images that came with their bytes go to [`Message::images`]; every other
+/// attachment becomes a note saying where it is saved ([`attachments_note`]), so
+/// the agent can read it.
+pub fn message<'a>(
+    text: &str,
+    notes: &[String],
+    attachments: &'a [Attachment],
+    pictures: bool,
+) -> Message<'a> {
+    let (images, files): (Vec<&Attachment>, Vec<&Attachment>) =
+        attachments.iter().partition(|attachment| pictures && attachment.data.is_some());
+    let mut notes = notes.to_vec();
+    notes.extend(attachments_note(&files));
+    Message { text: with_notes(&notes, text), images }
+}
+
+/// The note that tells an agent where the files attached to a message are saved,
+/// or `None` if there are none. For attachments a bridge does not hand over itself.
+pub fn attachments_note(attachments: &[&Attachment]) -> Option<String> {
+    if attachments.is_empty() {
+        return None;
+    }
+    let mut note = String::from(
+        "The user attached files to this message; qcc saved them where you can read them:",
+    );
+    for attachment in attachments {
+        note.push_str(&format!(
+            "\n  - {} ({}, {} bytes): {}",
+            attachment.name, attachment.mime, attachment.size, attachment.path
+        ));
+    }
+    Some(note)
+}
+
+/// Standard base64 with padding, the way agents take image bytes in JSON.
+pub fn base64(data: &[u8]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 /// The paragraph that tells an agent about the other folders of its project, or

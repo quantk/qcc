@@ -107,6 +107,14 @@ impl PluginHandle {
         &self.inner.contributions
     }
 
+    /// Whether `provider`, one of this plugin's, declared that it looks at images.
+    fn takes_images(&self, provider: &str) -> bool {
+        self.inner.contributions.iter().any(|contribution| {
+            matches!(contribution, Contribution::Provider(info)
+                if info.id.as_str() == provider && info.capabilities.images)
+        })
+    }
+
     /// Queue a request and wait for the plugin's answer.
     pub async fn call(&self, request: PluginRequest) -> Result<Outcome, PluginError> {
         self.send(request)?.await.map_err(|_| PluginError::Gone)?.map(convert::outcome)
@@ -117,7 +125,7 @@ impl PluginHandle {
     pub fn post(&self, request: PluginRequest) -> Result<(), PluginError> {
         self.inner
             .tx
-            .send(Message::Internal(convert::event(request)))
+            .send(Message::Internal(convert::event(request, |id| self.takes_images(id))))
             .map_err(|_| PluginError::Gone)
     }
 
@@ -143,7 +151,10 @@ impl PluginHandle {
         let (reply, receiver) = oneshot::channel();
         self.inner
             .tx
-            .send(Message::Call { event: convert::event(request), reply })
+            .send(Message::Call {
+                event: convert::event(request, |id| self.takes_images(id)),
+                reply,
+            })
             .map_err(|_| PluginError::Gone)?;
         Ok(receiver)
     }

@@ -8,11 +8,11 @@ use qcc_protocol::methods::{
     CommandList, CommandRun, CommentAdd, CommentDelete, CommentList, CommentResolve, DaemonStatus,
     DaemonStatusResult, Empty, InteractionResolve, PluginList, ProjectCreate, ProjectDelete,
     ProjectList, ProjectListResult, ProjectUpdate, ProviderModels, ProviderSkills, SettingsGet,
-    SettingsSet, SkillList, ThreadArchive, ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff,
-    ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams,
-    ThreadListResult, ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp,
-    ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop,
-    ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
+    SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges, ThreadCompact,
+    ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
+    ThreadListParams, ThreadListResult, ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent,
+    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn,
+    ThreadStop, ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
     ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
     UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
     UsageHistoryResult, UsageTools, UsageToolsResult,
@@ -37,6 +37,10 @@ impl Core {
                 let result = params::<ThreadSpawn>(raw).and_then(|p| self.thread_spawn(p));
                 responder.reply(result);
             }
+            ThreadAttachment::NAME => match params::<ThreadAttachment>(raw) {
+                Ok(p) => self.thread_attachment(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
             ThreadSend::NAME => {
                 let result = params::<ThreadSend>(raw).and_then(|p| self.thread_send(p));
                 responder.reply(result);

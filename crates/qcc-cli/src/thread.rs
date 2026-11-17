@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use anyhow::bail;
+use anyhow::{Context as _, bail};
 use clap::Subcommand;
 use qcc_client::protocol::methods::{
-    Delivery, Empty, MessageContext, SendMode, SettingsGet, SkillList, StopMode, ThreadArchive,
-    ThreadArchiveParams, ThreadChanges, ThreadCompact, ThreadCompactParams, ThreadDeliver,
-    ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams, ThreadIsolate,
+    Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
+    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadCompact, ThreadCompactParams,
+    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams, ThreadIsolate,
     ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams,
     ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
     ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams,
@@ -38,6 +38,10 @@ pub(crate) enum ThreadCommand {
         /// The first message to the agent.
         #[arg(long)]
         prompt: Option<String>,
+        /// Attach a file to the first message: qcc keeps a copy, and the agent looks at an
+        /// image or reads the file. Repeatable.
+        #[arg(long = "attach", value_name = "FILE")]
+        attach: Vec<PathBuf>,
         /// Working directory of the thread [default: the current directory].
         #[arg(long)]
         cwd: Option<PathBuf>,
@@ -99,6 +103,10 @@ pub(crate) enum ThreadCommand {
         /// Repeatable.
         #[arg(long = "comment", value_name = "ID")]
         comments: Vec<String>,
+        /// Attach a file to the message: qcc keeps a copy, and the agent looks at an
+        /// image or reads the file. Repeatable.
+        #[arg(long = "attach", value_name = "FILE")]
+        attach: Vec<PathBuf>,
         /// Stream the thread's events until the turn that takes this message settles.
         #[arg(long)]
         follow: bool,
@@ -250,6 +258,18 @@ pub(crate) enum ThreadCommand {
     },
 }
 
+/// Files to attach, by absolute path: the daemon reads them, from wherever it runs.
+fn attachments(files: Vec<PathBuf>) -> anyhow::Result<Vec<NewAttachment>> {
+    files
+        .into_iter()
+        .map(|file| {
+            let path = std::path::absolute(&file)
+                .with_context(|| format!("cannot attach {}", file.display()))?;
+            Ok(NewAttachment { path: Some(path.display().to_string()), ..NewAttachment::default() })
+        })
+        .collect()
+}
+
 /// Exit code of a wait that ran out of time, as `timeout(1)` has it.
 const TIMED_OUT: u8 = 124;
 
@@ -262,6 +282,7 @@ pub(crate) async fn run(
         ThreadCommand::Spawn {
             provider,
             prompt,
+            attach,
             cwd,
             env,
             base,
@@ -317,6 +338,7 @@ pub(crate) async fn run(
                     environment: env,
                     base,
                     prompt,
+                    attachments: attachments(attach)?,
                     model,
                     effort,
                     parent,
@@ -342,7 +364,7 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Send { thread, text, steer, about, comments, follow } => {
+        ThreadCommand::Send { thread, text, steer, about, comments, attach, follow } => {
             let thread_id = ThreadId::new(thread);
             // Read the cursor first so the stream starts at this message.
             let cursor = client
@@ -363,6 +385,7 @@ pub(crate) async fn run(
                             comment_ids: comments.into_iter().map(CommentId::new).collect(),
                         }))
                         .collect(),
+                    attachments: attachments(attach)?,
                 })
                 .await?;
             if !json {

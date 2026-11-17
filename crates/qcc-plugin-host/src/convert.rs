@@ -1,6 +1,6 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
-use qcc_domain::{AgentSkill, Compaction, SettingField, SettingKind};
+use qcc_domain::{AgentSkill, Attachment, Compaction, SettingField, SettingKind};
 use qcc_domain::{
     ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
     EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
@@ -230,6 +230,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 compact: p.capabilities.compact,
                 list_skills: p.capabilities.list_skills,
                 context_usage: p.capabilities.context_usage,
+                images: p.capabilities.images,
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -439,19 +440,56 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
     }
 }
 
-fn thread_input(thread: ThreadId, input: UserInput) -> wit::ThreadInput {
-    wit::ThreadInput { thread: thread.0, text: input.text, notes: input.notes }
+/// An attachment as a provider gets it. The bytes of an image go along only to a
+/// provider that looks at images; one that cannot be read goes by its path alone.
+fn attachment(attachment: Attachment, images: bool) -> wit::Attachment {
+    let data = if images && attachment.is_image() {
+        std::fs::read(&attachment.path)
+            .inspect_err(|error| {
+                tracing::warn!("cannot read attachment {}: {error}", attachment.path);
+            })
+            .ok()
+    } else {
+        None
+    };
+    wit::Attachment {
+        name: attachment.name,
+        mime: attachment.mime,
+        path: attachment.path,
+        size: attachment.size,
+        data,
+    }
 }
 
-fn session_start(start: SessionStart) -> wit::SessionStart {
+fn attachments(attachments: Vec<Attachment>, images: bool) -> Vec<wit::Attachment> {
+    attachments.into_iter().map(|item| attachment(item, images)).collect()
+}
+
+fn thread_input(thread: ThreadId, input: UserInput, images: bool) -> wit::ThreadInput {
+    wit::ThreadInput {
+        thread: thread.0,
+        text: input.text,
+        notes: input.notes,
+        attachments: attachments(input.attachments, images),
+    }
+}
+
+fn session_start(start: SessionStart, images: bool) -> wit::SessionStart {
+    let (prompt, prompt_notes, prompt_attachments) = match start.prompt {
+        Some(UserInput { text, notes, attachments: files }) => {
+            (Some(text), notes, attachments(files, images))
+        }
+        None => (None, Vec::new(), Vec::new()),
+    };
     wit::SessionStart {
         thread: start.thread.0,
         cwd: start.cwd,
         model: start.model,
         effort: start.effort,
         resume: start.resume,
-        prompt_notes: start.prompt.as_ref().map(|prompt| prompt.notes.clone()).unwrap_or_default(),
-        prompt: start.prompt.map(|prompt| prompt.text),
+        prompt,
+        prompt_notes,
+        prompt_attachments,
         permission_mode: start.permission_mode.map(mode_to_wit),
         env: start.env,
         skills: start
@@ -493,17 +531,19 @@ fn resolution(resolution: InteractionResolution) -> wit::InteractionResolution {
     }
 }
 
-pub(crate) fn event(request: PluginRequest) -> wit::Event {
+/// `images` tells whether a provider of the plugin declared that it looks at images.
+pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wit::Event {
     match request {
         PluginRequest::Provider { provider, request } => wit::Event::Provider(wit::ProviderCall {
-            provider: provider.0,
             request: match request {
-                ProviderRequest::Start(start) => wit::ProviderRequest::Start(session_start(*start)),
+                ProviderRequest::Start(start) => {
+                    wit::ProviderRequest::Start(session_start(*start, images(&provider.0)))
+                }
                 ProviderRequest::Input { thread, input } => {
-                    wit::ProviderRequest::Input(thread_input(thread, input))
+                    wit::ProviderRequest::Input(thread_input(thread, input, images(&provider.0)))
                 }
                 ProviderRequest::Steer { thread, input } => {
-                    wit::ProviderRequest::Steer(thread_input(thread, input))
+                    wit::ProviderRequest::Steer(thread_input(thread, input, images(&provider.0)))
                 }
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),
@@ -525,6 +565,7 @@ pub(crate) fn event(request: PluginRequest) -> wit::Event {
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
                 ProviderRequest::ListSkills => wit::ProviderRequest::ListSkills,
             },
+            provider: provider.0,
         }),
         PluginRequest::Ui(request) => wit::Event::Ui(match request {
             UiRequest::Render { view, thread } => {

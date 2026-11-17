@@ -302,6 +302,10 @@ interface types {
     /// The provider reports what its agent's context window holds, part by part
     /// (`context-usage` deltas).
     context-usage: bool,
+    /// The agent looks at attached images as images: the provider is given their
+    /// bytes (`attachment.data`) and hands them over the way its agent takes them.
+    /// Without it, attachments come with their paths only.
+    images: bool,
   }
 
   record provider-info {
@@ -501,6 +505,22 @@ interface types {
     headers: list<tuple<string, string>>,
   }
 
+  /// A file the user attached to a message. qcc keeps a copy of it; the copy stays
+  /// as long as the thread.
+  record attachment {
+    /// The file name as the user knows it.
+    name: string,
+    /// Media type, like `image/png`.
+    mime: string,
+    /// Absolute path of qcc's copy, which the agent can read.
+    path: string,
+    size: u64,
+    /// The file's bytes: given for an image the agent can look at (PNG, JPEG, GIF,
+    /// WebP), and only to a provider that declared `images`. A bridge tells its
+    /// agent about the other attachments by path (`qcc_plugin_sdk::attachments_note`).
+    data: option<list<u8>>,
+  }
+
   record session-start {
     thread: thread-id,
     /// Working directory of the thread.
@@ -516,6 +536,8 @@ interface types {
     /// What qcc tells the agent along with the first message, as with
     /// `thread-input.notes`.
     prompt-notes: list<string>,
+    /// Files attached to the first message, as with `thread-input.attachments`.
+    prompt-attachments: list<attachment>,
     /// Absent: the agent's own configuration decides what it may do unasked.
     permission-mode: option<permission-mode>,
     /// Variables the agent process must see (`QCC_THREAD_ID`, `QCC_SOCKET`).
@@ -556,6 +578,8 @@ interface types {
     /// started). The bridge hands them over the way its agent takes them;
     /// `qcc_plugin_sdk::with_notes` puts them in front of the text.
     notes: list<string>,
+    /// Files the user attached to the message.
+    attachments: list<attachment>,
   }
 
   record interaction-answer {

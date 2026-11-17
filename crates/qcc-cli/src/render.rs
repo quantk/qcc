@@ -2,7 +2,7 @@
 
 use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
-    ChangeKind, ContextKind, EnvironmentChanges, EnvironmentState, EventPayload,
+    Attachment, ChangeKind, ContextKind, EnvironmentChanges, EnvironmentState, EventPayload,
     InteractionRequest, Item, ItemShape, ItemStatus, McpState, SettingKind, Thread, ThreadEvent,
     ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
@@ -364,18 +364,27 @@ fn item(item: &Item) -> Option<String> {
     })
 }
 
+fn attachment_line(attachment: &Attachment) -> String {
+    format!("  [attached {} ({}, {} bytes)]", attachment.name, attachment.mime, attachment.size)
+}
+
 /// One event as text; `None` for events that only matter to programs.
 pub fn event(event: &ThreadEvent) -> Option<String> {
     Some(match &event.payload {
-        EventPayload::InputSubmitted { text, steered: true, .. } => {
-            format!("> {text}  (into the running turn)")
+        EventPayload::InputSubmitted { text, notes, attachments, steered, .. } => {
+            let mut lines = vec![format!("> {text}")];
+            if *steered {
+                lines[0].push_str("  (into the running turn)");
+            }
+            lines.extend(notes.iter().map(|note| format!("  (qcc: {note})")));
+            lines.extend(attachments.iter().map(attachment_line));
+            lines.join("\n")
         }
-        EventPayload::InputSubmitted { text, notes, .. } if !notes.is_empty() => {
-            let notes: Vec<String> = notes.iter().map(|note| format!("  (qcc: {note})")).collect();
-            format!("> {text}\n{}", notes.join("\n"))
+        EventPayload::InputQueued { text, attachments, .. } => {
+            let mut lines = vec![format!("(queued) {text}")];
+            lines.extend(attachments.iter().map(attachment_line));
+            lines.join("\n")
         }
-        EventPayload::InputSubmitted { text, .. } => format!("> {text}"),
-        EventPayload::InputQueued { text, .. } => format!("(queued) {text}"),
         EventPayload::InputDropped { .. } => "(a queued message was dropped)".to_owned(),
         EventPayload::PermissionModeChanged { permission_mode } => {
             format!("permission mode: {}", permission_mode.map_or("default", |mode| mode.as_str()))

@@ -42,6 +42,9 @@ impl Provider for Codex {
                 compact: true,
                 list_skills: true,
                 context_usage: false,
+                // Codex reads images from their files (`localImage`); the bytes it
+                // is given go unused.
+                images: true,
             },
         }
     }
@@ -70,8 +73,8 @@ impl Provider for Codex {
         self.sessions.apply(&start.thread, handshake)?;
         if let Some(prompt) = &start.prompt {
             // Held by the bridge until the agent finished its handshake.
-            let prompt = with_notes(&start.prompt_notes, prompt);
-            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
+            let prompt = message(prompt, &start.prompt_notes, &start.prompt_attachments, true);
+            self.sessions.run(&start.thread, |bridge| bridge.prompt_message(&prompt))?;
         }
         // A new thread is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
@@ -79,13 +82,13 @@ impl Provider for Codex {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let text = with_notes(&input.notes, &input.text);
-        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
+        let message = message(&input.text, &input.notes, &input.attachments, true);
+        self.sessions.run(&input.thread, |bridge| bridge.prompt_message(&message))
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let text = with_notes(&input.notes, &input.text);
-        self.sessions.run(&input.thread, |bridge| bridge.steer(&text))
+        let message = message(&input.text, &input.notes, &input.attachments, true);
+        self.sessions.run(&input.thread, |bridge| bridge.steer_message(&message))
     }
 
     fn compact(&mut self, thread: String) -> Result<(), String> {

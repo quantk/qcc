@@ -13,6 +13,21 @@ export type AgentSkill = {
 	path?: string | null,
 };
 
+/**
+ *  A file attached to a user message. qcc keeps its own copy, so the message reads
+ *  the same later whatever happens to the file it came from.
+ */
+export type Attachment = {
+	/**  The file name as the user knows it. */
+	name: string,
+	/**  Media type, like `image/png`. */
+	mime: string,
+	/**  Absolute path of qcc's copy. */
+	path: string,
+	/**  Bytes. */
+	size: number,
+};
+
 /**  How a file differs from what an environment started from. */
 export type ChangeKind = "added" | "modified" | "deleted" | 
 /**  New and not yet known to version control. */
@@ -275,12 +290,14 @@ export type EventPayload =
 { type: "input/submitted"; text: string; 
 /**  What qcc told the agent along with the message (see [`UserInput::notes`]). */
 notes?: string[]; 
+/**  Files the user attached to the message. */
+attachments?: Attachment[]; 
 /**  Fed into the running turn instead of starting one. */
 steered?: boolean; 
 /**  The queued input this delivery takes off the queue. */
 queue_id?: string | null } | 
 /**  A user message arrived while a turn was running and waits for it to end. */
-{ type: "input/queued"; queue_id: string; text: string; notes?: string[] } | 
+{ type: "input/queued"; queue_id: string; text: string; notes?: string[]; attachments?: Attachment[] } | 
 /**
  *  A queued message was discarded before delivery: the thread was stopped, or the
  *  user took the message back.
@@ -442,6 +459,25 @@ export type ModelInfo = {
 	default_effort?: string | null,
 };
 
+/**
+ *  A file to attach to a message: one on the daemon's machine (`path`) or its
+ *  contents (`data`), like a pasted image. qcc keeps a copy of it with the thread,
+ *  which the agent can read and the timeline shows.
+ */
+export type NewAttachment = {
+	/**
+	 *  An absolute path. A file qcc already keeps for the thread (an attachment of
+	 *  a message taken back from the queue) is not copied again.
+	 */
+	path?: string | null,
+	/**  The file's contents, base64-encoded. Exactly one of `path` and `data`. */
+	data?: string | null,
+	/**  The file name to show. Absent: that of `path`, or one made up for `data`. */
+	name?: string | null,
+	/**  Media type. Absent: told from the contents and the name. */
+	mime?: string | null,
+};
+
 export type OptionKind = "allow" | "deny" | "other";
 
 /**  An approval or a question the agent is waiting on. */
@@ -584,6 +620,11 @@ export type ProviderCapabilities = {
 	 *  (`context.usage` deltas). Without it, only how full the window is is known.
 	 */
 	context_usage?: boolean,
+	/**
+	 *  The agent looks at attached images (PNG, JPEG, GIF, WebP) as images. Without
+	 *  it, it is told where they are saved, like any other attached file.
+	 */
+	images?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -851,6 +892,18 @@ export type ThreadArchiveParams = {
 	force?: boolean,
 };
 
+export type ThreadAttachmentParams = {
+	thread_id: ThreadId,
+	/**  `Attachment::path` as the thread's events give it. */
+	path: string,
+};
+
+export type ThreadAttachmentResult = {
+	/**  The file, base64-encoded. */
+	data: string,
+	mime: string,
+};
+
 export type ThreadChangesResult = {
 	changes: EnvironmentChanges,
 };
@@ -970,6 +1023,8 @@ export type ThreadSendParams = {
 	 *  it; the note is kept in the timeline with the message.
 	 */
 	context?: MessageContext[],
+	/**  Files attached to the message. The text may be empty when there are some. */
+	attachments?: NewAttachment[],
 };
 
 export type ThreadSendResult = {
@@ -1027,6 +1082,8 @@ export type ThreadSpawnParams = {
 	/**  What the environment starts from (a git ref). Absent: its default. */
 	base?: string | null,
 	prompt?: string | null,
+	/**  Files attached to `prompt`. */
+	attachments?: NewAttachment[],
 	model?: string | null,
 	/**
 	 *  How hard the model thinks: a level the provider lists for the model.
@@ -1094,6 +1151,8 @@ export type ThreadUnqueueParams = {
 
 export type ThreadUnqueueResult = {
 	text: string,
+	/**  Its attachments, which can be sent again by `path`. */
+	attachments?: Attachment[],
 };
 
 export type ThreadUnsubscribeParams = {
@@ -1330,6 +1389,7 @@ export type Methods = {
 	"thread.spawn": { params: ThreadSpawnParams; result: ThreadResult },
 	"thread.send": { params: ThreadSendParams; result: ThreadSendResult },
 	"thread.unqueue": { params: ThreadUnqueueParams; result: ThreadUnqueueResult },
+	"thread.attachment": { params: ThreadAttachmentParams; result: ThreadAttachmentResult },
 	"thread.set_mode": { params: ThreadSetModeParams; result: ThreadResult },
 	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
 	"thread.set_skill": { params: ThreadSetSkillParams; result: ThreadResult },

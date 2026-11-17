@@ -2277,3 +2277,90 @@ fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
         daemon.qcc_env(&["orchestration", "handoff", "--json"], &[("QCC_THREAD_ID", &source)]);
     assert!(own.ok, "{}", own.stderr);
 }
+
+#[test]
+fn files_and_pasted_images_are_attached_to_messages() {
+    use base64::Engine as _;
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let png = b"\x89PNG\r\n\x1a\nnot really";
+    std::fs::write(files.path().join("shot.png"), png).unwrap();
+    std::fs::write(files.path().join("notes.md"), "# notes\n").unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("first");
+    daemon.wait_for(&id, "turn/completed");
+
+    let shot = files.path().join("shot.png");
+    let notes = files.path().join("notes.md");
+    let sent = daemon.qcc(&[
+        "thread",
+        "send",
+        &id,
+        "/attachments",
+        "--attach",
+        shot.to_str().unwrap(),
+        "--attach",
+        notes.to_str().unwrap(),
+    ]);
+    assert!(sent.ok, "{}", sent.stderr);
+    let events = daemon.eventually(&id, "ran the second turn", |e| messages(e).len() >= 2);
+    let reply = messages(&events)[1].to_owned();
+    // Echo looks at images: the bytes of the picture came along, the other file by path.
+    let lines: Vec<&str> = reply.lines().collect();
+    assert!(
+        lines[0].starts_with("shot.png (image/png, 18 bytes) image, 18 bytes inline: "),
+        "{reply}"
+    );
+    assert!(lines[1].starts_with("notes.md (text/markdown, 8 bytes) by path: "), "{reply}");
+    // qcc's copies, kept with the thread.
+    let own = dir.path().join("attachments").join(&id);
+    let submitted = events.iter().rfind(|event| event["type"] == "input/submitted").unwrap();
+    let attachments = submitted["attachments"].as_array().unwrap();
+    assert_eq!(attachments.len(), 2);
+    let copy = attachments[0]["path"].as_str().unwrap().to_owned();
+    assert!(Path::new(&copy).starts_with(&own), "{copy}");
+    assert_eq!(std::fs::read(&copy).unwrap(), png);
+    // The CLI shows them with the message.
+    let shown = daemon.qcc(&["thread", "events", &id]).stdout;
+    assert!(shown.contains("[attached shot.png (image/png, 18 bytes)]"), "{shown}");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let client = Client::connect(&daemon.socket).await.unwrap();
+        // A client reads them back to show them.
+        let read = client
+            .call_raw("thread.attachment", json!({"thread_id": id, "path": copy}))
+            .await
+            .unwrap();
+        assert_eq!(read["mime"], "image/png");
+        let data = base64::engine::general_purpose::STANDARD.encode(png);
+        assert_eq!(read["data"], data.as_str());
+        // Nothing but the thread's own attachments.
+        let outside = notes.display().to_string();
+        let refused =
+            client.call_raw("thread.attachment", json!({"thread_id": id, "path": outside})).await;
+        assert!(refused.is_err());
+
+        // An empty message is refused; a picture alone is a message.
+        let empty = client.call_raw("thread.send", json!({"thread_id": id, "text": " "})).await;
+        assert!(empty.is_err());
+        let pasted = json!({"data": data, "mime": "image/png"});
+        let alone = json!({"thread_id": id, "text": "", "attachments": [pasted]});
+        client.call_raw("thread.send", alone).await.unwrap();
+        daemon.eventually(&id, "ran the third turn", |e| {
+            e.iter().filter(|event| event["type"] == "turn/completed").count() >= 3
+        });
+        // A pasted image comes as its bytes, named for its type.
+        let ask = json!({"thread_id": id, "text": "/attachments", "attachments": [pasted]});
+        client.call_raw("thread.send", ask).await.unwrap();
+    });
+    let events = daemon.eventually(&id, "ran the fourth turn", |e| messages(e).len() >= 3);
+    let reply = messages(&events)[2];
+    assert!(
+        reply.starts_with("pasted.png (image/png, 18 bytes) image, 18 bytes inline: "),
+        "{reply}"
+    );
+}

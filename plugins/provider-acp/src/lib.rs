@@ -10,7 +10,7 @@ pub mod models;
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
-use bridge::{Bridge, Config};
+use bridge::{Bridge, Config, Prompt};
 
 /// An agent this plugin can run.
 struct Agent {
@@ -66,6 +66,8 @@ impl Provider for AcpProvider {
                 // `opencode debug skill` loses output written into a pipe.
                 list_skills: false,
                 context_usage: false,
+                // As images when the agent says it takes them, by path otherwise.
+                images: true,
             },
         }
     }
@@ -94,8 +96,12 @@ impl Provider for AcpProvider {
         self.sessions.apply(&start.thread, handshake)?;
         if let Some(prompt) = &start.prompt {
             // Held by the bridge until the agent finished its handshake.
-            let prompt = with_notes(&start.prompt_notes, prompt);
-            self.sessions.run(&start.thread, |bridge| bridge.prompt(&prompt))?;
+            let prompt = Prompt {
+                text: prompt.clone(),
+                notes: start.prompt_notes,
+                attachments: start.prompt_attachments,
+            };
+            self.sessions.run(&start.thread, |bridge| bridge.prompt_with(prompt))?;
         }
         // A new session is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
@@ -103,8 +109,9 @@ impl Provider for AcpProvider {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let text = with_notes(&input.notes, &input.text);
-        self.sessions.run(&input.thread, |bridge| bridge.prompt(&text))
+        let prompt =
+            Prompt { text: input.text, notes: input.notes, attachments: input.attachments };
+        self.sessions.run(&input.thread, |bridge| bridge.prompt_with(prompt))
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {

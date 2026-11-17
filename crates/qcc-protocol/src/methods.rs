@@ -3,10 +3,10 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    AgentSkill, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
-    InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
-    Project, ProjectId, ProviderId, ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId,
-    ThreadState, ToolBucket, UiViewInfo, UsageBucket,
+    AgentSkill, Attachment, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges,
+    EnvironmentInfo, InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo,
+    PermissionMode, Project, ProjectId, ProviderId, ProviderInfo, SettingField, Thread,
+    ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -68,6 +68,9 @@ pub struct ThreadSpawnParams {
     pub base: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
+    /// Files attached to `prompt`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<NewAttachment>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     /// How hard the model thinks: a level the provider lists for the model.
@@ -135,6 +138,29 @@ pub struct ThreadSendParams {
     /// it; the note is kept in the timeline with the message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<MessageContext>,
+    /// Files attached to the message. The text may be empty when there are some.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<NewAttachment>,
+}
+
+/// A file to attach to a message: one on the daemon's machine (`path`) or its
+/// contents (`data`), like a pasted image. qcc keeps a copy of it with the thread,
+/// which the agent can read and the timeline shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct NewAttachment {
+    /// An absolute path. A file qcc already keeps for the thread (an attachment of
+    /// a message taken back from the queue) is not copied again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// The file's contents, base64-encoded. Exactly one of `path` and `data`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    /// The file name to show. Absent: that of `path`, or one made up for `data`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Media type. Absent: told from the contents and the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
 }
 
 /// Something a user's message is about, which the agent is told along with it.
@@ -183,6 +209,28 @@ pub struct ThreadUnqueueParams {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadUnqueueResult {
     pub text: String,
+    /// Its attachments, which can be sent again by `path`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+method!(
+    /// Read a file attached to one of the thread's messages, to show it.
+    ThreadAttachment, "thread.attachment", ThreadAttachmentParams => ThreadAttachmentResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadAttachmentParams {
+    pub thread_id: ThreadId,
+    /// `Attachment::path` as the thread's events give it.
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadAttachmentResult {
+    /// The file, base64-encoded.
+    pub data: String,
+    pub mime: String,
 }
 
 method!(

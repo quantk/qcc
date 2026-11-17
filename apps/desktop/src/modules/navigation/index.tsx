@@ -1,9 +1,11 @@
 // Back and forward between the threads and screens visited, as in a browser:
 // Alt+Left and Alt+Right, the mouse's back and forward buttons, the palette. And
-// the panel at the right of a thread, which belongs to the same frame.
+// the panel at the right of a thread, which belongs to the same frame. And Alt+1 to
+// Alt+9 for the views, in the order their buttons are drawn.
 
 import { store } from "../../state/store";
-import type { UiModule } from "../../ui/registry";
+import type { AppView, UiModule } from "../../ui/registry";
+import { openViewCommand, viewShortcuts } from "../../ui/views";
 
 /** `MouseEvent.button` of the side buttons most mice have. */
 const MOUSE_BACK = 3;
@@ -21,6 +23,22 @@ export const navigationModule: UiModule = {
       run: () => store().toggleSidePanel(),
     });
 
+    // The views come and go with modules and plugins, and their shortcuts with them.
+    let views: readonly AppView[] | null = null;
+    let removeShortcuts: (() => void)[] = [];
+    const syncShortcuts = () => {
+      const next = ui.getSnapshot().views;
+      // Registering a command notifies this listener again; the views are the same then.
+      if (next === views) return;
+      views = next;
+      removeShortcuts.forEach((remove) => remove());
+      removeShortcuts = viewShortcuts(next).map(({ view, shortcut }) =>
+        ui.command({ id: openViewCommand(view.id), title: `Open ${view.title}`, shortcut, run: () => store().openView(view.id) }),
+      );
+    };
+    const stopShortcuts = ui.subscribe(syncShortcuts);
+    syncShortcuts();
+
     // The webview would otherwise take the side buttons for its own history and
     // reload the page; they are ours on every phase of the click.
     const swallow = (event: MouseEvent) => {
@@ -35,6 +53,8 @@ export const navigationModule: UiModule = {
     window.addEventListener("auxclick", swallow);
     window.addEventListener("mouseup", onUp);
     return () => {
+      stopShortcuts();
+      removeShortcuts.forEach((remove) => remove());
       window.removeEventListener("mousedown", swallow);
       window.removeEventListener("auxclick", swallow);
       window.removeEventListener("mouseup", onUp);

@@ -129,3 +129,19 @@ export function contextFill(thread: Thread): number | null {
   if (used == null || !window) return null;
   return Math.min(1, used / window);
 }
+
+/** What the live wall's button counts: agents at work and those waiting for the user. */
+export type LiveCount = { working: number; waiting: number };
+
+/** Threads the user can see that are working or waiting for an answer, as the wall's button counts them. */
+export function liveCount(threads: readonly Thread[]): LiveCount {
+  let working = 0;
+  let waiting = 0;
+  for (const thread of threads) {
+    if (thread.hidden) continue;
+    const attention = attentionOf(thread);
+    if (attention === "waiting") waiting += 1;
+    else if (attention === "active") working += 1;
+  }
+  return { working, waiting };
+}

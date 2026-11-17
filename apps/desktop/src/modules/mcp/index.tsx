@@ -2,6 +2,8 @@
 // they and the agents' own servers are doing, and a tab with the servers of one
 // thread's session.
 
+import { ServerIcon } from "lucide-react";
+
 import { mcpServersOf } from "../../state/mcp";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
@@ -13,7 +15,7 @@ export const mcpModule: UiModule = {
   id: "core.mcp",
   activate(registry) {
     const connected = () => store().getState().daemon.status === "connected";
-    registry.appView({ id: MCP_VIEW, title: "MCP servers", order: 90, render: McpView });
+    registry.appView({ id: MCP_VIEW, title: "MCP servers", order: 90, icon: ServerIcon, place: "bottom", render: McpView });
     registry.threadTab({
       id: "mcp",
       title: "MCP",

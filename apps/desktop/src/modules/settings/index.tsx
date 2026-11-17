@@ -1,6 +1,9 @@
 // The settings screen: the daemon's settings (agents' programs, defaults and
 // environment), the plugins, and preferences of this window such as its scale.
 
+import { SettingsIcon } from "lucide-react";
+
+import { store } from "../../state/store";
 import { zoomIn, zoomOut } from "../../state/zoom";
 import type { UiModule } from "../../ui/registry";
 import { SettingsView } from "./SettingsView";
@@ -12,7 +15,8 @@ export const settingsModule: UiModule = {
   id: "core.settings",
   activate(ui) {
     restoreZoom();
-    ui.appView({ id: SETTINGS, title: "Settings", order: 100, render: SettingsView });
+    ui.appView({ id: SETTINGS, title: "Settings", order: 100, icon: SettingsIcon, place: "bottom", render: SettingsView });
+    ui.command({ id: "view.settings", title: "Open settings", shortcut: "Ctrl+,", run: () => store().openView(SETTINGS) });
     // The shortcuts a browser uses. Ctrl+0 already opens the overview, so resetting
     // the scale is left to the palette and the settings screen.
     ui.command({ id: "zoom.in", title: "Zoom in", shortcut: "Ctrl+Plus", run: () => setZoom(zoomIn(getZoom())) });

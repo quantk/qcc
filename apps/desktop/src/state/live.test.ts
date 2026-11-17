@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventPayload, Item, ItemShape, Thread, ThreadEvent } from "../api/protocol.gen";
-import { RECENT_MS, contextFill, tailOf, wallThreads } from "./live";
+import { RECENT_MS, contextFill, liveCount, tailOf, wallThreads } from "./live";
 import { applyEvents, emptyTimeline } from "./timeline";
 
 const NOW = 1_000_000_000;
@@ -27,6 +27,18 @@ describe("the live wall", () => {
       NOW,
     );
     expect(shown.map((t) => t.id)).toEqual(["asks", "long", "short", "done"]);
+  });
+
+  it("counts the agents at work and those waiting, leaving out what is put away or hidden", () => {
+    const asks = { pending_interactions: [{ id: "i", request: { type: "question", question: "?" } }] } as Partial<Thread>;
+    const count = liveCount([
+      thread("idle"),
+      thread("works", { status: "active" }),
+      thread("asks", { status: "active", ...asks }),
+      thread("put-away", { status: "active", archived: true }),
+      thread("plugin's", { status: "active", hidden: true }),
+    ]);
+    expect(count).toEqual({ working: 1, waiting: 1 });
   });
 
   it("tells how full the context is only when the agent said", () => {

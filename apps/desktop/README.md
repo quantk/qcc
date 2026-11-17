@@ -50,6 +50,13 @@ plugin's UI does:
 | A command (palette, shortcut, sidebar buttons) | `ui.command` | `modules/new-thread`, `modules/projects`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
 
+A view is a button in the sidebar, so it gives an `icon` (a lucide component; plugin
+screens get a generic one). `place: "bottom"` puts it in the sidebar's foot with
+setup and preferences rather than above the threads, and `useBadge` puts a count
+on the button (a hook, called while the button is drawn; see `modules/live`). The
+navigation module binds `Alt+1`…`Alt+9` to the views in the order of their buttons
+(`src/ui/views.ts`).
+
 The side panel stays in view beside whichever thread tab is open, so it is the place
 for what is worth glancing at while reading the timeline. `modules/insights` puts
 three tabs there: Usage (how full the context is, the context at each request, compactions,

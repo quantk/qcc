@@ -45,13 +45,35 @@ export type ThreadPanel = {
   render: ComponentType<ThreadContext>;
 };
 
-/** A screen of its own, reachable from the top of the sidebar. */
+/** A screen of its own, reachable from a button of the sidebar. */
 export type AppView = {
   id: string;
   title: string;
   /** Ascending; the first one is what the app opens with. */
   order: number;
+  /** The view's button shows only this, with the title as its tooltip. Absent: a generic icon. */
+  icon?: ComponentType<{ className?: string }>;
+  /**
+   * Where the button sits. `top` (the default): screens to watch the agents, above
+   * the threads. `bottom`: setup and preferences, at the foot of the sidebar, out of
+   * the way of the threads.
+   */
+  place?: "top" | "bottom";
+  /**
+   * A number to show on the button, such as how many agents a screen has to show.
+   * Called as a React hook while the button is drawn, so it may read the store.
+   */
+  useBadge?: () => ViewBadge | null;
   render: ComponentType;
+};
+
+/** A count on a view's button. */
+export type ViewBadge = {
+  count: number;
+  /** `attention`: something there waits for the user. */
+  tone?: "default" | "attention";
+  /** What the count means, added to the tooltip. */
+  label: string;
 };
 
 /** A control in the thread's header. */

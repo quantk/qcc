@@ -2,6 +2,8 @@
 // UI nodes; this module turns each contribution into the same registrations the
 // built-in modules make, so a plugin's tab sits next to the timeline like any other.
 
+import { PuzzleIcon } from "lucide-react";
+
 import type { PluginInfo, Thread, UiContributionsResult } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import type { UiModule, UiRegistry } from "../../ui/registry";
@@ -27,7 +29,7 @@ export function contributionsModule(contributions: UiContributionsResult): UiMod
             <PluginView plugin={view.plugin} view={view.id} thread={thread} />
           );
         if (view.placement === "app") {
-          ui.appView({ id, title: view.title, order, render: () => <div className="plugin-screen">{draw()}</div> });
+          ui.appView({ id, title: view.title, order, icon: PuzzleIcon, render: () => <div className="plugin-screen">{draw()}</div> });
         } else {
           ui.threadTab({
             id,

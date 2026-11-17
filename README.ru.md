@@ -66,7 +66,7 @@ qcc CLI ─────┘  unix socket   │  WASM  ├─ provider-acp ──�
 qcc разрабатывается на Linux. Всё собирается внутри Nix flake, и `./dev` заходит в него сам.
 
 ```sh
-git clone <этот репозиторий> qcc && cd qcc
+git clone https://github.com/quantk/qcc.git && cd qcc
 ./dev app        # собрать release, поставить в ~/.local/lib/qcc и открыть приложение
 ```
 

@@ -67,7 +67,7 @@ else's.
 qcc is developed on Linux. Everything builds inside a Nix flake, and `./dev` enters it by itself.
 
 ```sh
-git clone <this repository> qcc && cd qcc
+git clone https://github.com/quantk/qcc.git && cd qcc
 ./dev app        # build a release, install it to ~/.local/lib/qcc and open the app
 ```
 

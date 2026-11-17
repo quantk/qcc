@@ -77,7 +77,7 @@ function nextDay(day: number): number {
 }
 
 /** The first day `range` covers, as of `now`. */
-export function rangeStart(range: Range, buckets: readonly UsageBucket[], now: number): number {
+export function rangeStart(range: Range, buckets: readonly { hour: number }[], now: number): number {
   if (range === "all") {
     const first = buckets.reduce((min, bucket) => Math.min(min, bucket.hour), Infinity);
     return dayStart(Number.isFinite(first) ? first : now);
@@ -87,7 +87,7 @@ export function rangeStart(range: Range, buckets: readonly UsageBucket[], now: n
   return date.getTime();
 }
 
-export function inRange(buckets: readonly UsageBucket[], range: Range, now: number): UsageBucket[] {
+export function inRange<T extends { hour: number }>(buckets: readonly T[], range: Range, now: number): T[] {
   const start = rangeStart(range, buckets, now);
   return buckets.filter((bucket) => bucket.hour >= start);
 }

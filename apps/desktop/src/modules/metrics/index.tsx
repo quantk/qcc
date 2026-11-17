@@ -1,4 +1,4 @@
-// What agents spent and how their turns went, over time and across threads.
+// What agents spent, how their turns went and what they used, over time and across threads.
 
 import { ChartColumnIcon } from "lucide-react";
 

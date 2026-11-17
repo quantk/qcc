@@ -94,10 +94,6 @@ describe("stats", () => {
       failedCommands: 1,
       filesChanged: ["/w/a.rs"],
       filesRead: ["/w/b.rs"],
-      tools: [
-        { name: "web", count: 2 },
-        { name: "grep", count: 1 },
-      ],
     });
   });
 

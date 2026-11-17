@@ -156,14 +156,12 @@ export type Activity = {
   filesChanged: readonly string[];
   filesRead: readonly string[];
   searches: number;
-  /** Tool calls by name, most used first. */
-  tools: readonly { name: string; count: number }[];
   questions: number;
   unanswered: number;
   errors: number;
 };
 
-/** What the agent did, counted from the timeline. */
+/** What the agent did, counted from the timeline; its tools are counted in `tools.ts`. */
 export function activityOf(entries: readonly Entry[]): Activity {
   let userMessages = 0;
   let agentMessages = 0;
@@ -175,7 +173,6 @@ export function activityOf(entries: readonly Entry[]): Activity {
   let errors = 0;
   const changed = new Set<string>();
   const read = new Set<string>();
-  const tools = new Map<string, number>();
   for (const entry of entries) {
     switch (entry.kind) {
       case "user":
@@ -207,9 +204,6 @@ export function activityOf(entries: readonly Entry[]): Activity {
           case "search":
             searches += 1;
             break;
-          case "tool":
-            tools.set(item.name, (tools.get(item.name) ?? 0) + 1);
-            break;
           default:
             break;
         }
@@ -227,9 +221,6 @@ export function activityOf(entries: readonly Entry[]): Activity {
     filesChanged: [...changed],
     filesRead: [...read],
     searches,
-    tools: [...tools]
-      .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     questions,
     unanswered,
     errors,

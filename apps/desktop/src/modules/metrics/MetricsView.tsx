@@ -1,7 +1,7 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { UsageHistoryResult } from "../../api/protocol.gen";
+import type { UsageHistoryResult, UsageToolsResult } from "../../api/protocol.gen";
 import {
   type Day,
   type Dimension,
@@ -25,6 +25,7 @@ import {
 import { threadTitle } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { compactNumber, elapsed, errorMessage } from "../../util/format";
+import { ToolsSection } from "./ToolsSection";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -54,9 +55,10 @@ const dayLabel = (day: number, long = false) =>
 
 type Series = { key: string; label: string; fill: string };
 
-/** Spending and turns over time, across all agents. */
+/** Spending, turns and the tools used over time, across all agents. */
 export function MetricsView() {
   const [history, setHistory] = useState<UsageHistoryResult | null>(null);
+  const [tools, setTools] = useState<UsageToolsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [range, setRange] = useState<Range>(30);
@@ -68,10 +70,11 @@ export function MetricsView() {
 
   const load = useCallback(() => {
     setLoading(true);
-    store()
-      .api.call("usage.history", {})
-      .then((result) => {
-        setHistory(result);
+    const { api } = store();
+    Promise.all([api.call("usage.history", {}), api.call("usage.tools", {})])
+      .then(([history, tools]) => {
+        setHistory(history);
+        setTools(tools);
         setError(null);
       })
       .catch((failure: unknown) => setError(errorMessage(failure)))
@@ -102,6 +105,8 @@ export function MetricsView() {
       return slots.has(group.key) ? group : { key: OTHER, label: "Other" };
     };
     return {
+      keyOf,
+      tools: inRange(tools?.buckets ?? [], range, now),
       rows,
       series,
       totals,
@@ -109,7 +114,7 @@ export function MetricsView() {
       days: byDay(shown, keyed, range, now),
       top: topThreads(shown, TOP_THREADS),
     };
-  }, [history, range, dimension, threads, projects, plugins]);
+  }, [history, tools, range, dimension, threads, projects, plugins]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -135,6 +140,7 @@ export function MetricsView() {
             <TokenChart days={view.days} series={view.series} />
             <GroupTable rows={view.rows} slots={view.slots} dimension={dimension} />
             <TopThreads top={view.top} />
+            <ToolsSection buckets={view.tools} groups={view.rows} groupOf={view.keyOf} dimension={dimension} />
           </>
         )}
       </div>

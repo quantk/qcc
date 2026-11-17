@@ -1,8 +1,9 @@
 # AGENTS.md
 
 Инструкции для кодовых агентов (Claude Code, Codex, opencode), работающих с этим репозиторием.
-Что такое qcc, как им пользоваться и как он устроен — в [README.md](README.md); устройство
-desktop-приложения — в [apps/desktop/README.md](apps/desktop/README.md).
+Что такое qcc — в [README.md](README.md); как им пользоваться и как он устроен — в
+[docs/](docs/README.md); устройство desktop-приложения для разработчика — в
+[apps/desktop/README.md](apps/desktop/README.md).
 
 ## Коротко о проекте
 
@@ -54,6 +55,7 @@ WASM-плагинами.
 | `wit/plugin.wit` | контракт плагинов |
 | `apps/desktop` | фронтенд (`src/`) и Tauri-оболочка (`src-tauri/`) |
 | `scripts/` | проверки; `fixtures/` — запись и редактирование фикстур реальных агентов |
+| `docs/` | пользовательская документация (английский); `docs/images/` — скриншоты для README |
 
 ## Окружение и команды
 
@@ -154,7 +156,8 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - Rust edition 2024, `unsafe_code = "forbid"`, clippy с `-D warnings`, формат — `rustfmt.toml`.
   Не оставляйте `dbg!` и `todo!`.
 - Комментарии и doc-комментарии в коде — на английском, полными предложениями, объясняют «почему».
-  Пользовательская документация (`README.md`, `apps/desktop/README.md`) — на русском.
+  Документация — на английском: `README.md`, `docs/`, `apps/desktop/README.md`. `README.ru.md` —
+  русская версия витрины `README.md`; меняя одну, меняйте и другую.
 - Сообщения коммитов — на английском, в повелительном наклонении или как короткое описание
   результата (`Stage 7: orchestration through the CLI, threads import and commands`). Один логический
   шаг — один коммит.
@@ -163,4 +166,6 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - **Коммитьте по ходу работы, не спрашивая.** Закончили осмысленный кусок и следующий шаг уже про
   другое — прогоните проверки, закоммитьте и идите дальше. Не копите всё в один коммит в конце.
 - Меняя поведение, видимое пользователю (команды CLI, права, возможности провайдеров), обновляйте
-  `README.md` и, для приложения, `apps/desktop/README.md`.
+  нужный файл в `docs/` (для приложения — `docs/desktop.md`, для разработчиков приложения —
+  `apps/desktop/README.md`); `README.md` и `README.ru.md` — если меняется то, что показано на
+  витрине.

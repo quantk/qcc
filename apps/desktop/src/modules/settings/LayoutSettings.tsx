@@ -141,7 +141,7 @@ export function LayoutSettings() {
     <div className="flex flex-col gap-4 pt-2">
       <div className="flex items-center gap-3">
         <p className="flex-1 text-[13px] text-muted-foreground">
-          Drag a block by its handle to another place, or right-click a tab or a sidebar section to move it from where it is.
+          Drag a block by its handle to another place, or right-click its button, tab or sidebar section to move it from where it is.
           A block about a thread can only stand beside a thread.
         </p>
         <Button variant="outline" size="sm" disabled={Object.keys(layout).length === 0} onClick={() => store().setBlockLayout(defaultLayout)}>
@@ -209,6 +209,7 @@ function BlockRow(props: {
       >
         <GripVerticalIcon />
       </Button>
+      {block.icon ? <block.icon className="size-4 shrink-0 text-muted-foreground" /> : <span className="size-4 shrink-0" />}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="truncate text-sm font-medium">{block.title}</span>

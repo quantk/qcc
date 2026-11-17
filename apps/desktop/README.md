@@ -65,7 +65,7 @@ keeps its place for when it comes back. The logic is pure and tested in
 
 The user changes the layout in Settings → Layout (drag a block by its handle, or use
 its arrows and its slot menu; Reset layout puts everything back), or by right-clicking
-a tab or a sidebar section (move it to another slot, hide it, Arrange blocks…). The
+a screen's button, a tab or a sidebar section (move it to another slot, hide it, Arrange blocks…). The
 palette has `Open settings` (Ctrl+,), `Arrange blocks` and `Reset the layout of blocks`, so
 a screen hidden by mistake, Settings included, is always one step from coming back. A
 screen opened by name (a command or a link) shows even when its block was moved out of

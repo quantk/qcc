@@ -22,7 +22,7 @@ import {
 import { SIDEBAR, THREAD_MIN } from "../state/layout";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
-import { useSlot } from "../ui/blocks";
+import { BlockMenu, useSlot } from "../ui/blocks";
 import { type AppBlock, type ViewBadge, useUi } from "../ui/registry";
 import { isAppBlock, openViewCommand } from "../ui/views";
 import { ResizeHandle, ThreadMenu } from "../ui/kit";
@@ -318,44 +318,47 @@ function ViewButtonBody({
 }) {
   const shortcut = useUi((snapshot) => snapshot.commands.find((command) => command.id === openViewCommand(view.id))?.shortcut);
   const Icon = view.icon ?? AppWindowIcon;
+  // A right click on the button offers to move or hide its block, like a tab's.
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={badge ? `${view.title}: ${badge.label}` : view.title}
-            aria-current={current ? "page" : undefined}
-            className={cn(
-              "relative text-muted-foreground hover:bg-card hover:text-foreground",
-              current && "border-border bg-card text-foreground shadow-xs",
-            )}
-            onClick={() => store().openView(view.id)}
-          />
-        }
-      >
-        <Icon />
-        {badge && badge.count > 0 && (
-          <Badge
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] tabular-nums ring-2 ring-secondary",
-              badge.tone === "attention" && "bg-(--blue) text-background",
-            )}
-          >
-            {badge.count > 99 ? "99+" : badge.count}
-          </Badge>
-        )}
-      </TooltipTrigger>
-      <TooltipContent side={side} className="flex-col items-start gap-0.5">
-        <span className="flex items-center gap-2">
-          {view.title}
-          {shortcut && <Kbd>{shortcut}</Kbd>}
-        </span>
-        {badge && <span className="opacity-70">{badge.label}</span>}
-      </TooltipContent>
-    </Tooltip>
+    <BlockMenu block={view} render={<span className="contents" />}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={badge ? `${view.title}: ${badge.label}` : view.title}
+              aria-current={current ? "page" : undefined}
+              className={cn(
+                "relative text-muted-foreground hover:bg-card hover:text-foreground",
+                current && "border-border bg-card text-foreground shadow-xs",
+              )}
+              onClick={() => store().openView(view.id)}
+            />
+          }
+        >
+          <Icon />
+          {badge && badge.count > 0 && (
+            <Badge
+              aria-hidden
+              className={cn(
+                "pointer-events-none absolute -top-1 -right-1 h-4 min-w-4 px-1 text-[10px] tabular-nums ring-2 ring-secondary",
+                badge.tone === "attention" && "bg-(--blue) text-background",
+              )}
+            >
+              {badge.count > 99 ? "99+" : badge.count}
+            </Badge>
+          )}
+        </TooltipTrigger>
+        <TooltipContent side={side} className="flex-col items-start gap-0.5">
+          <span className="flex items-center gap-2">
+            {view.title}
+            {shortcut && <Kbd>{shortcut}</Kbd>}
+          </span>
+          {badge && <span className="opacity-70">{badge.label}</span>}
+        </TooltipContent>
+      </Tooltip>
+    </BlockMenu>
   );
 }
 

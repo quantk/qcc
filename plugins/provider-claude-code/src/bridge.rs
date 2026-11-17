@@ -13,6 +13,9 @@
 //!   message;
 //! * with `--permission-prompt-tool stdio` a permission prompt is a `control_request`
 //!   of subtype `can_use_tool`, answered by a `control_response`;
+//! * `AskUserQuestion` comes the same way, and the user's choices go back in its
+//!   input as `answers`, keyed by the text of each question; allowing it without
+//!   them tells the agent nobody answered;
 //! * a `control_request` of subtype `get_context_usage` is answered with what
 //!   `/context` shows, at any time and without a request to the model.
 
@@ -38,9 +41,86 @@ const CONTEXT_ENTRIES: usize = 20;
 const MCP_POLL_MS: u64 = 1000;
 const MCP_POLLS: u32 = 30;
 
+/// The tool whose permission prompt is really a set of questions for the user.
+const ASK_TOOL: &str = "AskUserQuestion";
+/// Joins a permission request's id and the index of one of its questions into the id
+/// of the interaction that asks it.
+const QUESTION_SEPARATOR: char = '#';
+
 struct Approval {
     tool_use_id: String,
     input: Value,
+    /// Set for `AskUserQuestion`: its questions are asked one at a time.
+    asking: Option<Asking>,
+}
+
+/// The questions of one `AskUserQuestion` call and the answers so far.
+struct Asking {
+    questions: Vec<Value>,
+    answers: serde_json::Map<String, Value>,
+}
+
+impl Asking {
+    /// The questions of a call, if it has any to ask.
+    fn of(input: &Value) -> Option<Self> {
+        let questions: Vec<Value> = input["questions"]
+            .as_array()?
+            .iter()
+            .filter(|question| !str_field(question, "question").is_empty())
+            .cloned()
+            .collect();
+        (!questions.is_empty()).then(|| Asking { questions, answers: serde_json::Map::new() })
+    }
+
+    /// The interaction that asks the next unanswered question, if any is left.
+    fn next(&self, request_id: &str, tool_use_id: &str) -> Option<Delta> {
+        let index = self.answers.len();
+        let question = self.questions.get(index)?;
+        let mut text = str_field(question, "question").to_owned();
+        // A question takes one option or one line of text, so several choices are
+        // typed: the agent reads the answer as written.
+        if question["multiSelect"].as_bool() == Some(true) {
+            text.push_str(" (several may apply: type them separated by commas)");
+        }
+        let options = question["options"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(at, choice)| {
+                let label = str_field(choice, "label");
+                (!label.is_empty()).then(|| option(&at.to_string(), label, OptionKind::Other))
+            })
+            .collect();
+        Some(Delta::InteractionRequest(InteractionAsk {
+            request_id: format!("{request_id}{QUESTION_SEPARATOR}{index}"),
+            item: (!tool_use_id.is_empty()).then(|| ItemKey::Provider(tool_use_id.to_owned())),
+            request: InteractionRequest::Question(QuestionRequest {
+                question: text,
+                options,
+                allow_text: true,
+            }),
+        }))
+    }
+
+    /// Take the answer to the current question; `None` if it says nothing.
+    fn answer(&mut self, resolution: &InteractionResolution) -> Option<()> {
+        let question = self.questions.get(self.answers.len())?;
+        let answer = match resolution {
+            InteractionResolution::Selected(id) => {
+                let at: usize = id.parse().ok()?;
+                str_field(question["options"].get(at)?, "label").to_owned()
+            }
+            InteractionResolution::Text(text) if !text.trim().is_empty() => text.trim().to_owned(),
+            _ => return None,
+        };
+        self.answers.insert(str_field(question, "question").to_owned(), Value::String(answer));
+        Some(())
+    }
+
+    fn done(&self) -> bool {
+        self.answers.len() == self.questions.len()
+    }
 }
 
 pub struct Bridge {
@@ -262,12 +342,17 @@ impl Bridge {
         output
     }
 
-    /// The user answered a permission prompt.
+    /// The user answered a permission prompt, or one question of `AskUserQuestion`.
     pub fn resolve(
         &mut self,
         request_id: &str,
         resolution: &InteractionResolution,
     ) -> Result<Output, String> {
+        if let Some((permission, _)) = request_id.rsplit_once(QUESTION_SEPARATOR)
+            && self.approvals.get(permission).is_some_and(|approval| approval.asking.is_some())
+        {
+            return Ok(self.answer_question(permission, resolution));
+        }
         let approval = self
             .approvals
             .remove(request_id)
@@ -287,6 +372,39 @@ impl Bridge {
             }
         };
         Ok(Output { writes: vec![line.to_string()], ..Output::default() })
+    }
+
+    /// One question of `AskUserQuestion` was answered: ask the next one, or, with all
+    /// of them answered, let the tool run with the answers. A question left without
+    /// an answer refuses the whole call.
+    fn answer_question(&mut self, request_id: &str, resolution: &InteractionResolution) -> Output {
+        let mut output = Output::default();
+        let Some(approval) = self.approvals.get_mut(request_id) else {
+            return output;
+        };
+        let Some(asking) = approval.asking.as_mut() else {
+            return output;
+        };
+        if asking.answer(resolution).is_none() {
+            let approval = self.approvals.remove(request_id).expect("looked up above");
+            self.denied.insert(approval.tool_use_id);
+            output.writes.push(denial(request_id, "The user did not answer.").to_string());
+            return output;
+        }
+        if let Some(next) = asking.next(request_id, &approval.tool_use_id) {
+            output.deltas.push(next);
+            return output;
+        }
+        debug_assert!(asking.done());
+        let approval = self.approvals.remove(request_id).expect("looked up above");
+        let mut input = approval.input;
+        let answers = approval.asking.map(|asking| asking.answers).unwrap_or_default();
+        if let Some(fields) = input.as_object_mut() {
+            fields.insert("answers".to_owned(), Value::Object(answers));
+        }
+        let response = json!({"behavior": "allow", "updatedInput": input});
+        output.writes.push(success(request_id, &response).to_string());
+        output
     }
 
     /// The session was stopped on request.
@@ -389,6 +507,14 @@ impl Bridge {
             name => name,
         };
         let input = request.get("input").cloned().unwrap_or(Value::Null);
+        if str_field(request, "tool_name") == ASK_TOOL
+            && let Some(asking) = Asking::of(&input)
+        {
+            output.deltas.extend(asking.next(&request_id, &tool_use_id));
+            let approval = Approval { tool_use_id, input, asking: Some(asking) };
+            self.approvals.insert(request_id, approval);
+            return;
+        }
         // The most telling line about what is being asked.
         let detail = ["command", "file_path", "url", "pattern"]
             .iter()
@@ -407,7 +533,7 @@ impl Bridge {
                 ],
             }),
         }));
-        self.approvals.insert(request_id, Approval { tool_use_id, input });
+        self.approvals.insert(request_id, Approval { tool_use_id, input, asking: None });
     }
 
     /// Ask the agent how its MCP servers are doing. It answers before any turn, so
@@ -1040,6 +1166,80 @@ mod tests {
         assert_eq!(late.deltas, []);
         assert!(late.writes[0].contains("\"request_id\":\"r2\""), "{late:?}");
         assert!(late.writes[0].contains("\"behavior\":\"deny\""));
+    }
+
+    #[test]
+    fn ask_user_question_is_asked_question_by_question_and_answered_in_the_input() {
+        let input = json!({"questions": [
+            {"question": "Which language?", "header": "Lang", "multiSelect": false,
+             "options": [{"label": "English", "description": "e"},
+                         {"label": "Russian", "description": "r"}]},
+            {"question": "Which parts?", "header": "Parts", "multiSelect": true,
+             "options": [{"label": "A", "description": "a"}, {"label": "B", "description": "b"}]},
+        ]});
+        let ask = json!({"type": "control_request", "request_id": "r1",
+                         "request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion",
+                                     "tool_use_id": "tu-1", "input": input}})
+        .to_string();
+        let question = |deltas: &[Delta]| match deltas {
+            [Delta::InteractionRequest(ask)] => match &ask.request {
+                InteractionRequest::Question(question) => {
+                    (ask.request_id.clone(), question.clone())
+                }
+                other => panic!("expected a question, got {other:?}"),
+            },
+            other => panic!("expected one interaction, got {other:?}"),
+        };
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("go");
+
+        let (id, first) = question(&bridge.on_line(&ask).deltas);
+        assert_eq!(id, "r1#0");
+        assert_eq!(first.question, "Which language?");
+        let labels: Vec<&str> = first.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["English", "Russian"]);
+        assert!(first.allow_text);
+
+        // The first answer asks the second question and tells the agent nothing yet.
+        let next = bridge.resolve(&id, &InteractionResolution::Selected("1".into())).unwrap();
+        assert_eq!(next.writes, Vec::<String>::new());
+        let (id, second) = question(&next.deltas);
+        assert_eq!(id, "r1#1");
+        assert!(second.question.starts_with("Which parts? (several"), "{}", second.question);
+
+        let last = bridge.resolve(&id, &InteractionResolution::Text("A, B".into())).unwrap();
+        assert_eq!(last.deltas, []);
+        let reply: Value = serde_json::from_str(&last.writes[0]).unwrap();
+        let response = &reply["response"]["response"];
+        assert_eq!(reply["response"]["request_id"], "r1");
+        assert_eq!(response["behavior"], "allow");
+        assert_eq!(
+            response["updatedInput"]["answers"],
+            json!({"Which language?": "Russian", "Which parts?": "A, B"})
+        );
+        assert_eq!(response["updatedInput"]["questions"], input["questions"]);
+    }
+
+    #[test]
+    fn an_unanswered_question_refuses_the_call_and_an_interrupt_refuses_it_too() {
+        let ask = |id: &str| {
+            json!({"type": "control_request", "request_id": id,
+                   "request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion",
+                               "tool_use_id": format!("tu-{id}"),
+                               "input": {"questions": [{"question": "Go?", "options": []}]}}})
+            .to_string()
+        };
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("go");
+        bridge.on_line(&ask("r1"));
+        let refused = bridge.resolve("r1#0", &InteractionResolution::Cancelled).unwrap();
+        assert!(refused.writes[0].contains("\"behavior\":\"deny\""), "{refused:?}");
+        assert!(bridge.resolve("r1#0", &InteractionResolution::Text("y".into())).is_err());
+
+        bridge.on_line(&ask("r2"));
+        let interrupt = bridge.interrupt();
+        assert!(interrupt.writes[1].contains("\"request_id\":\"r2\""), "{interrupt:?}");
+        assert!(interrupt.writes[1].contains("\"behavior\":\"deny\""));
     }
 
     #[test]

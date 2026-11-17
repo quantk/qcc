@@ -29,8 +29,11 @@ export function ParentLink({ parent }: { parent: Thread }) {
   );
 }
 
+/** The id of the Agents block: the full view of a thread's children. */
+export const AGENTS = "agents";
+
 /** What a child is up to, in a line. */
-function childStatus(thread: Thread): string {
+export function childStatus(thread: Thread): string {
   const attention = attentionOf(thread);
   if (attention === "active") return activityText(thread) || "Working";
   if (attention === "waiting") return "Waiting for your answer";

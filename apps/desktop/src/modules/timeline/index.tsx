@@ -14,11 +14,11 @@ export const timelineModule: UiModule = {
       title: "Timeline",
       scope: "thread",
       placement: { slot: "thread.tabs", order: 0 },
-      render: ({ thread, timeline, provider }) =>
-        timeline ? (
+      render: (context) =>
+        context.timeline ? (
           <>
-            <TimelineView thread={thread} timeline={timeline} />
-            <Composer thread={thread} timeline={timeline} provider={provider} />
+            <TimelineView thread={context.thread} timeline={context.timeline} />
+            <Composer thread={context.thread} timeline={context.timeline} provider={context.provider} context={context} />
           </>
         ) : (
           <div className="empty">Loading…</div>

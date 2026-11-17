@@ -21,6 +21,7 @@ describe("block layout", () => {
     expect(ids(slots["thread.tabs"])).toEqual(["timeline", "changes"]);
     expect(ids(slots["thread.panel"])).toEqual(["usage", "details"]);
     expect(ids(slots.sidebar)).toEqual([]);
+    expect(ids(slots["thread.composer"])).toEqual([]);
     expect(ids(hidden)).toEqual(["extra"]);
   });
 
@@ -28,6 +29,7 @@ describe("block layout", () => {
     expect(fits("app", "thread.panel")).toBe(true);
     expect(fits("app", "sidebar")).toBe(true);
     expect(fits("thread", "thread.tabs")).toBe(true);
+    expect(fits("thread", "thread.composer")).toBe(true);
     expect(fits("thread", "views")).toBe(false);
     expect(fits("thread", "sidebar")).toBe(false);
   });

@@ -121,6 +121,9 @@ export type AppState = {
   /** Threads whose children the sidebar keeps folded under them. */
   collapsed: ReadonlySet<ThreadId>;
   sidePanel: SidePanel;
+  /** The tab chosen in the selected thread's view, by block id. Null: its first tab.
+   * Not remembered: another thread opens on its first tab. */
+  threadTab: string | null;
   /** How wide the thread list at the left is, in pixels. */
   sidebarWidth: number;
   /** Where the user put blocks, over their default places; see `blocks.ts`. */
@@ -166,6 +169,7 @@ export class AppStore {
     history: startHistory,
     collapsed: readCollapsed(),
     sidePanel: readSidePanel(),
+    threadTab: null,
     sidebarWidth: clampWidth(readJson(SIDEBAR_WIDTH), SIDEBAR),
     blockLayout: parseLayout(readJson(BLOCK_LAYOUT)),
     sideOverlay: false,
@@ -487,6 +491,17 @@ export class AppStore {
     if (sidePanel.width !== this.state.sidePanel.width) this.set({ sidePanel });
   };
 
+  /** Show a tab of the selected thread's view, by its block's id. */
+  openThreadTab = (tab: string | null) => {
+    if (tab !== this.state.threadTab) this.set({ threadTab: tab });
+  };
+
+  /** Show the side panel, wherever it fits, on a tab of it. */
+  openSidePanel = (tab: string) => {
+    this.setSidePanel({ tab, ...(panelFitsBeside() ? { open: true } : {}) });
+    if (!panelFitsBeside()) this.set({ sideOverlay: true });
+  };
+
   toggleSidePanel = () => {
     if (panelFitsBeside()) this.setSidePanel({ open: !this.state.sidePanel.open });
     else this.set({ sideOverlay: !this.state.sideOverlay });
@@ -524,7 +539,7 @@ export class AppStore {
     if (place.view !== this.state.view) this.set({ view: place.view });
     const threadId = place.thread;
     if (threadId === this.state.selected) return;
-    this.set({ selected: threadId, loading: false });
+    this.set({ selected: threadId, loading: false, threadTab: null });
     this.selectedHold?.();
     this.selectedHold = threadId === null ? null : this.hold(threadId);
     this.seeSelected();

@@ -1,5 +1,5 @@
 import { PanelRightIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import type { ThreadId } from "../api/protocol.gen";
 import { SIDE_PANEL_WIDTH, THREAD_MIN } from "../state/layout";
@@ -37,7 +37,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [beside, overlay]);
-  const [chosen, setChosen] = useState<string | null>(null);
+  const chosen = useApp((state) => state.threadTab);
 
   const provider = useMemo(() => (thread ? findProvider(plugins, thread.provider) : undefined), [plugins, thread]);
   const children = useMemo(() => childrenOf(Object.values(threads), threadId), [threads, threadId]);
@@ -90,7 +90,7 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
           </div>
         </header>
         {tabs.length > 1 && tab && (
-          <Tabs value={tab.id} onValueChange={(value) => setChosen(String(value))} className="border-b px-4">
+          <Tabs value={tab.id} onValueChange={(value) => store().openThreadTab(String(value))} className="border-b px-4">
             <TabsList variant="line" className="h-10">
               {tabs.map((candidate) => (
                 <BlockMenu

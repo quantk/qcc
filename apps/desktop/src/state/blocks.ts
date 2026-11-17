@@ -8,7 +8,7 @@
 /** What a block needs to be drawn: nothing, or a thread. */
 export type Scope = "app" | "thread";
 
-export type SlotId = "views" | "views.foot" | "sidebar" | "thread.tabs" | "thread.panel";
+export type SlotId = "views" | "views.foot" | "sidebar" | "thread.tabs" | "thread.panel" | "thread.composer";
 
 export type SlotInfo = {
   id: SlotId;
@@ -25,6 +25,12 @@ export const SLOTS: readonly SlotInfo[] = [
   { id: "sidebar", title: "Sidebar", hint: "Sections at the bottom of the sidebar, always in view", provides: "app" },
   { id: "thread.tabs", title: "Thread tabs", hint: "Tabs of the thread view", provides: "thread" },
   { id: "thread.panel", title: "Thread side panel", hint: "Tabs of the panel beside a thread", provides: "thread" },
+  {
+    id: "thread.composer",
+    title: "Beside the composer",
+    hint: "Chips in the bar under the message box, each opening its block in a popover",
+    provides: "thread",
+  },
 ];
 
 export function slotInfo(slot: SlotId): SlotInfo {

@@ -171,7 +171,7 @@ export function LayoutSettings() {
         >
           <div className="truncate font-medium">{drag.title}</div>
           <div className={drag.refused ? "text-destructive" : "text-muted-foreground"}>
-            {drag.refused ? "Needs a thread: put it in a thread's tabs or side panel" : drag.target ? "Let go to put it here" : "Drop it on a list"}
+            {drag.refused ? "Needs a thread: put it in a thread's tabs, side panel or beside its composer" : drag.target ? "Let go to put it here" : "Drop it on a list"}
           </div>
         </div>
       )}

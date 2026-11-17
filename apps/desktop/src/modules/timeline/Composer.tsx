@@ -5,6 +5,8 @@ import type { ProviderInfo, SendMode, Thread } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import { contextUsed } from "../../state/stats";
 import { type QueuedMessage, type Timeline, queuedMessages } from "../../state/timeline";
+import { BlockChips } from "../../ui/blocks";
+import type { ThreadContext } from "../../ui/registry";
 import { compactNumber } from "../../util/format";
 import { fromAttachment, toNewAttachment } from "../../state/attachments";
 import { ComposerAttachmentList, useComposerAttachments } from "./ComposerAttachments";
@@ -35,7 +37,7 @@ function statusText(thread: Thread): string {
   return "";
 }
 
-export function Composer(props: { thread: Thread; timeline: Timeline; provider?: ProviderInfo }) {
+export function Composer(props: { thread: Thread; timeline: Timeline; provider?: ProviderInfo; context: ThreadContext }) {
   const { thread, timeline, provider } = props;
   const [text, setText] = useState(() => drafts.get(thread.id) ?? "");
   const [sending, setSending] = useState(false);
@@ -170,6 +172,8 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
               <PaperclipIcon />
             </InputGroupButton>
             {files.dragging && <span className="text-primary">Drop to attach</span>}
+            {/* Blocks the layout puts beside the composer, as chips (`thread.composer`). */}
+            <BlockChips slot="thread.composer" context={props.context} />
             <span className={busy ? "status-working" : undefined}>{status}</span>
             {busy && !steerable && (
               <span title="This agent cannot take a message in the middle of a turn, so messages wait for it to end">

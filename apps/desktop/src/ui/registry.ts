@@ -49,7 +49,12 @@ type BlockBase = {
 };
 
 /** A block that needs nothing: it can stand anywhere. */
-export type AppBlock = BlockBase & { scope: "app"; render: ComponentType };
+export type AppBlock = BlockBase & {
+  scope: "app";
+  render: ComponentType;
+  /** Its face where it stands as a chip (beside the composer); see `ThreadBlock.summary`. */
+  summary?: ComponentType;
+};
 
 /** A block about one thread: it stands only in a thread's slots. */
 export type ThreadBlock = BlockBase & {
@@ -57,6 +62,13 @@ export type ThreadBlock = BlockBase & {
   /** Absent: shown for every thread. */
   when?: (context: ThreadContext) => boolean;
   render: ComponentType<ThreadContext>;
+  /**
+   * Its face where it stands as a chip, beside the composer: a few words or counts
+   * that say enough at a glance, drawn inside the chip's button; a click shows
+   * `render` in a popover. An element marked `data-attention` tints the chip, for
+   * something that waits for the user. Absent: the icon and the title.
+   */
+  summary?: ComponentType<ThreadContext>;
 };
 
 export type Block = AppBlock | ThreadBlock;

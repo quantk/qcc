@@ -90,7 +90,7 @@ export function estimate(points: readonly UsagePoint[], window: number | null): 
   const used = contextUsed(last.usage);
   const start = Math.min(...points.map((point) => contextUsed(point.usage)));
   const categories: ContextCategory[] = [
-    { id: "start", name: "System, tools and first message", tokens: start, kind: "used" },
+    { id: "start", name: "Start: system, tools, first message", tokens: start, kind: "used" },
   ];
   if (used > start) categories.push({ id: "messages", name: "Conversation since", tokens: used - start, kind: "used" });
   return { used, window: window ?? last.usage.model_context_window ?? null, estimated: true, categories, entries: [] };

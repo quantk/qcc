@@ -14,7 +14,7 @@ export const contextModule: UiModule = {
       title: "Context",
       hint: "How full the context window is and what it holds",
       scope: "thread",
-      placement: { slot: "thread.panel", order: 5 },
+      placement: { slot: "thread.panel", order: 2 },
       icon: GaugeIcon,
       render: ContextPanel,
     });

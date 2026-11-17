@@ -101,7 +101,7 @@ export function ToolsSection({
             <div key={server.server} className="rounded-lg border bg-card px-3 py-2 text-sm">
               <div className="text-xs text-muted-foreground">{server.server}</div>
               <div className="tabular-nums">
-                <span className="font-semibold">{compactNumber(server.calls)}</span> calls ·{" "}
+                <span className="font-semibold">{compactNumber(server.calls)}</span> {server.calls === 1 ? "call" : "calls"} ·{" "}
                 {server.tools} {server.tools === 1 ? "tool" : "tools"}
                 {server.failed > 0 && ` · ${server.failed} failed`}
               </div>

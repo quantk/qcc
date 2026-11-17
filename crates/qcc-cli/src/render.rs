@@ -281,7 +281,12 @@ pub fn plugin(plugin: &PluginInfo) -> String {
             lines.push(format!("    modes      {}", modes.join(", ")));
         }
         let mut can = Vec::new();
-        for (name, on) in [("resume", capabilities.resume), ("steer", capabilities.steer)] {
+        for (name, on) in [
+            ("resume", capabilities.resume),
+            ("steer", capabilities.steer),
+            ("compact", capabilities.compact),
+            ("context_usage", capabilities.context_usage),
+        ] {
             if on {
                 can.push(name);
             }

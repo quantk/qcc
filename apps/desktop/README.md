@@ -79,7 +79,7 @@ works as a screen, a tab or a panel tab.
 
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
-| A block: a screen, a sidebar section, a thread tab or a side panel tab | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/lineage`, `modules/mcp`, `modules/skills` |
+| A block: a screen, a sidebar section, a thread tab or a side panel tab | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
@@ -100,11 +100,18 @@ a frame the shell already draws, not units the user would move.
 
 The side panel stays in view beside whichever thread tab is open, so it is the place
 for what is worth glancing at while reading the timeline. By default
-`modules/insights` puts three tabs there: Usage (how full the context is, the context at each request, compactions,
-tokens the thread spent over all its sessions), Activity (turns and their times,
-messages, commands, files, tools) and Details (agent, model, permissions, session,
+`modules/insights` puts three tabs there: Usage (the last request, the context at each
+request, compactions, tokens the thread spent over all its sessions), Activity (turns and
+their times, messages, commands, files, and from `state/tools.ts` the tools, MCP calls by
+server, skills and programs used) and Details (agent, model, permissions, session,
 directory, dates). The numbers come from `state/stats.ts`, folded from the same events
-as the timeline. `modules/changes` adds a compact Changes there (block `changes.panel`; the full
+as the timeline. `modules/context` adds Context (block `context.window`): how full the
+window is and what it holds, from `state/context.ts` — the agent's own breakdown
+(`context/usage` events, or the thread's projection while the timeline loads), else a
+reckoning from the usage reports marked as an estimate. Each part keeps one color group
+whatever else the window holds. The Metrics view adds up the same tool rows across threads
+from the daemon's `usage.tools` buckets (`modules/metrics/ToolsSection.tsx`).
+`modules/changes` adds a compact Changes there (block `changes.panel`; the full
 view is the `changes` tab): the diff of a thread's worktree, or of
 the uncommitted work in its own git checkout,
 read again whenever the agent settles an edit or a command, so it keeps up beside the

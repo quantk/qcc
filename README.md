@@ -297,6 +297,7 @@ qcc thread project <thread-id> Shop               # или none — убрать
 qcc thread spawn --provider claude-code --env git-worktree --prompt '…' --follow
 qcc thread changes <thread-id>     # какие файлы изменены относительно базы
 qcc thread diff <thread-id>        # всё одним патчем: коммиты, незакоммиченное и новые файлы
+qcc thread diff <thread-id> src/a.rs src/b.rs   # только эти файлы (пути — как в thread changes)
 qcc thread archive <thread-id>     # отпустить сессию, удалить worktree, убрать тред из списка
 ```
 
@@ -306,6 +307,8 @@ qcc thread archive <thread-id>     # отпустить сессию, удали
   git-checkout: тогда они показывают незакоммиченное в нём относительно `HEAD` (правки, удаления,
   новые файлы) с путями от корня репозитория. Это умеет плагин окружения, объявивший
   `inspects-directories`; для каталога вне git команда отвечает ошибкой.
+- Патч целиком ограничен 2 МБ, и большой lockfile может вытеснить из него остальные файлы, поэтому
+  `thread diff` принимает пути: приложение читает дифф по нескольку файлов, тем, что видно.
 - `.worktreeinclude` в корне репозитория (синтаксис gitignore) перечисляет неотслеживаемые файлы
   основного checkout, которые копируются в новый worktree: `.env`, сертификаты.
 - **Вернуть работу в свой checkout**: `qcc thread deliver <id>` накладывает всё, что тред сделал

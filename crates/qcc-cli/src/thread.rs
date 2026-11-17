@@ -9,13 +9,13 @@ use clap::Subcommand;
 use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
     ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadCompact, ThreadCompactParams,
-    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadGet, ThreadGetParams, ThreadIsolate,
-    ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams,
-    ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams, ThreadSetAgent,
-    ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams,
-    ThreadSetParent, ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams,
-    ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams, ThreadStop,
-    ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
+    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams, ThreadGet, ThreadGetParams,
+    ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename,
+    ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
+    ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
+    ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -230,7 +230,11 @@ pub(crate) enum ThreadCommand {
     /// List the files a thread changed in its environment.
     Changes { thread: String },
     /// Print everything a thread changed in its environment as a unified diff.
-    Diff { thread: String },
+    Diff {
+        thread: String,
+        /// Only these files, by their paths in `qcc thread changes`.
+        paths: Vec<String>,
+    },
     /// Put a thread away: release its session and remove its environment. The
     /// timeline stays readable.
     Archive {
@@ -644,9 +648,9 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Diff { thread } => {
+        ThreadCommand::Diff { thread, paths } => {
             let result = client
-                .call::<ThreadDiff>(ThreadGetParams { thread_id: ThreadId::new(thread) })
+                .call::<ThreadDiff>(ThreadDiffParams { thread_id: ThreadId::new(thread), paths })
                 .await?;
             if json {
                 print_json(&result)?;

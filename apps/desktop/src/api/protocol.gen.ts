@@ -922,6 +922,16 @@ export type ThreadDeliverResult = {
 	message: string,
 };
 
+export type ThreadDiffParams = {
+	thread_id: ThreadId,
+	/**
+	 *  Only these files, by their paths in `thread.changes`; every file when empty.
+	 *  A large change is read a few files at a time this way, and none of them is
+	 *  crowded out of a diff cut short by the others.
+	 */
+	paths?: string[],
+};
+
 export type ThreadDiffResult = {
 	diff: string,
 	/**  The diff was cut short because it is too large. */
@@ -1412,7 +1422,7 @@ export type Methods = {
 	"thread.get": { params: ThreadGetParams; result: ThreadResult },
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadResult },
 	"thread.changes": { params: ThreadGetParams; result: ThreadChangesResult },
-	"thread.diff": { params: ThreadGetParams; result: ThreadDiffResult },
+	"thread.diff": { params: ThreadDiffParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
 	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },
 	"comment.list": { params: CommentListParams; result: CommentListResult },

@@ -148,18 +148,22 @@ impl Core {
         Ok((plugin.clone(), info.id.clone(), thread.cwd.clone(), true))
     }
 
-    /// `thread.changes` and `thread.diff`: answered by an environment plugin, off
-    /// the core task.
-    pub(super) fn environment_query(&mut self, id: &ThreadId, diff: bool, responder: Responder) {
+    /// `thread.changes`, or with `diff` (the paths to diff, all when empty)
+    /// `thread.diff`: answered by an environment plugin, off the core task.
+    pub(super) fn environment_query(
+        &mut self,
+        id: &ThreadId,
+        diff: Option<Vec<String>>,
+        responder: Responder,
+    ) {
         let (plugin, environment, cwd, inspect) = match self.changes_source(id) {
             Ok(found) => found,
             Err(error) => return responder.reply::<Empty>(Err(error)),
         };
         let thread = id.clone();
-        let request = if diff {
-            EnvironmentRequest::Diff { thread, cwd, inspect }
-        } else {
-            EnvironmentRequest::Changes { thread, cwd, inspect }
+        let request = match diff {
+            Some(paths) => EnvironmentRequest::Diff { thread, cwd, inspect, paths },
+            None => EnvironmentRequest::Changes { thread, cwd, inspect },
         };
         tokio::spawn(async move {
             match call_environment(plugin, environment, request, QUERY_TIMEOUT).await {

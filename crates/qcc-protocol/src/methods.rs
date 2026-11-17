@@ -419,9 +419,20 @@ pub struct ThreadChangesResult {
 }
 
 method!(
-    /// Everything a thread changed in its environment, as one unified diff.
-    ThreadDiff, "thread.diff", ThreadGetParams => ThreadDiffResult
+    /// Everything a thread changed in its environment, as one unified diff; with
+    /// `paths`, only those files.
+    ThreadDiff, "thread.diff", ThreadDiffParams => ThreadDiffResult
 );
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadDiffParams {
+    pub thread_id: ThreadId,
+    /// Only these files, by their paths in `thread.changes`; every file when empty.
+    /// A large change is read a few files at a time this way, and none of them is
+    /// crowded out of a diff cut short by the others.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadDiffResult {

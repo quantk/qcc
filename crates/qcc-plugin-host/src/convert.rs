@@ -623,13 +623,15 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                             thread: thread.0,
                             cwd,
                             inspect,
+                            paths: Vec::new(),
                         })
                     }
-                    EnvironmentRequest::Diff { thread, cwd, inspect } => {
+                    EnvironmentRequest::Diff { thread, cwd, inspect, paths } => {
                         wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
                             inspect,
+                            paths,
                         })
                     }
                     EnvironmentRequest::Deliver { thread, cwd, mode } => {

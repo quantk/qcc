@@ -596,6 +596,7 @@ impl Remove {
 pub struct Inspect {
     cwd: String,
     diff: bool,
+    paths: Vec<String>,
     /// The job that does the work, once the top of the checkout is known.
     inner: Option<Box<Job>>,
 }
@@ -604,8 +605,8 @@ pub struct Inspect {
 const TOPLEVEL_OF: u32 = u32::MAX;
 
 impl Inspect {
-    pub fn new(cwd: String, diff: bool) -> Self {
-        Self { cwd, diff, inner: None }
+    pub fn new(cwd: String, diff: bool, paths: Vec<String>) -> Self {
+        Self { cwd, diff, paths, inner: None }
     }
 
     fn start(&mut self) -> Step {
@@ -631,10 +632,11 @@ impl Inspect {
             branch: String::new(),
             base: "HEAD".to_owned(),
         };
+        let paths = std::mem::take(&mut self.paths);
         let mut inner = Box::new(if self.diff {
-            Job::Diff(Diff::new(record))
+            Job::Diff(Diff::new(record, paths))
         } else {
-            Job::Changes(Changes::new(record))
+            Job::Changes(Changes::new(record, paths))
         });
         let step = inner.start();
         self.inner = Some(inner);
@@ -646,8 +648,19 @@ impl Inspect {
 
 const NO_RENAMES: &str = "--no-renames";
 
-fn untracked(tag: u32, worktree: &str) -> Cmd {
-    git(tag, worktree, &["ls-files", "-z", "--others", "--exclude-standard"])
+fn untracked(tag: u32, worktree: &str, paths: &[String]) -> Cmd {
+    only(git(tag, worktree, &["ls-files", "-z", "--others", "--exclude-standard"]), paths)
+}
+
+/// Narrow `cmd` to `paths`, every file when there are none. They are taken as they
+/// are, not as patterns: a file may well be named `*.rs`.
+fn only(mut cmd: Cmd, paths: &[String]) -> Cmd {
+    if !paths.is_empty() {
+        cmd.args.push("--".to_owned());
+        cmd.args.extend(paths.iter().cloned());
+        cmd.env.push(("GIT_LITERAL_PATHSPECS".to_owned(), "1".to_owned()));
+    }
+    cmd
 }
 
 fn nul_separated(bytes: &[u8]) -> Vec<String> {
@@ -698,24 +711,27 @@ mod changes {
 }
 
 /// Everything since the base commit, committed or not, plus files git does not
-/// know yet.
+/// know yet; of `paths` alone when there are any.
 pub struct Changes {
     record: Record,
+    paths: Vec<String>,
     exits: Vec<Option<Exit>>,
 }
 
 impl Changes {
-    pub fn new(record: Record) -> Self {
-        Self { record, exits: vec![None; changes::COUNT] }
+    pub fn new(record: Record, paths: Vec<String>) -> Self {
+        Self { record, paths, exits: vec![None; changes::COUNT] }
     }
 
     fn start(&mut self) -> Step {
         use changes::*;
-        let (worktree, base) = (&self.record.worktree, &self.record.base);
+        let (worktree, base, paths) = (&self.record.worktree, &self.record.base, &self.paths);
+        let diff =
+            |tag, how| only(git(tag, worktree, &["diff", NO_RENAMES, how, "-z", base]), paths);
         Step::Run(vec![
-            git(NAMES, worktree, &["diff", NO_RENAMES, "--name-status", "-z", base]),
-            git(STATS, worktree, &["diff", NO_RENAMES, "--numstat", "-z", base]),
-            untracked(UNTRACKED, worktree),
+            diff(NAMES, "--name-status"),
+            diff(STATS, "--numstat"),
+            untracked(UNTRACKED, worktree, paths),
             git(BRANCH, worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
         ])
     }
@@ -889,10 +905,11 @@ mod diff {
     pub const NEW_FILE: u32 = 2;
 }
 
-/// The same changes as one patch. New files are diffed against nothing, one by
-/// one, because git only diffs what it tracks.
+/// The same changes as one patch, of `paths` alone when there are any. New files
+/// are diffed against nothing, one by one, because git only diffs what it tracks.
 pub struct Diff {
     record: Record,
+    paths: Vec<String>,
     tracked: Option<Exit>,
     untracked: Option<Exit>,
     /// New files still to diff, last first.
@@ -902,9 +919,10 @@ pub struct Diff {
 }
 
 impl Diff {
-    pub fn new(record: Record) -> Self {
+    pub fn new(record: Record, paths: Vec<String>) -> Self {
         Self {
             record,
+            paths,
             tracked: None,
             untracked: None,
             pending: Vec::new(),
@@ -915,13 +933,16 @@ impl Diff {
 
     fn start(&mut self) -> Step {
         let (worktree, base) = (&self.record.worktree, &self.record.base);
-        let mut tracked = git(
-            diff::TRACKED,
-            worktree,
-            &["diff", "--no-color", "--no-ext-diff", NO_RENAMES, base],
+        let mut tracked = only(
+            git(
+                diff::TRACKED,
+                worktree,
+                &["diff", "--no-color", "--no-ext-diff", NO_RENAMES, base],
+            ),
+            &self.paths,
         );
         tracked.limit = DIFF_LIMIT;
-        Step::Run(vec![tracked, untracked(diff::UNTRACKED, worktree)])
+        Step::Run(vec![tracked, untracked(diff::UNTRACKED, worktree, &self.paths)])
     }
 
     fn append(&mut self, exit: &Exit) {
@@ -1270,7 +1291,7 @@ mod tests {
 
     #[test]
     fn changes_join_names_stats_and_untracked_files() {
-        let mut job = Changes::new(record());
+        let mut job = Changes::new(record(), Vec::new());
         assert_eq!(run(job.start()).len(), changes::COUNT);
         assert_eq!(job.on_exit(changes::BRANCH, out("qcc/thr_1\n")), Step::Wait);
         assert_eq!(
@@ -1301,7 +1322,7 @@ mod tests {
 
     #[test]
     fn a_checkout_of_the_users_own_is_measured_from_its_top_against_head() {
-        let mut job = Inspect::new("/src/app/crates".into(), false);
+        let mut job = Inspect::new("/src/app/crates".into(), false, Vec::new());
         let first = run(job.start());
         assert_eq!(first[0].args, ["-C", "/src/app/crates", "rev-parse", "--show-toplevel"]);
         let next = run(job.on_exit(TOPLEVEL_OF, out("/src/app\n")));
@@ -1322,7 +1343,7 @@ mod tests {
 
     #[test]
     fn a_directory_outside_git_says_so() {
-        let mut job = Inspect::new("/tmp/notes".into(), true);
+        let mut job = Inspect::new("/tmp/notes".into(), true, Vec::new());
         job.start();
         let step = job.on_exit(TOPLEVEL_OF, fatal("fatal: not a git repository"));
         let Step::Finish(Err(error)) = step else { panic!("{step:?}") };
@@ -1331,7 +1352,7 @@ mod tests {
 
     #[test]
     fn changes_report_a_git_failure() {
-        let mut job = Changes::new(record());
+        let mut job = Changes::new(record(), Vec::new());
         job.start();
         job.on_exit(changes::BRANCH, out("HEAD\n"));
         job.on_exit(changes::NAMES, failed("fatal: bad object abc123"));
@@ -1342,7 +1363,7 @@ mod tests {
 
     #[test]
     fn diff_appends_new_files_to_the_tracked_patch() {
-        let mut job = Diff::new(record());
+        let mut job = Diff::new(record(), Vec::new());
         let first = run(job.start());
         assert_eq!(first[0].limit, DIFF_LIMIT);
         assert_eq!(job.on_exit(diff::UNTRACKED, out("b.txt\0a.txt\0")), Step::Wait);
@@ -1365,8 +1386,29 @@ mod tests {
     }
 
     #[test]
+    fn a_diff_of_some_files_names_them_literally() {
+        let paths = vec!["src/*.rs".to_owned(), "new.txt".to_owned()];
+        let mut job = Diff::new(record(), paths.clone());
+        let first = run(job.start());
+        for cmd in &first {
+            assert_eq!(cmd.args[cmd.args.len() - 3..], ["--", "src/*.rs", "new.txt"]);
+            assert!(cmd.env.contains(&("GIT_LITERAL_PATHSPECS".to_owned(), "1".to_owned())));
+        }
+        // Only the new file asked for comes back from `ls-files`, and is diffed.
+        assert_eq!(job.on_exit(diff::UNTRACKED, out("new.txt\0")), Step::Wait);
+        let next = run(job.on_exit(diff::TRACKED, out("")));
+        assert_eq!(next[0].args.last().unwrap(), "new.txt");
+
+        let mut job = Changes::new(record(), paths);
+        let first = run(job.start());
+        assert!(
+            first[..3].iter().all(|cmd| cmd.args.ends_with(&["src/*.rs".into(), "new.txt".into()]))
+        );
+    }
+
+    #[test]
     fn an_oversized_diff_is_cut_and_says_so() {
-        let mut job = Diff::new(record());
+        let mut job = Diff::new(record(), Vec::new());
         job.start();
         job.on_exit(diff::UNTRACKED, out("new.txt\0"));
         // The tracked diff hit its limit and was stopped: no exit code.

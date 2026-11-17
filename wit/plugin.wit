@@ -666,6 +666,9 @@ interface types {
     /// The thread works in `cwd` itself, not in an environment of this plugin: tell
     /// what changed there. Only asked of environments that inspect directories.
     inspect: bool,
+    /// Only these files, by their paths as `changes` reports them; every file when
+    /// empty. Lets a viewer read the diff of a large change a few files at a time.
+    paths: list<string>,
   }
 
   variant environment-request {

@@ -106,6 +106,8 @@ pub enum EnvironmentRequest {
         cwd: String,
         /// `cwd` is the thread's own directory, not one of the plugin's environments.
         inspect: bool,
+        /// Only these files; every file when empty.
+        paths: Vec<String>,
     },
     /// Answered with [`Outcome::EnvironmentDelivered`].
     Deliver {

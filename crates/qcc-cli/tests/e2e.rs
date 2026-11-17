@@ -1127,6 +1127,40 @@ fn a_thread_in_a_checkout_of_its_own_reports_what_is_uncommitted_there() {
 }
 
 #[test]
+fn threads_started_together_each_get_a_worktree_of_the_same_repository() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("README.md", "hello\n")]);
+    let daemon = Daemon::start(&data);
+
+    // Spawned side by side, as an orchestrator starts its children: git alone would
+    // let the worktrees race for the names of their records in `.git/worktrees`.
+    let ids: Vec<String> = std::thread::scope(|scope| {
+        let spawns: Vec<_> = (0..12)
+            .map(|n| {
+                let (daemon, repo) = (&daemon, &repo);
+                scope.spawn(move || {
+                    let prompt = format!("task {n}");
+                    let output = spawn_in_worktree(daemon, repo, &["--prompt", &prompt]);
+                    assert!(output.ok, "{}", output.stderr);
+                    output.json()["thread"]["id"].as_str().unwrap().to_owned()
+                })
+            })
+            .collect();
+        spawns.into_iter().map(|spawn| spawn.join().unwrap()).collect()
+    });
+    let mut wait = vec!["thread", "wait", "--timeout", "60"];
+    wait.extend(ids.iter().map(String::as_str));
+    let waited = daemon.qcc(&wait);
+    assert!(waited.ok, "{}\n{}", waited.stdout, waited.stderr);
+    for id in &ids {
+        let worktree = data.join("environments/git-worktree").join(id).join("app");
+        assert_eq!(std::fs::read_to_string(worktree.join("README.md")).unwrap(), "hello\n");
+        assert_eq!(git(&worktree, &["branch", "--show-current"]).trim(), format!("qcc/{id}"));
+    }
+}
+
+#[test]
 fn a_thread_gets_a_worktree_of_its_own_and_reports_what_it_changed() {
     let dir = tempfile::tempdir().unwrap();
     let data = dir.path().join("data");

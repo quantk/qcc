@@ -47,6 +47,10 @@ pub struct Cmd {
     /// Standard output beyond this is dropped and the command is stopped.
     pub limit: usize,
     pub timeout_ms: u64,
+    /// The repository whose list of worktrees the command changes. Commands with the
+    /// same one run one at a time: git does not guard that list against itself, and
+    /// a `worktree add` can read the record another one is still writing.
+    pub lock: Option<String>,
 }
 
 fn git(tag: u32, dir: &str, args: &[&str]) -> Cmd {
@@ -61,7 +65,13 @@ fn git(tag: u32, dir: &str, args: &[&str]) -> Cmd {
         timeout_ms: GIT_TIMEOUT_MS,
         // The jobs read git's messages; a translated one would not match.
         env: vec![("LC_ALL".to_owned(), "C".to_owned())],
+        lock: None,
     }
+}
+
+/// A git command that adds a worktree to `dir`'s repository or removes one from it.
+fn git_worktree(tag: u32, dir: &str, args: &[&str]) -> Cmd {
+    Cmd { lock: Some(dir.to_owned()), ..git(tag, dir, args) }
 }
 
 /// Run `script` from the root of `dir` if the checkout has it.
@@ -79,6 +89,7 @@ fn script(tag: u32, dir: &str, script: &str, env: Vec<(String, String)>) -> Cmd 
         env,
         limit: OUTPUT_LIMIT,
         timeout_ms: SCRIPT_TIMEOUT_MS,
+        lock: None,
     }
 }
 
@@ -279,7 +290,7 @@ impl Prepare {
     /// Take the worktree down again, give the stash back, and fail with `reason`.
     fn undo(&mut self, reason: String) -> Step {
         self.failure = Some(reason);
-        Step::Run(vec![git(
+        Step::Run(vec![git_worktree(
             prepare::UNDO_WORKTREE,
             &self.record.toplevel,
             &["worktree", "remove", "--force", &self.record.worktree],
@@ -415,6 +426,7 @@ impl Prepare {
                     env: Vec::new(),
                     limit: OUTPUT_LIMIT,
                     timeout_ms: SCRIPT_TIMEOUT_MS,
+                    lock: None,
                 }])
             }
             INCLUDE => {
@@ -474,7 +486,7 @@ impl Prepare {
         let record = &self.record;
         // `--no-track`: the branch is the thread's own, not a follower of its base,
         // whatever `branch.autoSetupMerge` says.
-        git(
+        git_worktree(
             prepare::ADD,
             &record.toplevel,
             &[
@@ -558,7 +570,7 @@ impl Remove {
             }
             // A failing teardown is the repository's problem; it never keeps the
             // worktree alive.
-            TEARDOWN => Step::Run(vec![git(
+            TEARDOWN => Step::Run(vec![git_worktree(
                 WORKTREE,
                 &record.toplevel,
                 &["worktree", "remove", "--force", &record.worktree],
@@ -581,6 +593,7 @@ impl Remove {
                     env: Vec::new(),
                     limit: OUTPUT_LIMIT,
                     timeout_ms: GIT_TIMEOUT_MS,
+                    lock: None,
                 }])
             }
             _ => Step::Finish(Ok(Answer::Removed)),
@@ -874,6 +887,7 @@ impl Deliver {
             env: vec![("LC_ALL".to_owned(), "C".to_owned())],
             limit: OUTPUT_LIMIT,
             timeout_ms: GIT_TIMEOUT_MS,
+            lock: None,
         }])
     }
 
@@ -1072,6 +1086,9 @@ mod tests {
                 "abc123"
             ]
         );
+        // Worktrees of one repository are added one at a time.
+        assert_eq!(add[0].lock.as_deref(), Some("/src/app"));
+        assert_eq!(base[0].lock, None);
 
         let include = run(job.on_exit(prepare::ADD, out("")));
         assert_eq!(include[0].program, "bash");
@@ -1241,6 +1258,7 @@ mod tests {
         // A failing teardown does not keep the worktree alive.
         let worktree = run(job.on_exit(remove::TEARDOWN, failed("docker: not found")));
         assert_eq!(&worktree[0].args[2..], ["worktree", "remove", "--force", "/data/thr_1/app"]);
+        assert_eq!(worktree[0].lock.as_deref(), Some(record().toplevel.as_str()));
         let branch = run(job.on_exit(remove::WORKTREE, out("")));
         // The safe delete: git keeps a branch with commits that are nowhere else.
         assert_eq!(&branch[0].args[2..], ["branch", "-d", "qcc/thr_1"]);

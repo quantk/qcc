@@ -31,6 +31,8 @@ struct Running {
     truncated: bool,
     timer: Option<u64>,
     timed_out: bool,
+    /// The repository lock it holds, if any.
+    lock: Option<String>,
 }
 
 #[derive(Default)]
@@ -41,6 +43,9 @@ struct Worktrees {
     /// Timeout timers and the processes they stop.
     timers: HashMap<u64, u64>,
     last_token: u64,
+    /// Repositories with a command running that changes their worktrees, and the
+    /// commands of other jobs waiting for it, in order.
+    locks: HashMap<String, VecDeque<(u64, Cmd)>>,
 }
 
 fn key(thread: &str) -> String {
@@ -75,8 +80,18 @@ impl Worktrees {
                 Step::Wait => {}
                 Step::Run(cmds) => {
                     for cmd in cmds {
-                        let tag = cmd.tag;
+                        if let Some(lock) = &cmd.lock {
+                            if let Some(waiting) = self.locks.get_mut(lock) {
+                                waiting.push_back((token, cmd));
+                                continue;
+                            }
+                            self.locks.insert(lock.clone(), VecDeque::new());
+                        }
+                        let (tag, lock) = (cmd.tag, cmd.lock.clone());
                         if let Err(error) = self.spawn(token, cmd) {
+                            if let Some(lock) = lock {
+                                self.release(&lock);
+                            }
                             let exit = Exit { stderr: error, ..Exit::default() };
                             if let Some((_, job)) = self.jobs.get_mut(&token) {
                                 steps.push_back(job.on_exit(tag, exit));
@@ -88,6 +103,33 @@ impl Worktrees {
                     self.finish(token, result);
                     return;
                 }
+            }
+        }
+    }
+
+    /// A command holding `lock` is over: start the next one waiting for it, if its
+    /// job is still on.
+    fn release(&mut self, lock: &str) {
+        let Some(mut waiting) = self.locks.remove(lock) else { return };
+        while let Some((job, cmd)) = waiting.pop_front() {
+            if self.jobs.contains_key(&job) {
+                // It takes the lock over, and the rest wait for it in turn.
+                self.locks.insert(lock.to_owned(), VecDeque::new());
+                let lock = lock.to_owned();
+                let tag = cmd.tag;
+                let started = self.spawn(job, cmd);
+                if let Some(queue) = self.locks.get_mut(&lock) {
+                    queue.extend(waiting);
+                }
+                if let Err(error) = started {
+                    self.release(&lock);
+                    let exit = Exit { stderr: error, ..Exit::default() };
+                    if let Some((_, owner)) = self.jobs.get_mut(&job) {
+                        let step = owner.on_exit(tag, exit);
+                        self.advance(job, step);
+                    }
+                }
+                return;
             }
         }
     }
@@ -111,6 +153,7 @@ impl Worktrees {
         };
         self.timers.insert(timer, process);
         let timer = Some(timer);
+        let lock = cmd.lock;
         self.running.insert(
             process,
             Running {
@@ -122,6 +165,7 @@ impl Worktrees {
                 truncated: false,
                 timer,
                 timed_out: false,
+                lock,
             },
         );
         Ok(())
@@ -134,9 +178,14 @@ impl Worktrees {
             self.running.iter().filter(|(_, run)| run.job == token).map(|(id, _)| *id).collect();
         for process in orphans {
             let _ = process::kill(process);
-            if let Some(timer) = self.running.remove(&process).and_then(|run| run.timer) {
+            let Some(run) = self.running.remove(&process) else { continue };
+            if let Some(timer) = run.timer {
                 timers::cancel(timer);
                 self.timers.remove(&timer);
+            }
+            // Its exit will not be heard, so the lock is given up now.
+            if let Some(lock) = run.lock {
+                self.release(&lock);
             }
         }
         let outcome = result.and_then(|answer| {
@@ -249,6 +298,9 @@ impl Plugin for Worktrees {
                 if let Some(timer) = run.timer {
                     timers::cancel(timer);
                     self.timers.remove(&timer);
+                }
+                if let Some(lock) = &run.lock {
+                    self.release(lock);
                 }
                 let exit = Exit {
                     code,

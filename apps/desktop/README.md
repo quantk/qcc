@@ -5,7 +5,8 @@ The control panel for qcc: a Tauri window over the daemon's API.
 ```
 src-tauri/        the backend: one connection to qccd, requests and notifications passed through
 src/api/          the typed door to the daemon; protocol.gen.ts is generated from qcc-protocol
-src/state/        the store (mirror of the daemon) and pure folds: timeline, diff, block layout
+src/state/        the store (mirror of the daemon) and pure folds: timeline, diff, block layout,
+                  delegated threads (children.ts: states, counts, filters of the Agents tab)
 src/ui/registry   the extension points; src/ui/blocks: slots drawn under the user's layout
 src/ui/kit/       shared building blocks: Markdown, DiffView, InteractionPrompt,
                   ItemTrace and its kin (the AI Elements Terminal, Tool and Reasoning patterns)

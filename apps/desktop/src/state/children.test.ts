@@ -149,8 +149,10 @@ describe("the agents list", () => {
     const recent = ids(childList(family, "p", filter({ sort: "recent", archived: true })));
     expect(recent).toEqual(["a", "a2", "a1", "b", "c", "c1"]);
     const status = ids(childList(family, "p", filter({ sort: "status", archived: true })));
-    // b works, c is idle, a is done; under a, the waiting a2 comes before the failed a1.
-    expect(status).toEqual(["b", "c", "c1", "a", "a2", "a1"]);
+    // a is done, but a2 under it waits: the branch comes first, a2 before the failed a1.
+    expect(status).toEqual(["a", "a2", "a1", "b", "c", "c1"]);
+    // In the direct view only the children themselves count: b works, c is idle, a is done.
+    expect(ids(childList(family, "p", filter({ sort: "status", archived: true, depth: "direct" })))).toEqual(["b", "c", "a"]);
   });
 
   it("knows when something narrows it", () => {

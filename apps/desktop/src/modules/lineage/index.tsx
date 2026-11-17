@@ -25,7 +25,7 @@ export const lineageModule: UiModule = {
       scope: "thread",
       placement: { slot: "thread.tabs", order: 5 },
       when: ({ children }) => children.length > 0,
-      render: ({ children }) => <ChildrenView children={children} />,
+      render: ({ thread }) => <ChildrenView parent={thread} />,
     });
     ui.block({
       id: "agents.glance",

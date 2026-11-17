@@ -167,12 +167,17 @@ export type ChildList = {
 
 const URGENCY = Object.fromEntries(CHILD_STATES.map((state, index) => [state, index])) as Record<ChildState, number>;
 
-const COMPARE: Record<ChildSort, (a: Thread, b: Thread) => number> = {
-  started: (a, b) => a.created_at - b.created_at,
-  recent: (a, b) => b.updated_at - a.updated_at,
-  status: (a, b) =>
-    URGENCY[childState(a)] - URGENCY[childState(b)] || Number(!!a.archived) - Number(!!b.archived) || b.updated_at - a.updated_at,
-};
+/** Siblings in the order a sort asks for; `urgency` ranks a thread by its whole branch. */
+function comparer(sort: ChildSort, urgency: (thread: Thread) => number): (a: Thread, b: Thread) => number {
+  switch (sort) {
+    case "started":
+      return (a, b) => a.created_at - b.created_at;
+    case "recent":
+      return (a, b) => b.updated_at - a.updated_at;
+    case "status":
+      return (a, b) => urgency(a) - urgency(b) || Number(!!a.archived) - Number(!!b.archived) || b.updated_at - a.updated_at;
+  }
+}
 
 /**
  * The threads under `id` the Agents tab lists. With `depth: "all"` the list is a
@@ -184,6 +189,20 @@ export function childList(threads: readonly Thread[], id: string, filter: ChildF
   const reach = filter.depth === "direct" ? 1 : MAX_DEPTH;
   const query = filter.query.trim().toLocaleLowerCase();
   const states = new Set(filter.states);
+  // By status, a branch ranks by the most pressing thread in it, so a grandchild
+  // waiting for an answer brings its parent up rather than waiting below it.
+  const branchUrgency = new Map<string, number>();
+  const urgency = (thread: Thread, depth = 0): number => {
+    let rank = branchUrgency.get(thread.id);
+    if (rank === undefined) {
+      rank = thread.archived && !filter.archived ? CHILD_STATES.length : URGENCY[childState(thread)];
+      if (depth + 1 < reach) {
+        for (const child of byParent.get(thread.id) ?? []) rank = Math.min(rank, urgency(child, depth + 1));
+      }
+      branchUrgency.set(thread.id, rank);
+    }
+    return rank;
+  };
   const providers = new Set(filter.providers);
 
   const list: ChildList = {
@@ -205,7 +224,8 @@ export function childList(threads: readonly Thread[], id: string, filter: ChildF
   // Returns the rows of the subtree under `parent`, for the caller to keep or drop.
   const visit = (parent: string, depth: number): ChildRow[] => {
     if (depth >= reach) return [];
-    const siblings = [...(byParent.get(parent) ?? [])].sort((a, b) => COMPARE[filter.sort](a, b) || a.created_at - b.created_at);
+    const compare = comparer(filter.sort, (thread) => urgency(thread, depth));
+    const siblings = [...(byParent.get(parent) ?? [])].sort((a, b) => compare(a, b) || a.created_at - b.created_at);
     const rows: ChildRow[] = [];
     for (const thread of siblings) {
       const own = byParent.get(thread.id)?.length ?? 0;

@@ -1,4 +1,4 @@
-// The side panel's built-in tabs: how full the context is and what was spent,
+// The side panel's built-in tabs: what was spent and how the context filled,
 // what the agent did, and the thread's facts in one place.
 
 import type { ThreadBlock, UiModule } from "../../ui/registry";

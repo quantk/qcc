@@ -5,7 +5,6 @@ import { type UsagePoint, contextUsed, threadTotal } from "../../state/stats";
 import type { ThreadContext } from "../../ui/registry";
 import { compactNumber, plural } from "../../util/format";
 import { Fact, Quiet, Section } from "./Facts";
-import { Progress } from "@/components/ui/progress";
 
 /** The chart keeps to the latest requests: older ones would be slivers. */
 const CHART_POINTS = 48;
@@ -28,7 +27,11 @@ export function UsagePanel({ timeline }: ThreadContext) {
   const limit = usage?.model_context_window ?? null;
   return (
     <>
-      {usage && <ContextSection used={contextUsed(usage)} limit={limit} last={usage.last} />}
+      {usage && (
+        <Section title="Last request">
+          <Breakdown usage={usage.last} />
+        </Section>
+      )}
       {stats.usage.length > 1 && <ContextChart points={stats.usage} limit={limit} />}
       {stats.compactions.length > 0 && (
         <Section title="Compactions" aside={plural(stats.compactions.length, "time")}>
@@ -55,27 +58,6 @@ export function UsagePanel({ timeline }: ThreadContext) {
         </Section>
       )}
     </>
-  );
-}
-
-function ContextSection({ used, limit, last }: { used: number; limit: number | null; last: TokenUsage }) {
-  const percent = limit ? Math.min(100, Math.round((used / limit) * 100)) : null;
-  return (
-    <Section title="Context">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-2xl font-semibold tabular-nums">
-          {percent !== null ? `${percent}%` : compactNumber(used)}
-        </span>
-        <span className="text-sm text-muted-foreground tabular-nums">
-          {limit ? `${compactNumber(used)} of ${compactNumber(limit)}` : "tokens, window unknown"}
-        </span>
-      </div>
-      {percent !== null && <Progress value={percent} aria-label="Context used" />}
-      <div className="mt-1 flex flex-col gap-1">
-        <span className="text-xs text-muted-foreground">Last request</span>
-        <Breakdown usage={last} />
-      </div>
-    </Section>
   );
 }
 

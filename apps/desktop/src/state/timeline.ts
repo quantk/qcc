@@ -25,7 +25,8 @@ export type Entry =
       queued: boolean;
       queueId?: string;
     }
-  | { kind: "item"; key: string; ts: number; item: Item }
+  /** `endTs`: when the item settled, once it has. */
+  | { kind: "item"; key: string; ts: number; endTs?: number; item: Item }
   | {
       kind: "interaction";
       key: string;
@@ -134,9 +135,9 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     }
     case "item/completed": {
       const { item } = event;
-      const replaced = replaceLast(entries, isItem(item.id), (entry) => ({ ...entry, item }) as Entry);
+      const replaced = replaceLast(entries, isItem(item.id), (entry) => ({ ...entry, item, endTs: ts }) as Entry);
       if (replaced) entries = replaced;
-      else push({ kind: "item", key: item.id, ts, item });
+      else push({ kind: "item", key: item.id, ts, endTs: ts, item });
       break;
     }
     case "usage/updated":

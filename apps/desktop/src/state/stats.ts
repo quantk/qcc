@@ -3,6 +3,7 @@
 
 import type {
   Compaction,
+  ContextUsage,
   ThreadEvent,
   TokenUsage,
   TurnId,
@@ -29,6 +30,8 @@ export type ThreadStats = {
   banked: TokenUsage;
   /** The total the current session last reported. */
   current: TokenUsage;
+  /** What the context holds, part by part, as the agent last said; with entries. */
+  context?: ContextUsage;
 };
 
 const zero: TokenUsage = { input_tokens: 0, output_tokens: 0, cached_input_tokens: null };
@@ -84,11 +87,20 @@ export function applyStats(stats: ThreadStats, event: ThreadEvent): ThreadStats 
       const banked = restarted(stats.current, total) ? addUsage(stats.banked, stats.current) : stats.banked;
       return { ...stats, banked, current: total, usage: [...stats.usage, { ts: event.ts, usage: event.usage }] };
     }
+    case "context/usage":
+      return { ...stats, context: event.context };
     case "session/compacted":
       return { ...stats, compactions: [...stats.compactions, { ts: event.ts, compaction: event.compaction }] };
     case "thread/reset":
       // The next session starts its count afresh; what this one spent stays counted.
-      return { ...stats, usage: [], compactions: [], banked: addUsage(stats.banked, stats.current), current: zero };
+      return {
+        ...stats,
+        usage: [],
+        compactions: [],
+        context: undefined,
+        banked: addUsage(stats.banked, stats.current),
+        current: zero,
+      };
     default:
       return stats;
   }

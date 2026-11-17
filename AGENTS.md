@@ -1,8 +1,8 @@
 # AGENTS.md
 
 Инструкции для кодовых агентов (Claude Code, Codex, opencode), работающих с этим репозиторием.
-Что такое qcc и как им пользоваться — в [README.md](README.md); архитектура и этапы — в
-[PLAN.md](PLAN.md); устройство desktop-приложения — в [apps/desktop/README.md](apps/desktop/README.md).
+Что такое qcc, как им пользоваться и как он устроен — в [README.md](README.md); устройство
+desktop-приложения — в [apps/desktop/README.md](apps/desktop/README.md).
 
 ## Коротко о проекте
 
@@ -154,7 +154,7 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - Rust edition 2024, `unsafe_code = "forbid"`, clippy с `-D warnings`, формат — `rustfmt.toml`.
   Не оставляйте `dbg!` и `todo!`.
 - Комментарии и doc-комментарии в коде — на английском, полными предложениями, объясняют «почему».
-  Пользовательская документация (`README.md`, `PLAN.md`) — на русском.
+  Пользовательская документация (`README.md`, `apps/desktop/README.md`) — на русском.
 - Сообщения коммитов — на английском, в повелительном наклонении или как короткое описание
   результата (`Stage 7: orchestration through the CLI, threads import and commands`). Один логический
   шаг — один коммит.

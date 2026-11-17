@@ -286,6 +286,7 @@ pub fn plugin(plugin: &PluginInfo) -> String {
             ("steer", capabilities.steer),
             ("compact", capabilities.compact),
             ("context_usage", capabilities.context_usage),
+            ("images", capabilities.images),
         ] {
             if on {
                 can.push(name);

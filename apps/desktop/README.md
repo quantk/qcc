@@ -43,7 +43,7 @@ plugin's UI does.
 Most of the window is made of **blocks**: a block is a unit of UI with an id, a title,
 the context it needs and a `render`. A block of scope `app` needs nothing; a block of
 scope `thread` is drawn with a `ThreadContext` and may say with `when` whether it
-applies to a thread. The shell has five **slots** that show blocks (`state/blocks.ts`):
+applies to a thread. The window has six **slots** that show blocks (`state/blocks.ts`):
 
 | Slot | Where | Gives |
 | --- | --- | --- |
@@ -52,6 +52,7 @@ applies to a thread. The shell has five **slots** that show blocks (`state/block
 | `sidebar` | folding sections at the bottom of the sidebar | nothing |
 | `thread.tabs` | the tabs of the thread view | the thread |
 | `thread.panel` | the tabs of the side panel at the right of a thread | the thread |
+| `thread.composer` | chips in the bar under the message box, each opening its block in a popover | the thread |
 
 A block goes into any slot that gives what it needs: an app's block anywhere, a
 thread's block only beside a thread. Each block names its default `placement` (a slot
@@ -79,7 +80,7 @@ works as a screen, a tab or a panel tab.
 
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
-| A block: a screen, a sidebar section, a thread tab or a side panel tab | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
+| A block: a screen, a sidebar section, a thread tab, a side panel tab or a chip beside the composer | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
@@ -94,6 +95,20 @@ button stands in the top row or at the foot with setup and preferences is not a
 property of the block but its slot, `views` or `views.foot`, so the user can move it.
 The navigation module binds `Alt+1`…`Alt+9` to the screens in the order of their
 buttons (`src/ui/views.ts`).
+
+A block beside the composer stands as a chip: its `summary` (a component given the
+same context as `render`, drawn inside the chip's button), or its icon and title when
+it has none; a click opens `render` in a popover. A summary that marks an element
+with `data-attention` tints the chip, for something that waits for the user. The
+timeline module draws this slot under its message box (`BlockChips` from
+`ui/blocks.tsx`), so the chips are there wherever the timeline is. By default
+`modules/lineage` puts **Started agents** there (block `agents.glance`), shown only
+for a thread that started others: how many it started, with how many wait for the
+user (blue, and the chip is tinted, as on the Live button), work, failed or are done
+(`state/lineage.ts`). Its popover lists them, the ones that want the user first, each
+leading to its thread, and leads to the full **Agents** tab where their questions can
+be answered. A block can be brought into view where the layout put it with
+`showThreadBlock(id)` from `ui/blocks.tsx`.
 
 Header controls, menu entries and item renderers are not blocks: they are small parts of
 a frame the shell already draws, not units the user would move.

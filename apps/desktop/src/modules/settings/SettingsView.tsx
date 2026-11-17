@@ -109,7 +109,7 @@ export function SettingsView() {
           <ZoomSetting />
         </Section>
         <div id={LAYOUT_SECTION}>
-          <Section title="Layout" hint="Which blocks the window shows and where: screens, sidebar, a thread's tabs and its side panel.">
+          <Section title="Layout" hint="Which blocks the window shows and where: screens, sidebar, a thread's tabs, its side panel and the chips beside its composer.">
             <LayoutSettings />
           </Section>
         </div>

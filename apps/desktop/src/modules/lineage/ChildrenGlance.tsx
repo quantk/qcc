@@ -65,7 +65,9 @@ export function ChildrenGlance({ children }: { children: readonly Thread[] }) {
                   <span className={`dot ${attention}`} title={attentionLabel[attention]} />
                 </ItemMedia>
                 <ItemContent className="min-w-0">
-                  <ItemTitle className="w-full truncate font-normal">{threadTitle(child)}</ItemTitle>
+                  <ItemTitle className="w-full font-normal">
+                    <span className="truncate">{threadTitle(child)}</span>
+                  </ItemTitle>
                   <ItemDescription
                     className={cn(
                       "line-clamp-1",

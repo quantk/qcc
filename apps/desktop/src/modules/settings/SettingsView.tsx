@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { LAYOUT_SECTION, LayoutSettings } from "./LayoutSettings";
 import { setZoom, useZoom } from "./zoom";
 
 function Setting(props: { title: string; hint: string; children: React.ReactNode }) {
@@ -107,6 +108,11 @@ export function SettingsView() {
           <ExamplesSetting />
           <ZoomSetting />
         </Section>
+        <div id={LAYOUT_SECTION}>
+          <Section title="Layout" hint="Which blocks the window shows and where: screens, sidebar, a thread's tabs and its side panel.">
+            <LayoutSettings />
+          </Section>
+        </div>
         <Section
           title="Agents"
           hint="Where each agent's program is, and what its threads start with. Saved in the daemon, so the CLI uses them too."

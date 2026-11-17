@@ -133,13 +133,14 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
           />
           <div className="flex items-center gap-1 border-b pr-2 pl-3">
             <Tabs value={panel.id} onValueChange={(value) => store().setSidePanel({ tab: String(value) })} className="min-w-0 flex-1">
-              {/* A narrow panel scrolls its tabs rather than spilling them over the close button. */}
-              <TabsList variant="line" className="h-10 max-w-full justify-start overflow-x-auto [scrollbar-width:none]">
+              {/* The user may put many blocks here: a narrow panel wraps its tabs onto more lines
+                  rather than hiding some of them. */}
+              <TabsList variant="line" className="h-auto! min-h-10 max-w-full flex-wrap justify-start! gap-y-0 py-1">
                 {panels.map((candidate) => (
                   <BlockMenu
                     key={candidate.id}
                     block={candidate}
-                    render={<TabsTrigger value={candidate.id} className="flex-none px-2 after:bg-primary" />}
+                    render={<TabsTrigger value={candidate.id} className="h-8 flex-none px-2 after:bg-primary" />}
                   >
                     {candidate.title}
                   </BlockMenu>

@@ -1,4 +1,4 @@
-import { ArrowUpIcon, CornerDownRightIcon, PencilIcon, SquareIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, CornerDownRightIcon, PaperclipIcon, PencilIcon, SquareIcon, XIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ProviderInfo, SendMode, Thread } from "../../api/protocol.gen";
@@ -6,11 +6,14 @@ import { store } from "../../state/store";
 import { contextUsed } from "../../state/stats";
 import { type QueuedMessage, type Timeline, queuedMessages } from "../../state/timeline";
 import { compactNumber } from "../../util/format";
+import { fromAttachment, toNewAttachment } from "../../state/attachments";
+import { ComposerAttachmentList, useComposerAttachments } from "./ComposerAttachments";
 import { readText, saveText } from "../../util/storage";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 // Unsent text survives switching between threads.
@@ -45,6 +48,9 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   const delivery: SendMode = canSteer ? preferred : "queue";
   const other: SendMode = delivery === "steer" ? "queue" : "steer";
   const queued = useMemo(() => queuedMessages(timeline), [timeline]);
+  const files = useComposerAttachments(thread.id);
+  const pictures = provider?.capabilities.images ?? false;
+  const canSend = (text.trim() !== "" || files.attachments.length > 0) && files.ready && !sending;
 
   useEffect(() => {
     drafts.set(thread.id, text);
@@ -59,11 +65,14 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
 
   const send = async (mode: SendMode) => {
     const message = text.trim();
-    if (!message || sending) return;
+    if (!canSend) return;
     setSending(true);
-    const taken = await store().send(thread.id, message, mode);
+    const taken = await store().send(thread.id, message, mode, [], files.outgoing());
     setSending(false);
-    if (taken) setText("");
+    if (taken) {
+      setText("");
+      files.clear();
+    }
     input.current?.focus();
   };
 
@@ -76,13 +85,17 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   const edit = async (message: QueuedMessage) => {
     const back = await store().unqueue(thread.id, message.queueId);
     if (back === null) return;
-    setText((current) => (current.trim() ? `${current.trimEnd()}\n\n${back}` : back));
+    const { text: taken, attachments = [] } = back;
+    setText((current) => (current.trim() ? `${current.trimEnd()}\n\n${taken}` : taken));
+    files.restore(attachments);
     input.current?.focus();
   };
 
   const steerNow = async (message: QueuedMessage) => {
     const back = await store().unqueue(thread.id, message.queueId);
-    if (back !== null) await store().send(thread.id, back, "steer");
+    if (back === null) return;
+    const attachments = (back.attachments ?? []).map((attachment) => toNewAttachment(fromAttachment(attachment)));
+    await store().send(thread.id, back.text, "steer", [], attachments);
   };
 
   if (thread.archived) {
@@ -114,7 +127,12 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
             remove={(message) => void store().unqueue(thread.id, message.queueId)}
           />
         )}
-        <InputGroup className="bg-card">
+        <InputGroup className={cn("bg-card", files.dragging && "border-primary ring-3 ring-primary/30")}>
+          {files.attachments.length > 0 && (
+            <InputGroupAddon align="block-start">
+              <ComposerAttachmentList state={files} />
+            </InputGroupAddon>
+          )}
           <InputGroupTextarea
             ref={input}
             rows={1}
@@ -128,6 +146,9 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
                   : "Queue a message for when this turn ends…"
             }
             onChange={(event) => setText(event.target.value)}
+            onPaste={(event) => {
+              if (files.paste(event.clipboardData)) event.preventDefault();
+            }}
             onKeyDown={(event) => {
               if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
               event.preventDefault();
@@ -135,6 +156,20 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
             }}
           />
           <InputGroupAddon align="block-end" className="flex-wrap gap-x-3 gap-y-1.5">
+            <InputGroupButton
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => void files.pick().then(() => input.current?.focus())}
+              aria-label="Attach files"
+              title={
+                pictures
+                  ? "Attach files · or paste or drop them here"
+                  : "Attach files · or paste or drop them here. This agent is told where they are saved; it does not see images as pictures"
+              }
+            >
+              <PaperclipIcon />
+            </InputGroupButton>
+            {files.dragging && <span className="text-primary">Drop to attach</span>}
             <span className={busy ? "status-working" : undefined}>{status}</span>
             {busy && !steerable && (
               <span title="This agent cannot take a message in the middle of a turn, so messages wait for it to end">
@@ -185,7 +220,7 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
               type="submit"
               variant="default"
               size="sm"
-              disabled={!text.trim() || sending}
+              disabled={!canSend}
               title={canSteer ? `Enter · Alt+Enter to ${other} instead` : "Enter"}
             >
               {!busy ? "Send" : delivery === "steer" ? "Steer" : "Queue"} <ArrowUpIcon />
@@ -216,6 +251,14 @@ function QueuedList(props: {
             <span className="min-w-0 flex-1 truncate" title={message.text}>
               {message.text}
             </span>
+            {message.attachments.length > 0 && (
+              <span
+                className="flex items-center gap-0.5 text-xs text-muted-foreground"
+                title={message.attachments.map((attachment) => attachment.name).join("\n")}
+              >
+                <PaperclipIcon className="size-3" /> {message.attachments.length}
+              </span>
+            )}
             {props.canSteer && (
               <Button type="button" variant="ghost" size="xs" onClick={() => props.steer(message)} title="Feed it into the running turn now">
                 <CornerDownRightIcon /> Steer now

@@ -5,7 +5,7 @@ import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "r
 import type { Item, Thread } from "../../api/protocol.gen";
 import { estimateEntryHeight, newTurnKey, turnRoom } from "../../state/scroll";
 import { type Entry, type Timeline, conversationStart, earlierConversations } from "../../state/timeline";
-import { DataTrace, InteractionOutcome, InteractionPrompt, Remembered } from "../../ui/kit";
+import { DataTrace, InteractionOutcome, InteractionPrompt, MessageAttachments, Remembered } from "../../ui/kit";
 import { itemKey, useUi } from "../../ui/registry";
 import { deferScrollWrites } from "./deferScrollWrites";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -35,13 +35,16 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
       return (
         <Message align="end">
           <MessageContent className="gap-1">
-            <Bubble
-              align="end"
-              variant="muted"
-              className="*:data-[slot=bubble-content]:bg-accent"
-            >
-              <BubbleContent className="whitespace-pre-wrap">{entry.text}</BubbleContent>
-            </Bubble>
+            {entry.text.trim() !== "" && (
+              <Bubble
+                align="end"
+                variant="muted"
+                className="*:data-[slot=bubble-content]:bg-accent"
+              >
+                <BubbleContent className="whitespace-pre-wrap">{entry.text}</BubbleContent>
+              </Bubble>
+            )}
+            <MessageAttachments threadId={thread.id} attachments={entry.attachments} />
             {entry.notes.map((note, index) => (
               <MessageFooter
                 key={index}

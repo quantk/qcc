@@ -123,6 +123,17 @@ comments themselves live in the store, read with `comment.list` and kept current
 `comments.updated`. Ctrl+B or the button in the thread header shows and hides the panel;
 in a window too narrow for it, it opens over the thread and Escape puts it away.
 
+The composer takes attachments: the paperclip opens the system file dialog, `Ctrl+V`
+pastes images or files from the clipboard (a file manager's copied files come as a
+`text/uri-list`), and files dropped anywhere on the window (Tauri's drag-drop event)
+join the message being written. Picked files go to the daemon by path; pasted ones by
+their bytes. Thumbnails of picked pictures are read by the backend command
+`attachment_preview`, since the webview cannot read files. The pure part lives in
+`state/attachments.ts`; `ui/kit/Attachments.tsx` draws the tiles in the composer and
+under a sent message, whose pictures are read back with `thread.attachment`. Whether
+the agent looks at images is its provider's `images` capability; the paperclip's hint
+says when it does not.
+
 Both sides of the window can be resized by dragging their edge (`ui/kit/ResizeHandle`,
 arrow keys when it has focus, a double click resets it). The widths live in the store
 and are bounded by `state/layout.ts`, which also keeps room for the thread.

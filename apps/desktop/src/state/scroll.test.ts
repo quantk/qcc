@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { estimateEntryHeight, newTurnKey, turnRoom } from "./scroll";
 import type { Entry } from "./timeline";
 
-const user = (key: string, text = "hi"): Entry => ({ kind: "user", key, ts: 0, text, notes: [], steered: false, queued: false });
+const user = (key: string, text = "hi"): Entry => ({ kind: "user", key, ts: 0, text, notes: [], attachments: [], steered: false, queued: false });
 const answer = (key: string, text: string): Entry => ({
   kind: "item",
   key,

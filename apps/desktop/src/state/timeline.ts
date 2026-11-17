@@ -2,6 +2,7 @@
 // always give the same entries, whether they arrive live or from the journal.
 
 import type {
+  Attachment,
   Compaction,
   InteractionId,
   InteractionRequest,
@@ -20,6 +21,8 @@ export type Entry =
       text: string;
       /** What qcc told the agent along with the message. */
       notes: readonly string[];
+      /** Files the user attached to it. */
+      attachments: readonly Attachment[];
       steered: boolean;
       /** Waiting for the running turn to end. */
       queued: boolean;
@@ -93,6 +96,7 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
         ts,
         text: event.text,
         notes: event.notes ?? [],
+        attachments: event.attachments ?? [],
         steered: event.steered ?? false,
         queued: false,
       });
@@ -105,6 +109,7 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
         ts,
         text: event.text,
         notes: event.notes ?? [],
+        attachments: event.attachments ?? [],
         steered: false,
         queued: true,
         queueId: event.queue_id,
@@ -217,13 +222,15 @@ export function applyEvents(timeline: Timeline, events: readonly ThreadEvent[]):
   return events.reduce(applyEvent, timeline);
 }
 
-export type QueuedMessage = { queueId: string; text: string };
+export type QueuedMessage = { queueId: string; text: string; attachments: readonly Attachment[] };
 
 /** Messages waiting for the running turn to end, oldest first. */
 export function queuedMessages(timeline: Timeline | undefined): QueuedMessage[] {
   const queued: QueuedMessage[] = [];
   for (const entry of timeline?.entries ?? []) {
-    if (entry.kind === "user" && entry.queued && entry.queueId) queued.push({ queueId: entry.queueId, text: entry.text });
+    if (entry.kind === "user" && entry.queued && entry.queueId) {
+      queued.push({ queueId: entry.queueId, text: entry.text, attachments: entry.attachments });
+    }
   }
   return queued;
 }

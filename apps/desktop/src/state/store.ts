@@ -16,6 +16,7 @@ import type {
   LineComment,
   MessageContext,
   ModelInfo,
+  NewAttachment,
   PermissionMode,
   PluginInfo,
   Project,
@@ -29,6 +30,7 @@ import type {
   ThreadEvent,
   ThreadId,
   ThreadSpawnParams,
+  ThreadUnqueueResult,
 } from "../api/protocol.gen";
 import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
@@ -179,6 +181,8 @@ export class AppStore {
   private watch: number | null = null;
   /** Threads whose timelines are kept current: the selected one and whatever a view holds. */
   private followed = new Map<ThreadId, Followed>();
+  /** Attachments read to be shown, by path: they never change. */
+  private attachmentUrls = new Map<string, Promise<string | null>>();
 
   constructor(
     readonly api: Api,
@@ -541,9 +545,10 @@ export class AppStore {
     text: string,
     delivery: SendMode,
     context: MessageContext[] = [],
+    attachments: NewAttachment[] = [],
   ): Promise<boolean> {
     const result = await this.attempt(() =>
-      this.api.call("thread.send", { thread_id: threadId, text, delivery, context }),
+      this.api.call("thread.send", { thread_id: threadId, text, delivery, context, attachments }),
     );
     return result !== null;
   }
@@ -589,11 +594,25 @@ export class AppStore {
   }
 
   /** Take a queued message back. Resolves to its text, or null if it was gone. */
-  async unqueue(threadId: ThreadId, queueId: string): Promise<string | null> {
-    const result = await this.attempt(() =>
-      this.api.call("thread.unqueue", { thread_id: threadId, queue_id: queueId }),
-    );
-    return result?.text ?? null;
+  /** The message taken back, or null if it was not. */
+  async unqueue(threadId: ThreadId, queueId: string): Promise<ThreadUnqueueResult | null> {
+    return this.attempt(() => this.api.call("thread.unqueue", { thread_id: threadId, queue_id: queueId }));
+  }
+
+  /** A data URL of one of the thread's attachments, to show it. Read once per path. */
+  attachmentUrl(threadId: ThreadId, path: string): Promise<string | null> {
+    const known = this.attachmentUrls.get(path);
+    if (known) return known;
+    const read = this.api
+      .call("thread.attachment", { thread_id: threadId, path })
+      .then(({ mime, data }) => `data:${mime};base64,${data}`)
+      .catch(() => {
+        // Not kept: the next look asks again.
+        this.attachmentUrls.delete(path);
+        return null;
+      });
+    this.attachmentUrls.set(path, read);
+    return read;
   }
 
   /** Start the thread's conversation afresh. Resolves to whether the daemon took it. */

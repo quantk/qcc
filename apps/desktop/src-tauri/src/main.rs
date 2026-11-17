@@ -75,6 +75,30 @@ async fn rpc(
     })
 }
 
+/// The largest picture the composer shows a thumbnail of before sending.
+const PREVIEW_LIMIT: u64 = 20 * 1024 * 1024;
+
+/// A picture the user picked to attach, base64-encoded, for its thumbnail in the
+/// composer: the webview cannot read files. Only files the user chose reach here, and
+/// only images: anything else, or anything too large, has no preview.
+#[tauri::command]
+async fn attachment_preview(path: String) -> Option<String> {
+    let path = PathBuf::from(path);
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !matches!(extension.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp") {
+        return None;
+    }
+    let read = tauri::async_runtime::spawn_blocking(move || {
+        let metadata = std::fs::metadata(&path).ok()?;
+        if !metadata.is_file() || metadata.len() > PREVIEW_LIMIT {
+            return None;
+        }
+        std::fs::read(&path).ok()
+    });
+    let data = read.await.ok()??;
+    Some(base64::engine::general_purpose::STANDARD.encode(data))
+}
+
 #[tauri::command]
 fn daemon_state(daemon: State<'_, Arc<Daemon>>) -> DaemonState {
     daemon.state.lock().unwrap().clone()
@@ -238,7 +262,7 @@ fn main() {
             tauri::async_runtime::spawn(keep_connected(app.handle().clone(), daemon));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc, daemon_state])
+        .invoke_handler(tauri::generate_handler![rpc, daemon_state, attachment_preview])
         .run(tauri::generate_context!())
         .expect("the qcc desktop app runs");
 }

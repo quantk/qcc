@@ -142,7 +142,18 @@ describe("queued messages", () => {
       event(4, { type: "input/submitted", text: "first", queue_id: "a" }),
       event(5, { type: "input/dropped", queue_id: "c" }),
     ]);
-    expect(queuedMessages(timeline)).toEqual([{ queueId: "b", text: "second" }]);
+    expect(queuedMessages(timeline)).toEqual([{ queueId: "b", text: "second", attachments: [] }]);
     expect(queuedMessages(undefined)).toEqual([]);
+  });
+
+  it("keep their attachments, and so do delivered messages", () => {
+    const shot = { name: "shot.png", mime: "image/png", path: "/data/attachments/t/1/shot.png", size: 3 };
+    const timeline = fold(
+      { type: "input/queued", queue_id: "a", text: "look", attachments: [shot] },
+      { type: "input/submitted", text: "", attachments: [shot] },
+    );
+    expect(queuedMessages(timeline)[0]?.attachments).toEqual([shot]);
+    const delivered = timeline.entries.find((entry) => entry.kind === "user" && !entry.queued);
+    expect(delivered?.kind === "user" && delivered.attachments).toEqual([shot]);
   });
 });

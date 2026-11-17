@@ -6,6 +6,8 @@ import type { Entry } from "./timeline";
 /** Pixels of one line of body text, and of a folded trace line. */
 const LINE = 24;
 const TRACE = 32;
+/** The row of attachments under a user message. */
+const ATTACHMENTS = 88;
 /** Characters on one line of the timeline at its widest, roughly. */
 const LINE_CHARS = 95;
 
@@ -23,7 +25,7 @@ function textHeight(text: string): number {
 export function estimateEntryHeight(entry: Entry): number {
   switch (entry.kind) {
     case "user":
-      return textHeight(entry.text) + 20 + entry.notes.length * 20;
+      return textHeight(entry.text) + 20 + entry.notes.length * 20 + (entry.attachments.length > 0 ? ATTACHMENTS : 0);
     case "notice":
     case "conversation":
       return TRACE;

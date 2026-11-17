@@ -30,6 +30,7 @@ import type {
   ThreadId,
   ThreadSpawnParams,
 } from "../api/protocol.gen";
+import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
@@ -43,6 +44,7 @@ const SEEN = "qcc.seen";
 const COLLAPSED = "qcc.collapsed-families";
 const SIDE_PANEL = "qcc.side-panel";
 const SIDEBAR_WIDTH = "qcc.sidebar-width";
+const BLOCK_LAYOUT = "qcc.block-layout";
 
 /** The panel at the right of a thread: whether it is open, which tab it shows, how wide it is. */
 export type SidePanel = { open: boolean; tab: string | null; width: number };
@@ -119,6 +121,8 @@ export type AppState = {
   sidePanel: SidePanel;
   /** How wide the thread list at the left is, in pixels. */
   sidebarWidth: number;
+  /** Where the user put blocks, over their default places; see `blocks.ts`. */
+  blockLayout: Layout;
   /** The side panel covers the thread in a narrow window. Not remembered. */
   sideOverlay: boolean;
   /** The skills plugins offer; whether one is off is in the settings. */
@@ -161,6 +165,7 @@ export class AppStore {
     collapsed: readCollapsed(),
     sidePanel: readSidePanel(),
     sidebarWidth: clampWidth(readJson(SIDEBAR_WIDTH), SIDEBAR),
+    blockLayout: parseLayout(readJson(BLOCK_LAYOUT)),
     sideOverlay: false,
     skills: [],
     agentSkills: {},
@@ -463,6 +468,12 @@ export class AppStore {
     const sidebarWidth = clampWidth(width, SIDEBAR);
     if (save) saveJson(SIDEBAR_WIDTH, sidebarWidth);
     if (sidebarWidth !== this.state.sidebarWidth) this.set({ sidebarWidth });
+  };
+
+  /** Change where blocks stand; remembered for the next start. */
+  setBlockLayout = (blockLayout: Layout) => {
+    saveJson(BLOCK_LAYOUT, blockLayout);
+    this.set({ blockLayout });
   };
 
   /** Resize the side panel; `save` as for the sidebar. */

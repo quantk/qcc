@@ -15,11 +15,20 @@ export const mcpModule: UiModule = {
   id: "core.mcp",
   activate(registry) {
     const connected = () => store().getState().daemon.status === "connected";
-    registry.appView({ id: MCP_VIEW, title: "MCP servers", order: 90, icon: ServerIcon, place: "bottom", render: McpView });
-    registry.threadTab({
-      id: "mcp",
+    registry.block({
+      id: MCP_VIEW,
+      title: "MCP servers",
+      scope: "app",
+      placement: { slot: "views.foot", order: 90 },
+      icon: ServerIcon,
+      render: McpView,
+    });
+    registry.block({
+      id: "thread.mcp",
       title: "MCP",
-      order: 30,
+      hint: "Switch MCP servers for this thread",
+      scope: "thread",
+      placement: { slot: "thread.tabs", order: 30 },
       // Shown wherever there is a server to switch: reported, kept off, or set up in qcc.
       when: ({ thread }) =>
         (thread.mcp_servers ?? []).length > 0 ||

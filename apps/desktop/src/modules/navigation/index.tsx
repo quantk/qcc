@@ -3,8 +3,9 @@
 // the panel at the right of a thread, which belongs to the same frame. And Alt+1 to
 // Alt+9 for the views, in the order their buttons are drawn.
 
+import { type Layout, arrange } from "../../state/blocks";
 import { store } from "../../state/store";
-import type { AppView, UiModule } from "../../ui/registry";
+import type { Block, UiModule } from "../../ui/registry";
 import { openViewCommand, viewShortcuts } from "../../ui/views";
 
 /** `MouseEvent.button` of the side buttons most mice have. */
@@ -23,20 +24,24 @@ export const navigationModule: UiModule = {
       run: () => store().toggleSidePanel(),
     });
 
-    // The views come and go with modules and plugins, and their shortcuts with them.
-    let views: readonly AppView[] | null = null;
+    // The views come and go with modules, plugins and the user's layout, and their
+    // shortcuts with them.
+    let seen: { blocks: readonly Block[]; layout: Layout } | null = null;
     let removeShortcuts: (() => void)[] = [];
     const syncShortcuts = () => {
-      const next = ui.getSnapshot().views;
-      // Registering a command notifies this listener again; the views are the same then.
-      if (next === views) return;
-      views = next;
+      const blocks = ui.getSnapshot().blocks;
+      const layout = store().getState().blockLayout;
+      // Registering a command notifies this listener again; the blocks are the same then.
+      if (seen?.blocks === blocks && seen.layout === layout) return;
+      seen = { blocks, layout };
+      const { slots } = arrange(blocks, layout);
       removeShortcuts.forEach((remove) => remove());
-      removeShortcuts = viewShortcuts(next).map(({ view, shortcut }) =>
+      removeShortcuts = viewShortcuts(slots.views, slots["views.foot"]).map(({ view, shortcut }) =>
         ui.command({ id: openViewCommand(view.id), title: `Open ${view.title}`, shortcut, run: () => store().openView(view.id) }),
       );
     };
-    const stopShortcuts = ui.subscribe(syncShortcuts);
+    const stopUi = ui.subscribe(syncShortcuts);
+    const stopStore = store().subscribe(syncShortcuts);
     syncShortcuts();
 
     // The webview would otherwise take the side buttons for its own history and
@@ -53,7 +58,8 @@ export const navigationModule: UiModule = {
     window.addEventListener("auxclick", swallow);
     window.addEventListener("mouseup", onUp);
     return () => {
-      stopShortcuts();
+      stopUi();
+      stopStore();
       removeShortcuts.forEach((remove) => remove());
       window.removeEventListener("mousedown", swallow);
       window.removeEventListener("auxclick", swallow);

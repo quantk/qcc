@@ -6,7 +6,8 @@ import { SIDE_PANEL_WIDTH, THREAD_MIN } from "../state/layout";
 import { attentionLabel, attentionOf, childrenOf, findProvider, threadTitle } from "../state/selectors";
 import { SIDE_PANEL_BESIDE, store, useApp } from "../state/store";
 import { ResizeHandle } from "../ui/kit";
-import { type ThreadContext, useUi } from "../ui/registry";
+import { BlockContent, BlockMenu, useSlot } from "../ui/blocks";
+import { type ThreadContext, blockApplies, useUi } from "../ui/registry";
 import { tailPath } from "../util/format";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -18,9 +19,9 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
   const timeline = useApp((state) => state.timelines[threadId]);
   const loading = useApp((state) => state.loading);
   const plugins = useApp((state) => state.allPlugins);
-  const allTabs = useUi((snapshot) => snapshot.tabs);
+  const allTabs = useSlot("thread.tabs");
   const allActions = useUi((snapshot) => snapshot.actions);
-  const allPanels = useUi((snapshot) => snapshot.panels);
+  const allPanels = useSlot("thread.panel");
   const sidePanel = useApp((state) => state.sidePanel);
   const overlay = useApp((state) => state.sideOverlay);
   const beside = useMediaQuery(SIDE_PANEL_BESIDE);
@@ -44,10 +45,10 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
 
   const parent = thread.parent ? threads[thread.parent] : undefined;
   const context: ThreadContext = { thread, timeline, provider, parent, children };
-  const tabs = allTabs.filter((tab) => tab.when?.(context) ?? true);
+  const tabs = allTabs.filter((tab) => blockApplies(tab, context));
   const actions = allActions.filter((action) => action.when?.(context) ?? true);
   const tab = tabs.find((candidate) => candidate.id === chosen) ?? tabs[0];
-  const panels = allPanels.filter((panel) => panel.when?.(context) ?? true);
+  const panels = allPanels.filter((panel) => blockApplies(panel, context));
   const panel = panels.find((candidate) => candidate.id === sidePanel.tab) ?? panels[0];
   const attention = attentionOf(thread);
 
@@ -92,14 +93,25 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
           <Tabs value={tab.id} onValueChange={(value) => setChosen(String(value))} className="border-b px-4">
             <TabsList variant="line" className="h-10">
               {tabs.map((candidate) => (
-                <TabsTrigger key={candidate.id} value={candidate.id} className="flex-none px-2.5 after:bg-primary">
+                <BlockMenu
+                  key={candidate.id}
+                  block={candidate}
+                  render={<TabsTrigger value={candidate.id} className="flex-none px-2.5 after:bg-primary" />}
+                >
                   {candidate.title}
-                </TabsTrigger>
+                </BlockMenu>
               ))}
             </TabsList>
           </Tabs>
         )}
-        {tab ? <tab.render {...context} /> : <div className="empty">Nothing to show for this thread.</div>}
+        {tab ? (
+          // A block that scrolls by itself fills this; one that does not scrolls in it.
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <BlockContent block={tab} context={context} />
+          </div>
+        ) : (
+          <div className="empty">Nothing to show for this thread.</div>
+        )}
       </div>
       {panel && panelOpen && (
         <aside
@@ -124,9 +136,13 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
               {/* A narrow panel scrolls its tabs rather than spilling them over the close button. */}
               <TabsList variant="line" className="h-10 max-w-full justify-start overflow-x-auto [scrollbar-width:none]">
                 {panels.map((candidate) => (
-                  <TabsTrigger key={candidate.id} value={candidate.id} className="flex-none px-2 after:bg-primary">
+                  <BlockMenu
+                    key={candidate.id}
+                    block={candidate}
+                    render={<TabsTrigger value={candidate.id} className="flex-none px-2 after:bg-primary" />}
+                  >
                     {candidate.title}
-                  </TabsTrigger>
+                  </BlockMenu>
                 ))}
               </TabsList>
             </Tabs>
@@ -134,8 +150,8 @@ export function ThreadView({ threadId }: { threadId: ThreadId }) {
               <XIcon />
             </Button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <panel.render {...context} />
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <BlockContent block={panel} context={context} />
           </div>
         </aside>
       )}

@@ -14,10 +14,12 @@ export const lineageModule: UiModule = {
       when: ({ parent }) => parent !== undefined,
       render: ({ parent }) => (parent ? <ParentLink parent={parent} /> : null),
     });
-    ui.threadTab({
+    ui.block({
       id: "agents",
       title: "Agents",
-      order: 5,
+      hint: "The threads this one started",
+      scope: "thread",
+      placement: { slot: "thread.tabs", order: 5 },
       when: ({ children }) => children.length > 0,
       render: ({ children }) => <ChildrenView children={children} />,
     });

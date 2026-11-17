@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 
 import type { DaemonState } from "../api/api";
 import { store, useApp } from "../state/store";
+import { useSlot } from "../ui/blocks";
 import { matchesShortcut, ui, useUi } from "../ui/registry";
+import { isAppBlock } from "../ui/views";
 import { CommandPalette } from "./CommandPalette";
 import { Sidebar } from "./Sidebar";
 import { ThreadView } from "./ThreadView";
@@ -33,9 +35,13 @@ export function App() {
   const notice = useApp((state) => state.notice);
   const commands = useUi((snapshot) => snapshot.commands);
   const Dialog = useUi((snapshot) => snapshot.dialog);
-  const views = useUi((snapshot) => snapshot.views);
+  const views = useSlot("views");
+  const foot = useSlot("views.foot");
+  const blocks = useUi((snapshot) => snapshot.blocks);
   const viewId = useApp((state) => state.view);
-  const View = (views.find((view) => view.id === viewId) ?? views[0])?.render;
+  // A screen opened by name (a command, a link) shows even when the user moved its
+  // block out of the screens' list; only blocks that need nothing can fill the window.
+  const View = (blocks.filter(isAppBlock).find((block) => block.id === viewId) ?? views.find(isAppBlock) ?? foot.find(isAppBlock))?.render;
   const [palette, setPalette] = useState(false);
   const sidebarWidth = useApp((state) => state.sidebarWidth);
 

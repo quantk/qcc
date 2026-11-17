@@ -1,23 +1,22 @@
-// How the app's views are laid out in the sidebar: the order of their buttons and
-// the commands that open them, shared by the sidebar and the navigation module.
+// The app's views as buttons of the sidebar: which blocks can be one, and the
+// commands that open them, shared by the sidebar and the navigation module. Which
+// views stand at the top and which at the foot is the layout's call (the `views`
+// and `views.foot` slots).
 
-import type { AppView } from "./registry";
+import type { AppBlock, Block } from "./registry";
 
-/** The buttons in the order they are drawn: the top row, then the foot. */
-export function viewButtons(views: readonly AppView[]): { top: AppView[]; bottom: AppView[] } {
-  return {
-    top: views.filter((view) => view.place !== "bottom"),
-    bottom: views.filter((view) => view.place === "bottom"),
-  };
-}
+/** Only a block that needs nothing can fill the window as a screen. */
+export const isAppBlock = (block: Block): block is AppBlock => block.scope === "app";
 
 /** The id of the command that opens a view by its position (`Alt+1`, `Alt+2`, …). */
 export function openViewCommand(viewId: string): string {
   return `view.open:${viewId}`;
 }
 
-/** The views reachable by `Alt+<digit>`, with their shortcuts, in the order drawn. */
-export function viewShortcuts(views: readonly AppView[]): { view: AppView; shortcut: string }[] {
-  const { top, bottom } = viewButtons(views);
-  return [...top, ...bottom].slice(0, 9).map((view, index) => ({ view, shortcut: `Alt+${index + 1}` }));
+/** The views reachable by `Alt+<digit>`, with their shortcuts, in the order drawn: the top row, then the foot. */
+export function viewShortcuts(top: readonly Block[], bottom: readonly Block[]): { view: AppBlock; shortcut: string }[] {
+  return [...top, ...bottom]
+    .filter(isAppBlock)
+    .slice(0, 9)
+    .map((view, index) => ({ view, shortcut: `Alt+${index + 1}` }));
 }

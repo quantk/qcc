@@ -8,6 +8,6 @@ import { MetricsView } from "./MetricsView";
 export const metricsModule: UiModule = {
   id: "metrics",
   activate(ui) {
-    ui.appView({ id: "metrics", title: "Metrics", order: 20, icon: ChartColumnIcon, render: MetricsView });
+    ui.block({ id: "metrics", title: "Metrics", scope: "app", placement: { slot: "views", order: 20 }, icon: ChartColumnIcon, render: MetricsView });
   },
 };

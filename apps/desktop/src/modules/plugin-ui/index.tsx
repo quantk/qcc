@@ -1,6 +1,7 @@
 // What plugins contribute to the window. A plugin describes its views as trees of
-// UI nodes; this module turns each contribution into the same registrations the
-// built-in modules make, so a plugin's tab sits next to the timeline like any other.
+// UI nodes; this module turns each contribution into a block like the built-in
+// modules' blocks, so a plugin's tab sits next to the timeline like any other and
+// the user can move it to any slot that fits it.
 
 import { PuzzleIcon } from "lucide-react";
 
@@ -28,13 +29,25 @@ export function contributionsModule(contributions: UiContributionsResult): UiMod
           ) : (
             <PluginView plugin={view.plugin} view={view.id} thread={thread} />
           );
+        const hint = `From the plugin ${view.plugin}`;
         if (view.placement === "app") {
-          ui.appView({ id, title: view.title, order, icon: PuzzleIcon, render: () => <div className="plugin-screen">{draw()}</div> });
-        } else {
-          ui.threadTab({
+          ui.block({
             id,
             title: view.title,
-            order,
+            hint,
+            icon: PuzzleIcon,
+            scope: "app",
+            placement: { slot: "views", order },
+            render: () => <div className="plugin-screen">{draw()}</div>,
+          });
+        } else {
+          ui.block({
+            id,
+            title: view.title,
+            hint,
+            icon: PuzzleIcon,
+            scope: "thread",
+            placement: { slot: "thread.tabs", order },
             when: ({ thread }) => view.scope === "allThreads" || view.providers.includes(thread.provider),
             render: ({ thread }) => draw(thread),
           });

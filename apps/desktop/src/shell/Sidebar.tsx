@@ -22,11 +22,13 @@ import {
 import { SIDEBAR, THREAD_MIN } from "../state/layout";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
-import { type AppView, type ViewBadge, useUi } from "../ui/registry";
-import { openViewCommand, viewButtons } from "../ui/views";
+import { useSlot } from "../ui/blocks";
+import { type AppBlock, type ViewBadge, useUi } from "../ui/registry";
+import { isAppBlock, openViewCommand } from "../ui/views";
 import { ResizeHandle, ThreadMenu } from "../ui/kit";
 import { baseName, plural, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
+import { SidebarBlocks } from "./SidebarBlocks";
 import { type DragState, useThreadDrag } from "./useThreadDrag";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -49,11 +51,14 @@ export function Sidebar() {
   const collapsed = useApp((state) => state.collapsed);
   const connected = useApp((state) => state.daemon.status === "connected");
   const width = useApp((state) => state.sidebarWidth);
-  const views = useUi((snapshot) => snapshot.views);
-  const viewId = useApp((state) => state.view) ?? views[0]?.id;
+  // The screens' buttons: the top row and the foot are two slots of the layout.
+  const topSlot = useSlot("views");
+  const footSlot = useSlot("views.foot");
+  const top = useMemo(() => topSlot.filter(isAppBlock), [topSlot]);
+  const bottom = useMemo(() => footSlot.filter(isAppBlock), [footSlot]);
+  const viewId = useApp((state) => state.view) ?? (top[0] ?? bottom[0])?.id;
   // A view is current only while no thread covers it.
   const current = selected === null ? viewId : undefined;
-  const { top, bottom } = useMemo(() => viewButtons(views), [views]);
   const [showArchived, setShowArchived] = useState(false);
   const now = useNow(30_000);
   const { drag, start, wasDragged } = useThreadDrag();
@@ -236,6 +241,7 @@ export function Sidebar() {
             </section>
           ))}
         </nav>
+        <SidebarBlocks />
         {(bottom.length > 0 || archivedCount > 0) && (
           // Setup and preferences sit at the foot, where they leave the threads their room.
           <div className="flex items-center gap-1 border-t border-border px-3 py-1.5">
@@ -284,7 +290,7 @@ export function Sidebar() {
  * tooltip. A view that counts something reads its count here, so only its own
  * button redraws when the count changes.
  */
-function ViewButton({ view, current, side }: { view: AppView; current: boolean; side: "top" | "bottom" }) {
+function ViewButton({ view, current, side }: { view: AppBlock; current: boolean; side: "top" | "bottom" }) {
   return view.useBadge ? (
     <CountedViewButton view={view} useBadge={view.useBadge} current={current} side={side} />
   ) : (
@@ -295,7 +301,7 @@ function ViewButton({ view, current, side }: { view: AppView; current: boolean; 
 function CountedViewButton({
   useBadge,
   ...props
-}: { view: AppView; useBadge: () => ViewBadge | null; current: boolean; side: "top" | "bottom" }) {
+}: { view: AppBlock; useBadge: () => ViewBadge | null; current: boolean; side: "top" | "bottom" }) {
   return <ViewButtonBody {...props} badge={useBadge()} />;
 }
 
@@ -305,7 +311,7 @@ function ViewButtonBody({
   current,
   side,
 }: {
-  view: AppView;
+  view: AppBlock;
   badge: ViewBadge | null;
   current: boolean;
   side: "top" | "bottom";

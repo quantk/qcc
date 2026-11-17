@@ -30,7 +30,15 @@ function useLiveBadge(): ViewBadge | null {
 export const liveModule: UiModule = {
   id: "core.live",
   activate(ui) {
-    ui.appView({ id: LIVE, title: "Live", order: 5, icon: RadioIcon, useBadge: useLiveBadge, render: LiveWall });
+    ui.block({
+      id: LIVE,
+      title: "Live",
+      scope: "app",
+      placement: { slot: "views", order: 5 },
+      icon: RadioIcon,
+      useBadge: useLiveBadge,
+      render: LiveWall,
+    });
     ui.command({ id: "view.live", title: "Watch the agents at work", shortcut: "Ctrl+Shift+L", run: () => store().openView(LIVE) });
   },
 };

@@ -15,7 +15,14 @@ export const settingsModule: UiModule = {
   id: "core.settings",
   activate(ui) {
     restoreZoom();
-    ui.appView({ id: SETTINGS, title: "Settings", order: 100, icon: SettingsIcon, place: "bottom", render: SettingsView });
+    ui.block({
+      id: SETTINGS,
+      title: "Settings",
+      scope: "app",
+      placement: { slot: "views.foot", order: 100 },
+      icon: SettingsIcon,
+      render: SettingsView,
+    });
     ui.command({ id: "view.settings", title: "Open settings", shortcut: "Ctrl+,", run: () => store().openView(SETTINGS) });
     // The shortcuts a browser uses. Ctrl+0 already opens the overview, so resetting
     // the scale is left to the palette and the settings screen.

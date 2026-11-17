@@ -1,52 +1,51 @@
 import { describe, expect, it } from "vitest";
 
-import type { Item } from "../api/protocol.gen";
-import { UiRegistry, itemKey, matchesShortcut } from "./registry";
+import type { Item, Thread } from "../api/protocol.gen";
+import { UiRegistry, blockApplies, itemKey, matchesShortcut } from "./registry";
 
 const Nothing = () => null;
 
 describe("UiRegistry", () => {
-  it("orders tabs and removes a module's contributions as a whole", () => {
+  it("offers blocks and removes a module's contributions as a whole", () => {
     const ui = new UiRegistry();
     ui.activate({
       id: "a",
       activate(ui) {
-        ui.threadTab({ id: "late", title: "Late", order: 10, render: Nothing });
+        ui.block({ id: "late", title: "Late", scope: "thread", placement: { slot: "thread.tabs", order: 10 }, render: Nothing });
         ui.command({ id: "a.run", title: "Run", run: () => {} });
       },
     });
-    ui.activate({ id: "b", activate: (ui) => void ui.threadTab({ id: "early", title: "Early", order: 0, render: Nothing }) });
-    expect(ui.getSnapshot().tabs.map((tab) => tab.id)).toEqual(["early", "late"]);
+    ui.activate({
+      id: "b",
+      activate: (ui) => void ui.block({ id: "early", title: "Early", scope: "app", placement: { slot: "views", order: 0 }, render: Nothing }),
+    });
+    expect(ui.getSnapshot().blocks.map((block) => block.id)).toEqual(["late", "early"]);
 
     ui.deactivate("a");
-    expect(ui.getSnapshot().tabs.map((tab) => tab.id)).toEqual(["early"]);
+    expect(ui.getSnapshot().blocks.map((block) => block.id)).toEqual(["early"]);
     expect(ui.getSnapshot().commands).toEqual([]);
     expect(ui.activeModules()).toEqual(["b"]);
-  });
-
-  it("orders side panels and takes them out with their module", () => {
-    const ui = new UiRegistry();
-    ui.activate({
-      id: "a",
-      activate(ui) {
-        ui.threadPanel({ id: "usage", title: "Usage", order: 10, render: Nothing });
-        ui.threadPanel({ id: "info", title: "Info", order: 0, render: Nothing });
-      },
-    });
-    expect(ui.getSnapshot().panels.map((panel) => panel.id)).toEqual(["info", "usage"]);
-    ui.deactivate("a");
-    expect(ui.getSnapshot().panels).toEqual([]);
   });
 
   it("replaces what a module registered when it is activated again", () => {
     const ui = new UiRegistry();
     const module = (title: string) => ({
       id: "m",
-      activate: (ui: UiRegistry) => void ui.threadTab({ id: "tab", title, order: 0, render: Nothing }),
+      activate: (ui: UiRegistry) =>
+        void ui.block({ id: "tab", title, scope: "thread", placement: { slot: "thread.tabs", order: 0 }, render: Nothing }),
     });
     ui.activate(module("one"));
     ui.activate(module("two"));
-    expect(ui.getSnapshot().tabs.map((tab) => tab.title)).toEqual(["two"]);
+    expect(ui.getSnapshot().blocks.map((block) => block.title)).toEqual(["two"]);
+  });
+
+  it("asks a thread's block whether it applies, and shows a block that needs nothing anywhere", () => {
+    const context = { thread: { provider: "echo" } as Thread, timeline: undefined, provider: undefined, parent: undefined, children: [] };
+    const placement = { slot: "thread.tabs", order: 0 } as const;
+    const never = { id: "n", title: "N", scope: "thread", placement, when: () => false, render: Nothing } as const;
+    const always = { id: "a", title: "A", scope: "app", placement, render: Nothing } as const;
+    expect(blockApplies(never, context)).toBe(false);
+    expect(blockApplies(always, context)).toBe(true);
   });
 
   it("lets a later renderer take over an item kind and gives it back", () => {

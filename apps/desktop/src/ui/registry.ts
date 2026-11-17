@@ -1,10 +1,12 @@
 // The extension points of the window. Everything on screen beyond the bare shell is
 // a contribution: the timeline and the changes tab register here exactly as a
-// plugin's panel does, so nothing built in has a private way in.
+// plugin's panel does, so nothing built in has a private way in. Blocks say what
+// they are and where they go by default; which slot shows them is the layout's call.
 
 import { type ComponentType, useSyncExternalStore } from "react";
 
 import type { Item, ProviderInfo, Thread } from "../api/protocol.gen";
+import type { Placement } from "../state/blocks";
 import type { ThreadGroup } from "../state/selectors";
 import type { Timeline } from "../state/timeline";
 
@@ -20,52 +22,49 @@ export type ThreadContext = {
   children: readonly Thread[];
 };
 
-/** A tab of the thread view. */
-export type ThreadTab = {
-  id: string;
-  title: string;
-  /** Tabs are shown in ascending order; the first visible one opens by default. */
-  order: number;
-  /** Absent: shown for every thread. */
-  when?: (context: ThreadContext) => boolean;
-  render: ComponentType<ThreadContext>;
-};
-
 /**
- * A tab of the side panel at the right of a thread: something to keep in view
- * beside whichever thread tab is open, such as its numbers.
+ * A unit of the window's UI that can stand in any slot whose context it fits: a
+ * screen, a section of the sidebar, a tab of a thread or of its side panel. Where it
+ * stands by default is `placement`; the user's layout (`state/blocks.ts`) may move,
+ * reorder or hide it.
  */
-export type ThreadPanel = {
+type BlockBase = {
+  /** Unique among all blocks; the layout remembers places by it. */
   id: string;
   title: string;
-  /** Panels are shown in ascending order; the first visible one opens by default. */
-  order: number;
-  /** Absent: shown for every thread. */
-  when?: (context: ThreadContext) => boolean;
-  render: ComponentType<ThreadContext>;
-};
-
-/** A screen of its own, reachable from a button of the sidebar. */
-export type AppView = {
-  id: string;
-  title: string;
-  /** Ascending; the first one is what the app opens with. */
-  order: number;
-  /** The view's button shows only this, with the title as its tooltip. Absent: a generic icon. */
+  /** Where it goes until the user moves it. A null slot: offered, but not shown. */
+  placement: Placement;
+  /** A line that tells it apart in the layout settings: what it shows, whose it is. */
+  hint?: string;
+  /**
+   * Drawn where a block is a button rather than a tab: a screen in the sidebar shows
+   * only this, with the title as its tooltip. Absent: a generic icon.
+   */
   icon?: ComponentType<{ className?: string }>;
   /**
-   * Where the button sits. `top` (the default): screens to watch the agents, above
-   * the threads. `bottom`: setup and preferences, at the foot of the sidebar, out of
-   * the way of the threads.
-   */
-  place?: "top" | "bottom";
-  /**
-   * A number to show on the button, such as how many agents a screen has to show.
-   * Called as a React hook while the button is drawn, so it may read the store.
+   * A number to show on the block's button, such as how many agents a screen has to
+   * show. Called as a React hook while the button is drawn, so it may read the store.
    */
   useBadge?: () => ViewBadge | null;
-  render: ComponentType;
 };
+
+/** A block that needs nothing: it can stand anywhere. */
+export type AppBlock = BlockBase & { scope: "app"; render: ComponentType };
+
+/** A block about one thread: it stands only in a thread's slots. */
+export type ThreadBlock = BlockBase & {
+  scope: "thread";
+  /** Absent: shown for every thread. */
+  when?: (context: ThreadContext) => boolean;
+  render: ComponentType<ThreadContext>;
+};
+
+export type Block = AppBlock | ThreadBlock;
+
+/** Whether a block has something to show for a thread; one that needs nothing always does. */
+export function blockApplies(block: Block, context: ThreadContext): boolean {
+  return block.scope === "app" || (block.when?.(context) ?? true);
+}
 
 /** A count on a view's button. */
 export type ViewBadge = {
@@ -150,9 +149,7 @@ export function itemKey(item: Item): string {
 }
 
 type Snapshot = {
-  views: readonly AppView[];
-  tabs: readonly ThreadTab[];
-  panels: readonly ThreadPanel[];
+  blocks: readonly Block[];
   actions: readonly ThreadAction[];
   commands: readonly Command[];
   menu: readonly ThreadMenuItem[];
@@ -166,9 +163,7 @@ const byOrder = <T extends { order: number; id: string }>(a: T, b: T) =>
 
 export class UiRegistry {
   private snapshot: Snapshot = {
-    views: [],
-    tabs: [],
-    panels: [],
+    blocks: [],
     actions: [],
     commands: [],
     menu: [],
@@ -222,19 +217,10 @@ export class UiRegistry {
     return [...this.active.keys()];
   }
 
-  appView(view: AppView): () => void {
-    this.update({ views: [...this.snapshot.views.filter((other) => other.id !== view.id), view].sort(byOrder) });
-    return this.track(() => this.update({ views: this.snapshot.views.filter((other) => other !== view) }));
-  }
-
-  threadTab(tab: ThreadTab): () => void {
-    this.update({ tabs: [...this.snapshot.tabs.filter((other) => other.id !== tab.id), tab].sort(byOrder) });
-    return this.track(() => this.update({ tabs: this.snapshot.tabs.filter((other) => other !== tab) }));
-  }
-
-  threadPanel(panel: ThreadPanel): () => void {
-    this.update({ panels: [...this.snapshot.panels.filter((other) => other.id !== panel.id), panel].sort(byOrder) });
-    return this.track(() => this.update({ panels: this.snapshot.panels.filter((other) => other !== panel) }));
+  /** Offer a block. One with the same id is replaced. */
+  block(block: Block): () => void {
+    this.update({ blocks: [...this.snapshot.blocks.filter((other) => other.id !== block.id), block] });
+    return this.track(() => this.update({ blocks: this.snapshot.blocks.filter((other) => other !== block) }));
   }
 
   threadMenuItem(item: ThreadMenuItem): () => void {

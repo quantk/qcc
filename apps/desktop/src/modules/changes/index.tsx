@@ -11,17 +11,22 @@ import { ChangesView } from "./ChangesView";
 export const changesModule: UiModule = {
   id: "core.changes",
   activate(ui) {
-    ui.threadTab({
+    ui.block({
       id: "changes",
       title: "Changes",
-      order: 10,
+      hint: "The diff of the thread's work in full",
+      scope: "thread",
+      placement: { slot: "thread.tabs", order: 10 },
       when: ({ thread }) => changesShown(thread, store().getState().allPlugins),
       render: ({ thread }) => <ChangesView thread={thread} />,
     });
-    ui.threadPanel({
-      id: "changes",
+    // The same changes, compact: a list of files to keep in view beside the timeline.
+    ui.block({
+      id: "changes.panel",
       title: "Changes",
-      order: 5,
+      hint: "The files the thread changed, compact",
+      scope: "thread",
+      placement: { slot: "thread.panel", order: 5 },
       when: ({ thread }) => changesShown(thread, store().getState().allPlugins),
       render: ChangesPanel,
     });

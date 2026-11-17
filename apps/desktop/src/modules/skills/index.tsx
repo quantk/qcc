@@ -12,11 +12,20 @@ import { ThreadSkills } from "./ThreadSkills";
 export const skillsModule: UiModule = {
   id: "core.skills",
   activate(registry) {
-    registry.appView({ id: SKILLS_VIEW, title: "Skills", order: 95, icon: SparklesIcon, place: "bottom", render: SkillsView });
-    registry.threadTab({
-      id: "skills",
+    registry.block({
+      id: SKILLS_VIEW,
       title: "Skills",
-      order: 35,
+      scope: "app",
+      placement: { slot: "views.foot", order: 95 },
+      icon: SparklesIcon,
+      render: SkillsView,
+    });
+    registry.block({
+      id: "thread.skills",
+      title: "Skills",
+      hint: "Switch skills for this thread",
+      scope: "thread",
+      placement: { slot: "thread.tabs", order: 35 },
       when: () => {
         const state = store().getState();
         return visibleSkills(state.skills, state.plugins).length > 0;

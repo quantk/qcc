@@ -9,10 +9,11 @@ import { TimelineView } from "./TimelineView";
 export const timelineModule: UiModule = {
   id: "core.timeline",
   activate(ui) {
-    ui.threadTab({
+    ui.block({
       id: "timeline",
       title: "Timeline",
-      order: 0,
+      scope: "thread",
+      placement: { slot: "thread.tabs", order: 0 },
       render: ({ thread, timeline, provider }) =>
         timeline ? (
           <>

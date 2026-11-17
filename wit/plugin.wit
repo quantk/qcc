@@ -71,6 +71,10 @@ interface types {
     name: string,
     input: json,
     output: option<string>,
+    /// The MCP server the tool belongs to, for a tool of one.
+    mcp-server: option<string>,
+    /// The skill the call puts to use, for a call that loads one.
+    skill: option<string>,
   }
 
   /// A plugin-defined item; `kind` is `<plugin-id>/<name>`.

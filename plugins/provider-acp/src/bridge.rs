@@ -203,6 +203,8 @@ impl Tool {
                 name: self.title.clone(),
                 input: self.input.to_string(),
                 output: self.output.clone(),
+                mcp_server: None,
+                skill: None,
             }),
         }
     }

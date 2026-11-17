@@ -6,7 +6,7 @@ use qcc_domain::{
     AgentSkill, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
     InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
     Project, ProjectId, ProviderId, ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId,
-    ThreadState, UiViewInfo, UsageBucket,
+    ThreadState, ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -546,6 +546,20 @@ pub struct UsageHistoryResult {
     /// How long each bucket is, in milliseconds.
     pub bucket_ms: u64,
     pub buckets: Vec<UsageBucket>,
+}
+
+method!(
+    /// What every thread used — commands, tools, MCP tools, skills — how often, how
+    /// the uses ended and how long they took, hour by hour, oldest first, archived
+    /// threads included.
+    UsageTools, "usage.tools", Empty => UsageToolsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UsageToolsResult {
+    /// How long each bucket is, in milliseconds.
+    pub bucket_ms: u64,
+    pub buckets: Vec<ToolBucket>,
 }
 
 method!(

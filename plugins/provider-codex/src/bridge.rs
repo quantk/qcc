@@ -141,11 +141,15 @@ fn tool_shape(item: &Value) -> Option<ItemShape> {
                 .iter()
                 .find_map(|field| item.get(*field).filter(|value| !value.is_null()))
                 .map(Value::to_string),
+            mcp_server: Some(str_field(item, "server").to_owned()).filter(|s| !s.is_empty()),
+            skill: None,
         }),
         "dynamicToolCall" => ItemShape::Tool(ToolItem {
             name: str_field(item, "tool").to_owned(),
             input: item.get("arguments").unwrap_or(&Value::Null).to_string(),
             output: None,
+            mcp_server: None,
+            skill: None,
         }),
         "webSearch" => ItemShape::Search(str_field(item, "query").to_owned()),
         _ => return None,

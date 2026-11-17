@@ -15,7 +15,7 @@ use qcc_protocol::methods::{
     ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
     ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
     UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
-    UsageHistoryResult,
+    UsageHistoryResult, UsageTools, UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -96,6 +96,17 @@ impl Core {
                     .store
                     .usage_history()
                     .map(|buckets| UsageHistoryResult {
+                        bucket_ms: qcc_store::USAGE_BUCKET_MS,
+                        buckets,
+                    })
+                    .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()));
+                responder.reply(result);
+            }
+            UsageTools::NAME => {
+                let result = self
+                    .store
+                    .tool_history()
+                    .map(|buckets| UsageToolsResult {
                         bucket_ms: qcc_store::USAGE_BUCKET_MS,
                         buckets,
                     })

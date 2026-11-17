@@ -1682,6 +1682,42 @@ fn the_agent_says_what_its_context_holds() {
 }
 
 #[test]
+fn uses_of_tools_are_counted_across_threads() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let first = daemon.spawn("/tool docs__search");
+    let second = daemon.spawn("/tool lint");
+    daemon.wait_for(&first, "turn/completed");
+    daemon.wait_for(&second, "turn/completed");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let result = runtime.block_on(async {
+        let client = Client::connect(&daemon.socket).await.unwrap();
+        client.call_raw("usage.tools", json!({})).await.unwrap()
+    });
+    let uses: Vec<(String, String, String, u64)> = result["buckets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|bucket| {
+            (
+                bucket["thread_id"].as_str().unwrap().to_owned(),
+                bucket["kind"].as_str().unwrap().to_owned(),
+                bucket["name"].as_str().unwrap().to_owned(),
+                bucket["calls"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert!(uses.contains(&(first.clone(), "mcp".into(), "docs__search".into(), 1)), "{uses:?}");
+    assert!(uses.contains(&(second.clone(), "tool".into(), "lint".into(), 1)), "{uses:?}");
+    let mcp = result["buckets"].as_array().unwrap().iter().find(|b| b["kind"] == "mcp").unwrap();
+    assert_eq!(mcp["server"], "docs");
+}
+
+#[test]
 fn a_message_sent_during_a_release_starts_a_new_session() {
     use qcc_client::Client;
     use serde_json::json;

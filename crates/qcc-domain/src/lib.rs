@@ -18,6 +18,7 @@ pub mod interaction;
 pub mod item;
 pub mod project;
 pub mod provider;
+pub mod stats;
 pub mod thread;
 pub mod usage;
 
@@ -35,6 +36,7 @@ pub use provider::{
     ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SettingField, SettingKind,
     SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
 };
+pub use stats::{ToolBucket, ToolKind, ToolUse};
 pub use thread::{
     ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,
     ThreadEnvironment, ThreadState, ThreadStatus, TranscriptEntry, TurnStatus,

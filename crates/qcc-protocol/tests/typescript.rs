@@ -52,6 +52,7 @@ fn generate() -> String {
         .method::<ThreadRename>()
         .method::<ProjectList>()
         .method::<UsageHistory>()
+        .method::<UsageTools>()
         .method::<ProjectCreate>()
         .method::<ProjectUpdate>()
         .method::<ProjectDelete>()

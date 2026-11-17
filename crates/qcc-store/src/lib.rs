@@ -5,12 +5,13 @@
 //! the events with [`Thread::apply`] — the very fold the runtime uses, so the stored
 //! row cannot drift from what the engine holds.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
     CommentId, EventPayload, Item, ItemShape, LineComment, Project, ProjectId, Role, Thread,
-    ThreadEvent, ThreadId, ThreadUsage, TranscriptEntry, UsageBucket,
+    ThreadEvent, ThreadId, ThreadUsage, ToolBucket, ToolUse, TranscriptEntry, UsageBucket,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -176,6 +177,63 @@ impl Store {
             }
         }
         buckets.sort_by_key(|bucket| bucket.hour);
+        Ok(buckets)
+    }
+
+    /// What every thread used — commands, tools, MCP tools, skills — hour by hour
+    /// of when each use ended, oldest first. A use still running is not counted.
+    pub fn tool_history(&self) -> Result<Vec<ToolBucket>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT thread_id, ts, payload FROM events \
+             WHERE json_extract(payload, '$.type') IN ('item/started', 'item/completed') \
+               AND json_extract(payload, '$.item.type') \
+                   NOT IN ('agentMessage', 'reasoning', 'plan', 'extension') \
+             ORDER BY thread_id, seq",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, String>(2)?))
+        })?;
+        let mut buckets: HashMap<(String, u64, ToolUse), ToolBucket> = HashMap::new();
+        // When each item of the thread being read started.
+        let mut started: HashMap<String, u64> = HashMap::new();
+        let mut thread = String::new();
+        for row in rows {
+            let (thread_id, ts, payload) = row?;
+            let ts = ts.cast_unsigned();
+            if thread_id != thread {
+                started.clear();
+                thread.clone_from(&thread_id);
+            }
+            match decode::<EventPayload>(&payload)? {
+                EventPayload::ItemStarted { item, .. } => {
+                    started.insert(item.id.as_str().to_owned(), ts);
+                }
+                EventPayload::ItemCompleted { item, .. } => {
+                    let Some(tool) = ToolUse::of(&item) else { continue };
+                    let duration =
+                        started.remove(item.id.as_str()).map(|start| ts.saturating_sub(start));
+                    let hour = ts - ts % USAGE_BUCKET_MS;
+                    buckets
+                        .entry((thread_id.clone(), hour, tool.clone()))
+                        .or_insert_with(|| {
+                            ToolBucket::new(ThreadId::new(thread_id.as_str()), hour, tool)
+                        })
+                        .count(&item, duration);
+                }
+                _ => {}
+            }
+        }
+        let mut buckets: Vec<ToolBucket> = buckets.into_values().collect();
+        buckets.sort_by(|a, b| {
+            (a.hour, a.thread_id.as_str(), a.kind, &a.name, &a.server).cmp(&(
+                b.hour,
+                b.thread_id.as_str(),
+                b.kind,
+                &b.name,
+                &b.server,
+            ))
+        });
         Ok(buckets)
     }
 
@@ -707,6 +765,55 @@ mod tests {
         assert_eq!(hours, [("a", 0), ("a", USAGE_BUCKET_MS)]);
         assert_eq!(history[1].spent.input_tokens, 100);
         assert_eq!((history[1].turns_failed, history[1].working_ms), (1, 500));
+    }
+
+    #[test]
+    fn uses_of_tools_are_counted_by_the_hour_they_ended() {
+        use qcc_domain::{ItemShape, ItemStatus, ToolKind};
+        let store = Store::open_in_memory().unwrap();
+        let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
+        store.append(&scenario(&mut supervisor)).unwrap();
+        let engine = supervisor.engine(&"b".into()).unwrap();
+        let tool = |name: &str, server: Option<&str>| ItemShape::Tool {
+            name: name.into(),
+            input: serde_json::Value::Null,
+            output: None,
+            mcp_server: server.map(Into::into),
+            skill: None,
+        };
+        let key = |name: &str| ItemKey::Provider(name.into());
+        let mut events = engine.apply_deltas(
+            [
+                Delta::ItemOpen { key: key("1"), shape: tool("search", Some("docs")) },
+                Delta::ItemOpen { key: key("2"), shape: tool("search", Some("docs")) },
+            ],
+            1_000,
+        );
+        events.extend(engine.apply_deltas(
+            [Delta::ItemClose {
+                key: key("1"),
+                shape: tool("search", Some("docs")),
+                status: ItemStatus::Completed,
+            }],
+            1_250,
+        ));
+        events.extend(engine.apply_deltas(
+            [Delta::ItemClose {
+                key: key("2"),
+                shape: tool("search", Some("docs")),
+                status: ItemStatus::Failed,
+            }],
+            USAGE_BUCKET_MS + 1_000,
+        ));
+        store.append(&events).unwrap();
+
+        let history = store.tool_history().unwrap();
+        let mcp: Vec<_> = history.iter().filter(|b| b.kind == ToolKind::Mcp).collect();
+        assert_eq!(mcp.len(), 2, "{history:#?}");
+        assert_eq!((mcp[0].hour, mcp[0].calls, mcp[0].failed, mcp[0].duration_ms), (0, 1, 0, 250));
+        assert_eq!(mcp[0].server.as_deref(), Some("docs"));
+        assert_eq!((mcp[1].hour, mcp[1].calls, mcp[1].failed), (USAGE_BUCKET_MS, 1, 1));
+        assert_eq!(mcp[1].duration_ms, USAGE_BUCKET_MS);
     }
 
     #[test]

@@ -347,7 +347,14 @@ export type Item = {
 export type ItemId = string;
 
 /**  What an item is. Bridges send full shapes; the assembler never invents content. */
-export type ItemShape = { type: "agentMessage"; text: string } | { type: "reasoning"; text: string } | { type: "plan"; text: string } | { type: "command"; command: string; cwd?: string | null; output?: string | null; exit_code?: number | null } | { type: "fileChange"; path: string; diff?: string | null } | { type: "fileRead"; path: string } | { type: "search"; query: string } | { type: "tool"; name: string; input?: Value; output?: string | null } | 
+export type ItemShape = { type: "agentMessage"; text: string } | { type: "reasoning"; text: string } | { type: "plan"; text: string } | { type: "command"; command: string; cwd?: string | null; output?: string | null; exit_code?: number | null } | { type: "fileChange"; path: string; diff?: string | null } | { type: "fileRead"; path: string } | { type: "search"; query: string } | { type: "tool"; name: string; input?: Value; output?: string | null; 
+/**
+ *  The MCP server the tool belongs to, for a tool of one: the bridge knows
+ *  how its agent names them.
+ */
+mcp_server?: string | null; 
+/**  The skill the call puts to use, for a call that loads one. */
+skill?: string | null } | 
 /**  Plugin-defined item, `kind` is `"<plugin-id>/<name>"`. */
 { type: "extension"; kind: string; payload?: Value };
 
@@ -1153,6 +1160,38 @@ export type TokenUsage = {
 	cached_input_tokens?: number | null,
 };
 
+/**  How the uses of one thing by one thread went in one span of time. */
+export type ToolBucket = {
+	thread_id: ThreadId,
+	/**  Start of the span, in milliseconds since the Unix epoch. */
+	hour: number,
+	kind: ToolKind,
+	/**  See [`ToolUse::name`]. */
+	name: string,
+	server?: string | null,
+	/**  Uses that ended within the span. */
+	calls: number,
+	/**  Ended in failure, a command with a non-zero exit code included. */
+	failed: number,
+	/**  The user refused the approval it waited for. */
+	declined: number,
+	/**  Cut off with its turn or session. */
+	interrupted: number,
+	/**  From start to end, over the uses whose start is known. */
+	duration_ms: number,
+	/**  The longest of them. */
+	longest_ms: number,
+};
+
+/**  What kind of thing an agent used. */
+export type ToolKind = "command" | "fileChange" | "fileRead" | "search" | 
+/**  A tool of the agent's own. */
+"tool" | 
+/**  A tool of an MCP server. */
+"mcp" | 
+/**  A call that put a skill to use. */
+"skill";
+
 /**  Minted by the delta assembler, never by a provider or a bridge. */
 export type TurnId = string;
 
@@ -1270,6 +1309,12 @@ export type UsageSnapshot = {
 	context_used?: number | null,
 };
 
+export type UsageToolsResult = {
+	/**  How long each bucket is, in milliseconds. */
+	bucket_ms: number,
+	buckets: ToolBucket[],
+};
+
 export type Value = null | boolean | number | string | Value[] | { [key in string]: Value };
 
 export type WaitedThread = {
@@ -1297,6 +1342,7 @@ export type Methods = {
 	"thread.rename": { params: ThreadRenameParams; result: ThreadResult },
 	"project.list": { params: Empty; result: ProjectListResult },
 	"usage.history": { params: Empty; result: UsageHistoryResult },
+	"usage.tools": { params: Empty; result: UsageToolsResult },
 	"project.create": { params: ProjectCreateParams; result: ProjectResult },
 	"project.update": { params: ProjectUpdateParams; result: ProjectResult },
 	"project.delete": { params: ProjectDeleteParams; result: Empty },

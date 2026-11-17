@@ -68,9 +68,13 @@ fn shape(shape: wit::ItemShape) -> Result<ItemShape, String> {
         wit::ItemShape::FileChange(c) => ItemShape::FileChange { path: c.path, diff: c.diff },
         wit::ItemShape::FileRead(path) => ItemShape::FileRead { path },
         wit::ItemShape::Search(query) => ItemShape::Search { query },
-        wit::ItemShape::Tool(t) => {
-            ItemShape::Tool { name: t.name, input: json(&t.input)?, output: t.output }
-        }
+        wit::ItemShape::Tool(t) => ItemShape::Tool {
+            name: t.name,
+            input: json(&t.input)?,
+            output: t.output,
+            mcp_server: t.mcp_server,
+            skill: t.skill,
+        },
         wit::ItemShape::Extension(e) => {
             ItemShape::Extension { kind: e.kind, payload: json(&e.payload)? }
         }

@@ -124,8 +124,22 @@ fn tool_shape(name: &str, input: &Value, output: Option<String>) -> ItemShape {
         }),
         "Grep" | "Glob" => ItemShape::Search(str_field(input, "pattern").to_owned()),
         "WebSearch" => ItemShape::Search(str_field(input, "query").to_owned()),
-        _ => ItemShape::Tool(ToolItem { name: name.to_owned(), input: input.to_string(), output }),
+        _ => ItemShape::Tool(ToolItem {
+            name: name.to_owned(),
+            input: input.to_string(),
+            output,
+            mcp_server: mcp_server(name).map(str::to_owned),
+            skill: (name == "Skill")
+                .then(|| str_field(input, "skill").to_owned())
+                .filter(|skill| !skill.is_empty()),
+        }),
     }
+}
+
+/// The server of an MCP tool, which Claude Code names `mcp__<server>__<tool>`.
+fn mcp_server(name: &str) -> Option<&str> {
+    let (server, tool) = name.strip_prefix("mcp__")?.split_once("__")?;
+    (!server.is_empty() && !tool.is_empty()).then_some(server)
 }
 
 fn prefixed(prefix: char, text: &str) -> impl Iterator<Item = String> + '_ {
@@ -1250,5 +1264,17 @@ mod tests {
         let refused = json!({"type": "control_response", "response": {"subtype": "error",
             "request_id": "qcc-context-9", "error": "unknown subtype"}});
         assert!(bridge.on_line(&refused.to_string()).deltas.is_empty());
+    }
+
+    #[test]
+    fn tools_of_mcp_servers_and_skills_are_said_apart() {
+        let tool = |name: &str, input: Value| match tool_shape(name, &input, None) {
+            ItemShape::Tool(tool) => (tool.mcp_server, tool.skill),
+            other => panic!("not a tool: {other:?}"),
+        };
+        assert_eq!(tool("mcp__docs__search", json!({})), (Some("docs".into()), None));
+        assert_eq!(tool("Skill", json!({"skill": "tdd"})), (None, Some("tdd".into())));
+        assert_eq!(tool("mcp__broken", json!({})), (None, None));
+        assert_eq!(tool("TodoWrite", json!({})), (None, None));
     }
 }

@@ -42,6 +42,13 @@ pub enum ItemShape {
         input: Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output: Option<String>,
+        /// The MCP server the tool belongs to, for a tool of one: the bridge knows
+        /// how its agent names them.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mcp_server: Option<String>,
+        /// The skill the call puts to use, for a call that loads one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        skill: Option<String>,
     },
     /// Plugin-defined item, `kind` is `"<plugin-id>/<name>"`.
     Extension {

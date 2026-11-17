@@ -7,7 +7,7 @@
 //! | -------------------- | ------------------------------------------------------------ |
 //! | anything else        | streams the prompt back word by word                         |
 //! | `/slow <text>`       | streams one word per timer tick; can be interrupted          |
-//! | `/tool <name>`       | a tool call that opens and closes                            |
+//! | `/tool <name>`       | a tool call that opens and closes; `server__tool` is MCP     |
 //! | `/ask <question>`    | asks the user a question and echoes the answer               |
 //! | `/approve <command>` | asks for approval of a command item (not in `auto`/`full`)   |
 //! | `/exec <prog> <args>`| runs a process and streams its stdout                        |
@@ -231,7 +231,14 @@ impl Echo {
             "/tool" => {
                 let key = ItemKey::Provider(format!("call-{}", session.request_id()));
                 let tool = |output: Option<String>| {
-                    ItemShape::Tool(ToolItem { name: rest.to_owned(), input: "{}".into(), output })
+                    ItemShape::Tool(ToolItem {
+                        name: rest.to_owned(),
+                        input: "{}".into(),
+                        output,
+                        // `/tool server__name` is a tool of an MCP server.
+                        mcp_server: rest.split_once("__").map(|(server, _)| server.to_owned()),
+                        skill: None,
+                    })
                 };
                 out.push(text("Calling a tool."));
                 out.push(Delta::ItemOpen(ItemOpen { key: key.clone(), shape: tool(None) }));

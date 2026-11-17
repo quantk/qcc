@@ -1,7 +1,7 @@
 // The threads a thread started, and their threads in turn: what state each is in,
 // how many there are, and which of them a list shows under the user's filters.
-// Kept apart from the views so a count elsewhere (a badge, an indicator by the
-// composer) reads the same numbers the Agents tab does.
+// Kept apart from the views so a count elsewhere (the tally by the composer in
+// `lineage.ts`) sorts threads into the same states the Agents tab does.
 
 import { useSyncExternalStore } from "react";
 
@@ -68,25 +68,6 @@ function childIndex(threads: readonly Thread[]): Map<string, Thread[]> {
   }
   for (const siblings of byParent.values()) siblings.sort((a, b) => a.created_at - b.created_at);
   return byParent;
-}
-
-/** How many threads stand under a thread, by state: what a badge or an indicator shows. */
-export type ChildCounts = {
-  /** Everything under it, archived included. */
-  total: number;
-  archived: number;
-  /** Of the threads not archived. */
-  byState: Record<ChildState, number>;
-};
-
-export function countChildren(threads: readonly Thread[], id: string, maxDepth = MAX_DEPTH): ChildCounts {
-  const counts: ChildCounts = { total: 0, archived: 0, byState: emptyStates() };
-  for (const { thread } of descendantsOf(threads, id, maxDepth)) {
-    counts.total++;
-    if (thread.archived) counts.archived++;
-    else counts.byState[childState(thread)]++;
-  }
-  return counts;
 }
 
 function emptyStates(): Record<ChildState, number> {

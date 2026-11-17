@@ -6,7 +6,6 @@ import {
   childList,
   childState,
   clearNarrowing,
-  countChildren,
   DEFAULT_CHILD_FILTER,
   descendantsOf,
   isNarrowed,
@@ -69,14 +68,6 @@ describe("descendants", () => {
       "c1:2",
     ]);
     expect(descendantsOf(family, "p", 1).map(({ thread }) => thread.id)).toEqual(["a", "b", "c"]);
-  });
-
-  it("counts by state, the archived apart", () => {
-    const counts = countChildren(family, "p");
-    expect(counts.total).toBe(6);
-    expect(counts.archived).toBe(1);
-    expect(counts.byState).toEqual({ waiting: 1, working: 1, failed: 1, done: 1, idle: 1 });
-    expect(countChildren(family, "p", 1).total).toBe(3);
   });
 
   it("survives a cycle of parents", () => {

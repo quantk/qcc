@@ -4,7 +4,7 @@
 
 import type { Thread } from "../api/protocol.gen";
 import { plural } from "../util/format";
-import { attentionOf } from "./selectors";
+import { childState } from "./children";
 
 /** Children by what they are up to. Every child is in exactly one count. */
 export type ChildrenTally = {
@@ -21,10 +21,12 @@ export type ChildrenTally = {
 export function tallyChildren(children: readonly Thread[]): ChildrenTally {
   const tally: ChildrenTally = { total: children.length, waiting: 0, working: 0, failed: 0, done: 0 };
   for (const child of children) {
-    const attention = attentionOf(child);
-    if (attention === "waiting") tally.waiting += 1;
-    else if (attention === "active") tally.working += 1;
-    else if (attention === "failed") tally.failed += 1;
+    // The Agents tab's states, folded into four: an archived child is put away, so
+    // done whatever it was doing; one that is idle or finished waits on nobody.
+    const state = child.archived ? "done" : childState(child);
+    if (state === "waiting") tally.waiting += 1;
+    else if (state === "working") tally.working += 1;
+    else if (state === "failed") tally.failed += 1;
     else tally.done += 1;
   }
   return tally;

@@ -188,6 +188,7 @@ temporary daemon.
 | 🤖 [Agents and sessions](docs/agents.md) | models, effort, switching agents, settings, MCP servers, permission modes, steering, compaction, context, attachments, skills |
 | 🌿 [Projects and worktrees](docs/projects-and-worktrees.md) | projects, isolated worktrees, delivering work back, comments on changes |
 | 🪆 [Orchestration](docs/orchestration.md) | agents starting agents, permission inheritance, `handoff` and `review` |
+| ⏰ [Automations](docs/automations.md) | prompts sent to an agent on a schedule: cron or intervals, overlapping and missed runs, history |
 | 🖥️ [Desktop app](docs/desktop.md) | screens, panels, shortcuts, layout |
 | 🧩 [Writing a plugin](docs/plugins.md) | the plugin contract, UI, commands, skills, threads, permissions |
 | 🛠️ [Development](docs/development.md) | dev commands, architecture, recorded agent traffic |

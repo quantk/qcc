@@ -190,6 +190,7 @@ qcc thread deliver <thread-id>     # наложить работу из worktree
 | 🤖 [Agents and sessions](docs/agents.md) | модели, effort, смена агента, настройки, MCP-серверы, режимы разрешений, steer, сжатие, контекст, вложения, skills |
 | 🌿 [Projects and worktrees](docs/projects-and-worktrees.md) | проекты, изолированные worktree, возврат работы, комментарии к изменениям |
 | 🪆 [Orchestration](docs/orchestration.md) | агенты запускают агентов, наследование режима, `handoff` и `review` |
+| ⏰ [Automations](docs/automations.md) | промпты агенту по расписанию: cron или интервалы, наложение и пропуск запусков, история |
 | 🖥️ [Desktop app](docs/desktop.md) | экраны, панели, горячие клавиши, раскладка |
 | 🧩 [Writing a plugin](docs/plugins.md) | контракт плагинов, UI, команды, skills, треды, права |
 | 🛠️ [Development](docs/development.md) | команды разработки, устройство, записанный трафик агентов |

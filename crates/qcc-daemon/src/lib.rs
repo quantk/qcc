@@ -9,6 +9,7 @@ mod core;
 mod handover;
 mod plugins;
 mod projects;
+mod schedule;
 mod server;
 mod settings;
 

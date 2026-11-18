@@ -3,10 +3,11 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    AgentSkill, Attachment, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges,
-    EnvironmentInfo, InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo,
-    PermissionMode, Project, ProjectId, ProviderId, ProviderInfo, SettingField, Thread,
-    ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
+    AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, CommandInfo,
+    CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo, InteractionId,
+    InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode, Project,
+    ProjectId, ProviderId, ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState,
+    ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -685,6 +686,116 @@ method!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ProjectDeleteParams {
     pub id: ProjectId,
+}
+
+// ----- automations ------------------------------------------------------------------
+
+/// An automation and where it stands.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationEntry {
+    pub automation: Automation,
+    /// When it runs next, in milliseconds since the Unix epoch. Absent while it is
+    /// switched off, and for a schedule with no time left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_run_at: Option<u64>,
+    /// The latest time it came due, whatever came of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<AutomationRun>,
+}
+
+method!(
+    /// Every automation, oldest first.
+    AutomationList, "automation.list", Empty => AutomationListResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationListResult {
+    pub automations: Vec<AutomationEntry>,
+}
+
+/// Notification to connections that watch threads: an automation was made,
+/// changed, deleted or ran. Carries all of them.
+pub const AUTOMATIONS_UPDATED: &str = "automations.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationsUpdatedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub automations: Vec<AutomationEntry>,
+}
+
+method!(
+    /// Make an automation. The schedule, the provider, the directory, the
+    /// environment and the permission mode are checked now, not at its first run.
+    AutomationCreate, "automation.create", AutomationSpec => AutomationResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationResult {
+    pub automation: AutomationEntry,
+}
+
+method!(
+    /// Replace what an automation is. A new schedule, or switching it on, counts
+    /// from now: runs it would have had before are not made up for.
+    AutomationUpdate, "automation.update", AutomationUpdateParams => AutomationResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationUpdateParams {
+    pub id: AutomationId,
+    pub spec: AutomationSpec,
+}
+
+method!(
+    /// Switch an automation on or off.
+    AutomationSetEnabled, "automation.set_enabled", AutomationSetEnabledParams => AutomationResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationSetEnabledParams {
+    pub id: AutomationId,
+    pub enabled: bool,
+}
+
+method!(
+    /// Delete an automation and its history. The threads it started stay.
+    AutomationDelete, "automation.delete", AutomationIdParams => Empty
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationIdParams {
+    pub id: AutomationId,
+}
+
+method!(
+    /// Run an automation now, whether it is switched on or not. Its schedule goes
+    /// on as before. A run that would overlap the previous one is skipped as a
+    /// scheduled one would be; the answer says so.
+    AutomationRunNow, "automation.run", AutomationIdParams => AutomationRunResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationRunResult {
+    pub run: AutomationRun,
+}
+
+method!(
+    /// An automation's latest runs, newest first.
+    AutomationRuns, "automation.runs", AutomationRunsParams => AutomationRunsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationRunsParams {
+    pub id: AutomationId,
+    /// Absent: all that are kept (the latest 100).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AutomationRunsResult {
+    pub runs: Vec<AutomationRun>,
 }
 
 // ----- comments ---------------------------------------------------------------------

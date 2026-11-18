@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::ContextUsage;
 use crate::event::{EventPayload, ThreadEvent};
-use crate::ids::{InteractionId, ProjectId, ProviderId, ThreadId};
+use crate::ids::{AutomationId, InteractionId, ProjectId, ProviderId, ThreadId};
 use crate::interaction::InteractionRequest;
 use crate::item::{Item, ItemShape, ItemStatus};
 use crate::provider::{McpServerStatus, PermissionMode};
@@ -189,6 +189,10 @@ pub struct Thread {
     /// lists and overviews, and reach it by its id.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
+    /// The automation that started the thread on its schedule. The automation may
+    /// have been deleted since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation: Option<AutomationId>,
     /// The project the thread is grouped under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<ProjectId>,
@@ -410,6 +414,7 @@ mod tests {
             parent: None,
             started_by: None,
             hidden: false,
+            automation: None,
             project: None,
             permission_mode: None,
             title: None,

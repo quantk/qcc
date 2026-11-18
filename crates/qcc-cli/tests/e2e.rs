@@ -2572,3 +2572,209 @@ fn files_and_pasted_images_are_attached_to_messages() {
         "{reply}"
     );
 }
+
+impl Daemon {
+    /// Make an automation that runs the echo agent in `dir`; returns its id.
+    fn automation(
+        &self,
+        dir: &Path,
+        name: &str,
+        schedule: &str,
+        prompt: &str,
+        extra: &[&str],
+    ) -> String {
+        let cwd = dir.to_str().unwrap();
+        let mut args = vec![
+            "automation",
+            "add",
+            name,
+            "--schedule",
+            schedule,
+            "--prompt",
+            prompt,
+            "--provider",
+            "echo",
+            "--cwd",
+            cwd,
+            "--json",
+        ];
+        args.extend_from_slice(extra);
+        let output = self.qcc(&args);
+        assert!(output.ok, "{}", output.stderr);
+        output.json()["automation"]["automation"]["id"].as_str().unwrap().to_owned()
+    }
+
+    /// An automation's runs, newest first.
+    fn runs(&self, automation: &str) -> Vec<Value> {
+        let output = self.qcc(&["automation", "show", automation, "--runs", "100", "--json"]);
+        assert!(output.ok, "{}", output.stderr);
+        output.json()["runs"].as_array().unwrap().clone()
+    }
+
+    /// Poll an automation's runs until `check` holds for them, and return them.
+    fn runs_until(
+        &self,
+        automation: &str,
+        what: &str,
+        check: impl Fn(&[Value]) -> bool,
+    ) -> Vec<Value> {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let runs = self.runs(automation);
+            if check(&runs) {
+                return runs;
+            }
+            assert!(Instant::now() < deadline, "never {what}: {runs:#?}");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+#[test]
+fn an_automation_runs_on_schedule_and_skips_while_its_last_run_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    // Each run streams for about three seconds; one comes due every two.
+    let prompt = format!("/slow {}", words(300));
+    let id = daemon.automation(dir.path(), "Nightly check", "every 2s", &prompt, &[]);
+
+    let listed = daemon.qcc(&["automation", "list", "--json"]).json();
+    let entry = &listed["automations"][0];
+    assert_eq!(entry["automation"]["name"], "Nightly check");
+    assert_eq!(entry["automation"]["enabled"], true);
+    assert!(entry["next_run_at"].as_u64().is_some());
+
+    let runs = daemon.runs_until(&id, "skipped a run that overlapped", |runs| {
+        runs.iter().any(|run| run["outcome"] == "skipped")
+    });
+    let started: Vec<&Value> = runs.iter().filter(|run| run["outcome"] == "started").collect();
+    let first = started.last().expect("a run started before one was skipped");
+    assert_eq!(first["trigger"], "schedule");
+    let thread = first["thread_id"].as_str().unwrap();
+    let skipped = runs.iter().find(|run| run["outcome"] == "skipped").unwrap();
+    assert!(skipped["reason"].as_str().unwrap().contains("still at work"), "{skipped:#?}");
+
+    // The thread says which automation started it, and is named after it.
+    let shown = daemon.thread(thread);
+    assert_eq!(shown["automation"], id.as_str());
+    assert_eq!(shown["title"], "Nightly check");
+    let human = daemon.qcc(&["thread", "show", thread]);
+    assert!(human.stdout.contains(&format!("started   by automation {id}")), "{}", human.stdout);
+
+    // Once the first run is done, the next one starts a thread of its own.
+    let runs = daemon.runs_until(&id, "started a second thread", |runs| {
+        runs.iter().filter(|run| run["outcome"] == "started").count() >= 2
+    });
+    let threads: Vec<&str> = runs
+        .iter()
+        .filter(|run| run["outcome"] == "started")
+        .map(|run| run["thread_id"].as_str().unwrap())
+        .collect();
+    assert_ne!(threads[0], threads[1]);
+
+    // Switched off, it runs no more; its history stays.
+    let off = daemon.qcc(&["automation", "disable", "Nightly check", "--json"]).json();
+    assert_eq!(off["automation"]["automation"]["enabled"], false);
+    assert!(off["automation"]["next_run_at"].is_null());
+    let count = daemon.runs(&id).len();
+    std::thread::sleep(Duration::from_millis(2500));
+    assert_eq!(daemon.runs(&id).len(), count);
+}
+
+#[test]
+fn an_automation_runs_by_hand_and_can_continue_one_thread() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.automation(
+        dir.path(),
+        "Standup",
+        "0 9 * * mon-fri",
+        "what changed?",
+        &["--threads", "continue", "--disabled"],
+    );
+
+    // A run by hand goes ahead though the automation is switched off.
+    let run = daemon.qcc(&["automation", "run", &id, "--json"]).json();
+    assert_eq!(run["run"]["trigger"], "manual");
+    assert_eq!(run["run"]["outcome"], "started");
+    let thread = run["run"]["thread_id"].as_str().unwrap().to_owned();
+    let waited = daemon.qcc(&["thread", "wait", &thread, "--json"]);
+    assert!(waited.ok, "{}", waited.stderr);
+
+    // The second run is a message to the same thread.
+    let again = daemon.qcc(&["automation", "run", "Standup", "--json"]).json();
+    assert_eq!(again["run"]["outcome"], "started");
+    assert_eq!(again["run"]["thread_id"], thread.as_str());
+    daemon.eventually(&thread, "answered twice", |events| messages(events).len() == 2);
+    let shown = daemon.qcc(&["automation", "show", &id, "--json"]).json();
+    assert_eq!(shown["automation"]["automation"]["thread_id"], thread.as_str());
+    assert_eq!(shown["runs"].as_array().unwrap().len(), 2);
+
+    // Mistakes are refused when the automation is made or changed, not at night.
+    let wrong = daemon.qcc(&["automation", "edit", &id, "--schedule", "61 * * * *"]);
+    assert!(!wrong.ok);
+    assert!(wrong.stderr.contains("out of range"), "{}", wrong.stderr);
+    let wrong = daemon.qcc(&[
+        "automation",
+        "add",
+        "Bad",
+        "--schedule",
+        "every 1h",
+        "--prompt",
+        "x",
+        "--provider",
+        "nobody",
+    ]);
+    assert!(!wrong.ok);
+    let wrong = daemon.qcc(&[
+        "automation",
+        "add",
+        "Bad",
+        "--schedule",
+        "every 1h",
+        "--prompt",
+        "x",
+        "--provider",
+        "echo",
+        "--cwd",
+        "/no/such/dir",
+    ]);
+    assert!(!wrong.ok);
+
+    let edited =
+        daemon.qcc(&["automation", "edit", &id, "--name", "Daily", "--threads", "new", "--json"]);
+    assert!(edited.ok, "{}", edited.stderr);
+    let edited = edited.json();
+    assert_eq!(edited["automation"]["automation"]["name"], "Daily");
+    assert!(edited["automation"]["automation"]["thread_id"].is_null());
+
+    // Deleting it leaves its threads be.
+    assert!(daemon.qcc(&["automation", "remove", "Daily"]).ok);
+    let listed = daemon.qcc(&["automation", "list", "--json"]).json();
+    assert_eq!(listed["automations"].as_array().unwrap().len(), 0);
+    assert_eq!(daemon.thread(&thread)["automation"], id.as_str());
+}
+
+#[test]
+fn a_run_missed_while_the_daemon_was_down_is_made_up_for_at_most_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let eager = daemon.automation(dir.path(), "Eager", "every 3s", "catch up", &["--catch-up"]);
+    let lazy = daemon.automation(dir.path(), "Lazy", "every 3s", "let it go", &[]);
+    daemon.stop();
+    // Down long enough to miss two runs of each.
+    std::thread::sleep(Duration::from_secs(7));
+    let daemon = Daemon::start(dir.path());
+
+    let missed = |runs: &[Value]| runs.iter().any(|run| run["trigger"] == "missed");
+    let runs = daemon.runs_until(&eager, "made up for the missed run", missed);
+    let made_up: Vec<&Value> = runs.iter().filter(|run| run["trigger"] == "missed").collect();
+    assert_eq!(made_up.len(), 1, "{runs:#?}");
+    assert_eq!(made_up[0]["outcome"], "started");
+
+    let runs = daemon.runs_until(&lazy, "noted the missed run", missed);
+    let noted: Vec<&Value> = runs.iter().filter(|run| run["trigger"] == "missed").collect();
+    assert_eq!(noted.len(), 1, "{runs:#?}");
+    assert_eq!(noted[0]["outcome"], "skipped");
+    assert!(noted[0]["thread_id"].is_null());
+}

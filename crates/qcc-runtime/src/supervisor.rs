@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use qcc_domain::{
-    EventPayload, PermissionMode, ProjectId, ProviderId, Thread, ThreadEnvironment, ThreadEvent,
-    ThreadId, ThreadStatus, ThreadUsage,
+    AutomationId, EventPayload, PermissionMode, ProjectId, ProviderId, Thread, ThreadEnvironment,
+    ThreadEvent, ThreadId, ThreadStatus, ThreadUsage,
 };
 
 use crate::engine::{ThreadEngine, sorted};
@@ -31,6 +31,8 @@ pub struct NewThread {
     pub skills_disabled: Vec<String>,
     pub started_by: Option<ThreadId>,
     pub hidden: bool,
+    /// The automation whose run this thread is.
+    pub automation: Option<AutomationId>,
 }
 
 impl NewThread {
@@ -46,6 +48,7 @@ impl NewThread {
             parent: self.parent,
             started_by: self.started_by,
             hidden: self.hidden,
+            automation: self.automation,
             project: self.project,
             permission_mode: self.permission_mode,
             title: None,

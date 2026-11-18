@@ -14,7 +14,7 @@ use serde::de::DeserializeOwned;
 /// Bumped whenever a method is added or changed. Clients compare it with
 /// `daemon.status` on connecting, so a daemon left running from an older build is
 /// reported as such instead of failing one unknown method at a time.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// A request method: its wire name and the shapes it carries.
 pub trait Method {

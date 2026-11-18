@@ -69,3 +69,7 @@ id!(
     /// Minted by the daemon when a comment is left on a thread's changes.
     CommentId
 );
+id!(
+    /// Minted by the daemon when the user makes an automation.
+    AutomationId
+);

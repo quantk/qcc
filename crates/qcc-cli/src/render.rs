@@ -132,6 +132,9 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(by) = &thread.started_by {
         lines.push(format!("started   by thread {by}"));
     }
+    if let Some(automation) = &thread.automation {
+        lines.push(format!("started   by automation {automation}"));
+    }
     if thread.hidden {
         lines.push("hidden    kept out of lists".to_owned());
     }

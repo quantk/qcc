@@ -10,6 +10,7 @@
 //! This crate depends on neither an async runtime nor the plugin host.
 
 pub mod attachment;
+pub mod automation;
 pub mod comment;
 pub mod context;
 pub mod delta;
@@ -24,11 +25,17 @@ pub mod thread;
 pub mod usage;
 
 pub use attachment::{Attachment, guess_mime, is_image_mime};
+pub use automation::{
+    Automation, AutomationOutcome, AutomationOverlap, AutomationRun, AutomationSpec,
+    AutomationThreadMode, AutomationTrigger,
+};
 pub use comment::{DiffSide, LineComment};
 pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};
-pub use ids::{CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId};
+pub use ids::{
+    AutomationId, CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId,
+};
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
 pub use project::{Project, project_of};

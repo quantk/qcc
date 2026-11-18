@@ -28,6 +28,173 @@ export type Attachment = {
 	size: number,
 };
 
+/**  An automation as the daemon keeps it. */
+export type Automation = {
+	id: AutomationId,
+	/**  Milliseconds since the Unix epoch. */
+	created_at: number,
+	/**  The thread `continue` mode sends its runs to, once the first run started it. */
+	thread_id?: ThreadId | null,
+	/**
+	 *  The scheduled time the daemon last dealt with (ran, skipped or found
+	 *  missed), or the time the schedule was last set or switched on. The next run
+	 *  is the first scheduled time after it.
+	 */
+	anchor: number,
+} & AutomationSpec;
+
+/**  An automation and where it stands. */
+export type AutomationEntry = {
+	automation: Automation,
+	/**
+	 *  When it runs next, in milliseconds since the Unix epoch. Absent while it is
+	 *  switched off, and for a schedule with no time left.
+	 */
+	next_run_at?: number | null,
+	/**  The latest time it came due, whatever came of it. */
+	last_run?: AutomationRun | null,
+};
+
+/**  Minted by the daemon when the user makes an automation. */
+export type AutomationId = string;
+
+export type AutomationIdParams = {
+	id: AutomationId,
+};
+
+export type AutomationListResult = {
+	automations: AutomationEntry[],
+};
+
+/**
+ *  How a run went, as far as starting it goes. How the agent's work went is the
+ *  thread's to tell.
+ */
+export type AutomationOutcome = 
+/**  The prompt went to `thread_id`. */
+"started" | 
+/**  Nothing was sent; `reason` says why. */
+"skipped" | 
+/**  The thread could not be started; `reason` says why. */
+"failed";
+
+/**
+ *  What happens when a run comes due while the previous one is still at work
+ *  (running a turn or waiting for the user).
+ */
+export type AutomationOverlap = 
+/**  The run is skipped and recorded as such. */
+"skip" | 
+/**
+ *  The run goes ahead: a new thread runs alongside the previous one, or, in
+ *  `continue` mode, the message waits in the thread's queue.
+ */
+"allow";
+
+export type AutomationResult = {
+	automation: AutomationEntry,
+};
+
+/**  One time an automation came due. */
+export type AutomationRun = {
+	automation_id: AutomationId,
+	/**  When it was dealt with, in milliseconds since the Unix epoch. */
+	at: number,
+	/**  The scheduled time it was for. Absent for a manual run. */
+	scheduled_for?: number | null,
+	trigger: AutomationTrigger,
+	outcome: AutomationOutcome,
+	thread_id?: ThreadId | null,
+	reason?: string | null,
+};
+
+export type AutomationRunResult = {
+	run: AutomationRun,
+};
+
+export type AutomationRunsParams = {
+	id: AutomationId,
+	/**  Absent: all that are kept (the latest 100). */
+	limit?: number | null,
+};
+
+export type AutomationRunsResult = {
+	runs: AutomationRun[],
+};
+
+export type AutomationSetEnabledParams = {
+	id: AutomationId,
+	enabled: boolean,
+};
+
+/**  What the user decides about an automation. */
+export type AutomationSpec = {
+	name: string,
+	/**
+	 *  When it runs: a cron expression of five fields (`0 9 * * 1-5`), one of
+	 *  `@hourly`, `@daily`, `@weekly`, `@monthly`, `@yearly`, or an interval
+	 *  (`every 30m`, `every 1h30m`, `every 2d`). Cron runs in the daemon's local time.
+	 */
+	schedule: string,
+	/**  The message each run sends the agent. */
+	prompt: string,
+	provider: ProviderId,
+	/**
+	 *  Absolute path of the directory the agent works in, or that its environment
+	 *  is made from.
+	 */
+	cwd: string,
+	/**  A contributed environment each new thread gets (`git-worktree`). */
+	environment?: string | null,
+	model?: string | null,
+	effort?: string | null,
+	/**  Absent: the user's default for the agent, or else its own configuration. */
+	permission_mode?: PermissionMode | null,
+	thread_mode?: AutomationThreadMode,
+	overlap?: AutomationOverlap,
+	/**
+	 *  A run missed while the daemon was not running (or the computer slept) is
+	 *  made up for, once, as soon as the daemon notices. Absent: missed runs are
+	 *  recorded as skipped and the automation waits for its next time.
+	 */
+	catch_up?: boolean,
+	enabled: boolean,
+};
+
+/**  Where each run of an automation goes. */
+export type AutomationThreadMode = 
+/**
+ *  Every run is a thread of its own: runs do not see each other, and each one
+ *  can be read, archived or delivered on its own.
+ */
+"new" | 
+/**
+ *  Every run is a message to the same thread, which the first run starts: the
+ *  agent remembers earlier runs. A new thread is started when that one is
+ *  archived or gone.
+ */
+"continue";
+
+/**  Why a run happened. */
+export type AutomationTrigger = 
+/**  Its scheduled time came. */
+"schedule" | 
+/**  Its scheduled time passed while the daemon was not running. */
+"missed" | 
+/**  The user asked for a run now. */
+"manual";
+
+export type AutomationUpdateParams = {
+	id: AutomationId,
+	spec: AutomationSpec,
+};
+
+export type AutomationsUpdatedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	automations: AutomationEntry[],
+};
+
 /**  How a file differs from what an environment started from. */
 export type ChangeKind = "added" | "modified" | "deleted" | 
 /**  New and not yet known to version control. */
@@ -843,6 +1010,11 @@ export type Thread = {
 	 *  lists and overviews, and reach it by its id.
 	 */
 	hidden?: boolean,
+	/**
+	 *  The automation that started the thread on its schedule. The automation may
+	 *  have been deleted since.
+	 */
+	automation?: AutomationId | null,
 	/**  The project the thread is grouped under. */
 	project?: ProjectId | null,
 	/**  Absent: the agent's own configuration decides what it may do unasked. */
@@ -1451,6 +1623,13 @@ export type Methods = {
 	"project.create": { params: ProjectCreateParams; result: ProjectResult },
 	"project.update": { params: ProjectUpdateParams; result: ProjectResult },
 	"project.delete": { params: ProjectDeleteParams; result: Empty },
+	"automation.list": { params: Empty; result: AutomationListResult },
+	"automation.create": { params: AutomationSpec; result: AutomationResult },
+	"automation.update": { params: AutomationUpdateParams; result: AutomationResult },
+	"automation.set_enabled": { params: AutomationSetEnabledParams; result: AutomationResult },
+	"automation.delete": { params: AutomationIdParams; result: Empty },
+	"automation.run": { params: AutomationIdParams; result: AutomationRunResult },
+	"automation.runs": { params: AutomationRunsParams; result: AutomationRunsResult },
 	"thread.stop": { params: ThreadStopParams; result: Empty },
 	"thread.list": { params: ThreadListParams; result: ThreadListResult },
 	"thread.watch": { params: ThreadWatchParams; result: ThreadListResult },
@@ -1489,6 +1668,7 @@ export type Notifications = {
 	"thread.event": ThreadEventNotification,
 	"thread.updated": ThreadUpdatedNotification,
 	"projects.updated": ProjectsUpdatedNotification,
+	"automations.updated": AutomationsUpdatedNotification,
 	"comments.updated": CommentsUpdatedNotification,
 	"plugins.updated": PluginsUpdatedNotification,
 };

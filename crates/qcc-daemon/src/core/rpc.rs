@@ -5,17 +5,18 @@ use qcc_domain::{Thread, ThreadState};
 use qcc_plugin_host::UiRequest;
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
-    CommandList, CommandRun, CommentAdd, CommentDelete, CommentList, CommentResolve, DaemonStatus,
-    DaemonStatusResult, Empty, InteractionResolve, PluginDisable, PluginEnable, PluginList,
-    ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate, ProviderModels,
-    ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment,
-    ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet,
-    ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename,
-    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
-    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
-    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
+    AutomationCreate, AutomationDelete, AutomationList, AutomationRunNow, AutomationRuns,
+    AutomationSetEnabled, AutomationUpdate, CommandList, CommandRun, CommentAdd, CommentDelete,
+    CommentList, CommentResolve, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
+    PluginDisable, PluginEnable, PluginList, ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate,
+    ProviderModels, ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive,
+    ThreadAttachment, ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents,
+    ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult,
+    ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode,
+    ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
+    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
+    UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
     UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
@@ -131,6 +132,36 @@ impl Core {
             }
             ProjectDelete::NAME => {
                 let result = params::<ProjectDelete>(raw).and_then(|p| self.project_delete(p));
+                responder.reply(result);
+            }
+            AutomationList::NAME => responder.reply(Ok(self.automation_list())),
+            AutomationCreate::NAME => {
+                let result =
+                    params::<AutomationCreate>(raw).and_then(|p| self.automation_create(p));
+                responder.reply(result);
+            }
+            AutomationUpdate::NAME => {
+                let result =
+                    params::<AutomationUpdate>(raw).and_then(|p| self.automation_update(p));
+                responder.reply(result);
+            }
+            AutomationSetEnabled::NAME => {
+                let result = params::<AutomationSetEnabled>(raw)
+                    .and_then(|p| self.automation_set_enabled(p));
+                responder.reply(result);
+            }
+            AutomationDelete::NAME => {
+                let result =
+                    params::<AutomationDelete>(raw).and_then(|p| self.automation_delete(p));
+                responder.reply(result);
+            }
+            AutomationRunNow::NAME => {
+                let result =
+                    params::<AutomationRunNow>(raw).and_then(|p| self.automation_run_now(p));
+                responder.reply(result);
+            }
+            AutomationRuns::NAME => {
+                let result = params::<AutomationRuns>(raw).and_then(|p| self.automation_runs(p));
                 responder.reply(result);
             }
             ThreadUnqueue::NAME => {

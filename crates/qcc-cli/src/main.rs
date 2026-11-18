@@ -4,6 +4,7 @@
 //! and a `qcc thread spawn` run from inside an agent session records that session's
 //! thread as the parent. Plugin commands run as `qcc <plugin> <command>`.
 
+mod automation;
 mod comment;
 mod mcp;
 mod project;
@@ -29,6 +30,7 @@ use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
 use serde::Serialize;
 
+use automation::AutomationCommand;
 use comment::CommentCommand;
 use mcp::McpCommand;
 use project::ProjectCommand;
@@ -73,6 +75,10 @@ enum Command {
     /// Group threads by project: named sets of repositories and folders.
     #[command(subcommand)]
     Project(ProjectCommand),
+    /// Prompts the daemon sends an agent on a schedule: every hour, every weekday
+    /// at nine, …
+    #[command(subcommand)]
+    Automation(AutomationCommand),
     /// Show and change the daemon's settings: paths of agent programs, defaults and
     /// environment of each agent.
     #[command(subcommand)]
@@ -226,6 +232,8 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
         }
 
         Command::Project(command) => return project::run(&client, command, json).await,
+
+        Command::Automation(command) => return automation::run(&client, command, json).await,
 
         Command::Comment(command) => return comment::run(&client, command, json).await,
 

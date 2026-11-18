@@ -10,8 +10,9 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
-    CommentId, EventPayload, Item, ItemShape, LineComment, Project, ProjectId, Role, Thread,
-    ThreadEvent, ThreadId, ThreadUsage, ToolBucket, ToolUse, TranscriptEntry, UsageBucket,
+    Automation, AutomationId, AutomationRun, CommentId, EventPayload, Item, ItemShape, LineComment,
+    Project, ProjectId, Role, Thread, ThreadEvent, ThreadId, ThreadUsage, ToolBucket, ToolUse,
+    TranscriptEntry, UsageBucket,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -73,7 +74,25 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX comments_by_thread ON comments (thread_id, created_at);
 ",
+    "
+    CREATE TABLE automations (
+        id          TEXT PRIMARY KEY,
+        created_at  INTEGER NOT NULL,
+        data        TEXT NOT NULL
+    ) STRICT;
+
+    CREATE TABLE automation_runs (
+        id              INTEGER PRIMARY KEY,
+        automation_id   TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+        data            TEXT NOT NULL
+    ) STRICT;
+
+    CREATE INDEX automation_runs_by_automation ON automation_runs (automation_id, id);
+",
 ];
+
+/// How many runs of each automation the history keeps; older ones are dropped.
+pub const AUTOMATION_RUNS_KEPT: usize = 100;
 
 /// The version of what [`Thread::apply`] folds into a projection. Raise it when the
 /// fold learns something new from old events: on open, every stored projection is
@@ -445,6 +464,71 @@ impl Store {
         Ok(())
     }
 
+    /// Every automation, oldest first. Like projects they are settings, not
+    /// history: a row is replaced when the automation changes.
+    pub fn automations(&self) -> Result<Vec<Automation>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare("SELECT data FROM automations ORDER BY created_at, id")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut automations = Vec::new();
+        for data in rows {
+            automations.push(decode(&data?)?);
+        }
+        Ok(automations)
+    }
+
+    pub fn save_automation(&self, automation: &Automation) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO automations (id, created_at, data) VALUES (?1, ?2, ?3) \
+             ON CONFLICT (id) DO UPDATE SET data = excluded.data",
+            params![
+                automation.id.as_str(),
+                automation.created_at.cast_signed(),
+                encode(automation)?
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete an automation and its runs.
+    pub fn delete_automation(&self, id: &AutomationId) -> Result<()> {
+        self.lock().execute("DELETE FROM automations WHERE id = ?1", [id.as_str()])?;
+        Ok(())
+    }
+
+    /// Record a run, and forget the oldest of the automation's runs past
+    /// [`AUTOMATION_RUNS_KEPT`].
+    pub fn add_automation_run(&self, run: &AutomationRun) -> Result<()> {
+        let mut conn = self.lock();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO automation_runs (automation_id, data) VALUES (?1, ?2)",
+            params![run.automation_id.as_str(), encode(run)?],
+        )?;
+        tx.execute(
+            "DELETE FROM automation_runs WHERE automation_id = ?1 AND id NOT IN \
+             (SELECT id FROM automation_runs WHERE automation_id = ?1 ORDER BY id DESC LIMIT ?2)",
+            params![run.automation_id.as_str(), AUTOMATION_RUNS_KEPT as i64],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// An automation's latest runs, newest first.
+    pub fn automation_runs(&self, id: &AutomationId, limit: usize) -> Result<Vec<AutomationRun>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare(
+            "SELECT data FROM automation_runs WHERE automation_id = ?1 ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = statement
+            .query_map(params![id.as_str(), limit as i64], |row| row.get::<_, String>(0))?;
+        let mut runs = Vec::new();
+        for data in rows {
+            runs.push(decode(&data?)?);
+        }
+        Ok(runs)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Connection> {
         // A panic while holding the lock cannot leave a transaction half-applied:
         // rusqlite rolls back on drop.
@@ -551,6 +635,62 @@ mod tests {
     }
 
     #[test]
+    fn automations_keep_their_latest_runs_and_take_them_along() {
+        use qcc_domain::{
+            AutomationOutcome, AutomationOverlap, AutomationSpec, AutomationThreadMode,
+            AutomationTrigger, ProviderId,
+        };
+        let store = Store::open_in_memory().unwrap();
+        let mut automation = Automation {
+            id: AutomationId::new("a"),
+            spec: AutomationSpec {
+                name: "Nightly".into(),
+                schedule: "@daily".into(),
+                prompt: "check".into(),
+                provider: ProviderId::new("echo"),
+                cwd: "/src".into(),
+                environment: None,
+                model: None,
+                effort: None,
+                permission_mode: None,
+                thread_mode: AutomationThreadMode::New,
+                overlap: AutomationOverlap::Skip,
+                catch_up: false,
+                enabled: true,
+            },
+            created_at: 1,
+            thread_id: None,
+            anchor: 1,
+        };
+        store.save_automation(&automation).unwrap();
+        automation.spec.enabled = false;
+        store.save_automation(&automation).unwrap();
+        assert_eq!(store.automations().unwrap(), [automation.clone()]);
+
+        let run = |at: u64| AutomationRun {
+            automation_id: automation.id.clone(),
+            at,
+            scheduled_for: Some(at),
+            trigger: AutomationTrigger::Schedule,
+            outcome: AutomationOutcome::Skipped,
+            thread_id: None,
+            reason: None,
+        };
+        let total = AUTOMATION_RUNS_KEPT as u64 + 5;
+        for at in 0..total {
+            store.add_automation_run(&run(at)).unwrap();
+        }
+        let runs = store.automation_runs(&automation.id, 1000).unwrap();
+        assert_eq!(runs.len(), AUTOMATION_RUNS_KEPT);
+        assert_eq!(runs[0].at, total - 1, "newest first");
+        assert_eq!(store.automation_runs(&automation.id, 2).unwrap().len(), 2);
+
+        store.delete_automation(&automation.id).unwrap();
+        assert!(store.automations().unwrap().is_empty());
+        assert!(store.automation_runs(&automation.id, 1000).unwrap().is_empty());
+    }
+
+    #[test]
     fn comments_are_kept_per_thread_and_go_with_it() {
         let store = Store::open_in_memory().unwrap();
         let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
@@ -605,6 +745,7 @@ mod tests {
             skills_disabled: Vec::new(),
             started_by: None,
             hidden: false,
+            automation: None,
         }
     }
 

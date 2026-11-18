@@ -103,6 +103,7 @@ impl HarnessBuilder {
             skills_disabled: Vec::new(),
             started_by: None,
             hidden: false,
+            automation: None,
         }
         .into_thread(0);
         let (engine, events) = ThreadEngine::create(thread, Box::new(SequentialMint::default()), 0);

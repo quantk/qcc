@@ -1,8 +1,8 @@
 //! Requests that create threads and change their input, mode or agent.
 
 use qcc_domain::{
-    EnvironmentState, EventPayload, PermissionMode, ProviderId, Thread, ThreadEnvironment,
-    ThreadEvent, ThreadId, ThreadState, UserInput,
+    AutomationId, EnvironmentState, EventPayload, PermissionMode, ProviderId, Thread,
+    ThreadEnvironment, ThreadEvent, ThreadId, ThreadState, UserInput,
 };
 use qcc_plugin_host::{EnvironmentRequest, Outcome, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
@@ -22,9 +22,16 @@ use super::{
 };
 
 impl Core {
-    pub(super) fn thread_spawn(
+    pub(super) fn thread_spawn(&mut self, p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
+        self.spawn_thread(p, None)
+    }
+
+    /// Create a thread for a client, or, with `automation`, for a run of that
+    /// automation, which the thread is then named after.
+    pub(super) fn spawn_thread(
         &mut self,
         mut p: ThreadSpawnParams,
+        automation: Option<(AutomationId, String)>,
     ) -> Result<ThreadResult, RpcError> {
         let parent = match &p.parent {
             Some(parent) => {
@@ -156,10 +163,17 @@ impl Core {
                     skills_disabled: p.skills_disabled,
                     started_by: p.started_by,
                     hidden: p.hidden,
+                    automation: automation.as_ref().map(|(id, _)| id.clone()),
                 },
                 now,
             )
             .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
+        // Named before the prompt is submitted, which would otherwise name it.
+        if let Some((_, name)) = automation
+            && let Ok(engine) = self.supervisor.engine(&id)
+        {
+            events.extend(engine.set_title(name, now));
+        }
         let prompt = match (p.prompt, attachments) {
             (None, attachments) if attachments.is_empty() => None,
             (text, attachments) => {
@@ -194,7 +208,7 @@ impl Core {
     }
 
     /// The provider must exist and must be able to enforce the mode.
-    fn check_mode(
+    pub(super) fn check_mode(
         &self,
         provider: &ProviderId,
         mode: Option<PermissionMode>,

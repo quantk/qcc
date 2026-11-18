@@ -57,6 +57,13 @@ fn generate() -> String {
         .method::<ProjectCreate>()
         .method::<ProjectUpdate>()
         .method::<ProjectDelete>()
+        .method::<AutomationList>()
+        .method::<AutomationCreate>()
+        .method::<AutomationUpdate>()
+        .method::<AutomationSetEnabled>()
+        .method::<AutomationDelete>()
+        .method::<AutomationRunNow>()
+        .method::<AutomationRuns>()
         .method::<ThreadStop>()
         .method::<ThreadList>()
         .method::<ThreadWatch>()
@@ -93,6 +100,7 @@ fn generate() -> String {
         .register::<ThreadEventNotification>()
         .register::<ThreadUpdatedNotification>()
         .register::<ProjectsUpdatedNotification>()
+        .register::<AutomationsUpdatedNotification>()
         .register::<CommentsUpdatedNotification>()
         .register::<PluginsUpdatedNotification>()
         .register::<RpcError>();
@@ -113,6 +121,7 @@ fn generate() -> String {
     out.push_str(&format!("\t\"{THREAD_EVENT}\": ThreadEventNotification,\n"));
     out.push_str(&format!("\t\"{THREAD_UPDATED}\": ThreadUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{PROJECTS_UPDATED}\": ProjectsUpdatedNotification,\n"));
+    out.push_str(&format!("\t\"{AUTOMATIONS_UPDATED}\": AutomationsUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{COMMENTS_UPDATED}\": CommentsUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{PLUGINS_UPDATED}\": PluginsUpdatedNotification,\n"));
     out.push_str("};\n");

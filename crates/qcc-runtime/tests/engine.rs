@@ -23,6 +23,7 @@ fn new_thread(id: &str) -> NewThread {
         skills_disabled: Vec::new(),
         started_by: None,
         hidden: false,
+        automation: None,
     }
 }
 

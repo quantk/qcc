@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    AgentSkill, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
+    AgentSkill, Automation, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
     ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
@@ -28,6 +28,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::{Config, plugins, settings};
 
 mod attachments;
+mod automations;
 mod comments;
 mod configuration;
 mod environments;
@@ -189,6 +190,10 @@ pub(crate) enum Command {
     WaitTimedOut {
         waiter: u64,
     },
+    /// The automations' timer went off. Only the latest timer set counts.
+    AutomationTick {
+        generation: u64,
+    },
     Shutdown,
 }
 
@@ -272,6 +277,10 @@ pub(crate) struct Core {
     skills: Vec<plugins::OfferedSkill>,
     /// Oldest first.
     projects: Vec<Project>,
+    /// Oldest first.
+    automations: Vec<Automation>,
+    /// Counts the timers set for automations; a tick of an earlier one is ignored.
+    automation_timer: u64,
     settings: Settings,
     /// Where the programs plugins run live, as `settings.programs` says.
     programs: ProgramPaths,
@@ -346,6 +355,7 @@ impl Core {
             .filter(|dir| dir.join("qcc").is_file());
 
         let projects = store.projects()?;
+        let automations = store.automations()?;
         let mut supervisor = Supervisor::new(|| Box::new(UuidMint));
         let mut queued = HashSet::new();
         let now = now_ms();
@@ -390,6 +400,8 @@ impl Core {
             models: HashMap::new(),
             agent_skills: HashMap::new(),
             projects,
+            automations,
+            automation_timer: 0,
             settings,
             programs,
             cli_dir,
@@ -405,6 +417,8 @@ impl Core {
 
     pub(crate) async fn run(mut self, mut queue: UnboundedReceiver<Command>) -> anyhow::Result<()> {
         self.drain_queues();
+        // Runs missed while the daemon was down are found by the first tick.
+        self.arm_automations();
         while let Some(command) = queue.recv().await {
             if matches!(command, Command::Shutdown) {
                 break;
@@ -483,6 +497,7 @@ impl Core {
                     self.answer_wait(waiter, true);
                 }
             }
+            Command::AutomationTick { generation } => self.automation_tick(generation),
             Command::Shutdown => {}
         }
     }

@@ -116,6 +116,31 @@ impl Daemon {
         }
     }
 
+    /// Poll a thread until the MCP servers of its session are `expected`, each as
+    /// `name state`, in the order the agent reported them.
+    fn mcp_servers_become(&self, thread: &str, expected: &[&str]) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let found: Vec<String> = self.thread(thread)["mcp_servers"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|server| {
+                    format!(
+                        "{} {}",
+                        server["name"].as_str().unwrap(),
+                        server["state"].as_str().unwrap()
+                    )
+                })
+                .collect();
+            if found == expected {
+                return;
+            }
+            assert!(Instant::now() < deadline, "{thread}: MCP servers {found:?}, not {expected:?}");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     fn thread(&self, thread: &str) -> Value {
         let output = self.qcc(&["thread", "show", thread, "--json"]);
         assert!(output.ok, "{}", output.stderr);
@@ -419,45 +444,32 @@ fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
     assert!(shown.contains("docs ready"), "{shown}");
     assert!(shown.contains("broken failed: echo was told to fail"), "{shown}");
 
-    // A switch reaches the running session a moment after the call returns.
-    let state_of = |thread: &str, index: usize, state: &str| {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            let found = daemon.thread(thread)["mcp_servers"][index]["state"].clone();
-            if found == state {
-                return;
-            }
-            assert!(Instant::now() < deadline, "{thread}: server {index} is {found}, not {state}");
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    };
-
     // Only qcc's servers are switched; the agent's own are its configuration's.
     let theirs = daemon.qcc(&["thread", "mcp", &probe, "--off", "playwright"]);
     assert!(!theirs.ok);
     assert!(theirs.stderr.contains("not an MCP server set up in qcc"), "{}", theirs.stderr);
 
-    // One thread turns a server off for itself, in its running session.
+    // One thread turns a server off for itself: its running session drops it.
     let off = daemon.qcc(&["thread", "mcp", &probe, "--off", "docs", "--json"]);
     assert!(off.ok, "{}", off.stderr);
     assert_eq!(off.json()["mcp_disabled"], serde_json::json!(["docs"]));
-    state_of(&probe, 1, "disabled");
+    daemon.mcp_servers_become(&probe, &["broken failed"]);
     let shown = daemon.qcc(&["thread", "mcp", &probe]).stdout;
     assert!(shown.contains("docs off"), "{shown}");
     // Its next session starts without it; other threads and its children keep it.
     let other = daemon.spawn("/mcp");
     told(&other);
-    assert_eq!(daemon.thread(&other)["mcp_servers"][1]["state"], "ready");
+    daemon.mcp_servers_become(&other, &["broken failed", "docs ready"]);
     let child = daemon.qcc(&["thread", "spawn", "--parent", &probe, "--prompt", "hi", "--json"]);
     assert!(child.ok, "{}", child.stderr);
     assert!(child.json()["thread"].get("mcp_disabled").is_none());
     assert!(daemon.qcc(&["thread", "stop", &probe, "--release"]).ok);
     assert!(daemon.qcc(&["thread", "send", &probe, "/mcp"]).ok);
-    told(&probe);
-    state_of(&probe, 1, "disabled");
+    assert_eq!(told(&probe), "broken stdio /bin/fail-mcp ");
+    daemon.mcp_servers_become(&probe, &["broken failed"]);
     let on = daemon.qcc(&["thread", "mcp", &probe, "--on", "docs", "--json"]);
     assert!(on.ok, "{}", on.stderr);
-    state_of(&probe, 1, "ready");
+    daemon.mcp_servers_become(&probe, &["broken failed", "docs ready"]);
 
     // What could not work is refused.
     let refused = daemon.qcc(&["mcp", "add", "my docs", "--", "npx"]);
@@ -465,6 +477,70 @@ fn mcp_servers_set_up_in_qcc_reach_new_sessions() {
     assert!(refused.stderr.contains("not an MCP server name"), "{}", refused.stderr);
     assert!(!daemon.qcc(&["mcp", "add", "docs"]).ok);
     assert!(!daemon.qcc(&["mcp", "remove", "nope"]).ok);
+}
+
+#[test]
+fn mcp_settings_reach_running_sessions() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let told = |id: &str| {
+        let waited = daemon.qcc(&["thread", "wait", id, "--json"]).json();
+        waited["threads"][0]["last_message"].as_str().unwrap().to_owned()
+    };
+    let send = |id: &str, text: &str| {
+        let sent = daemon.qcc(&["thread", "send", id, text]);
+        assert!(sent.ok, "{}", sent.stderr);
+    };
+    let mcp = |args: &[&str]| {
+        let mut all = vec!["mcp"];
+        all.extend(args);
+        let output = daemon.qcc(&all);
+        assert!(output.ok, "{}", output.stderr);
+    };
+    let first = daemon.spawn("/mcp");
+    let second = daemon.spawn("/mcp");
+    assert_eq!(told(&first), "no MCP servers");
+    told(&second);
+
+    // A server added in the settings joins the running sessions at once.
+    mcp(&["add", "docs", "--", "npx", "-y", "docs"]);
+    daemon.mcp_servers_become(&first, &["docs ready"]);
+    daemon.mcp_servers_become(&second, &["docs ready"]);
+    send(&first, "/mcp");
+    assert_eq!(told(&first), "docs stdio npx -y docs");
+
+    // Each thread keeps its own choice: one kept off stays off whatever the settings do.
+    assert!(daemon.qcc(&["thread", "mcp", &second, "--off", "docs"]).ok);
+    daemon.mcp_servers_become(&second, &[]);
+    mcp(&["add", "web", "--url", "https://example.com/mcp"]);
+    daemon.mcp_servers_become(&first, &["docs ready", "web ready"]);
+    daemon.mcp_servers_become(&second, &["web ready"]);
+
+    // Turned off for every thread, it leaves every session; turned on, it is back
+    // where the thread does not keep it off.
+    mcp(&["disable", "docs"]);
+    daemon.mcp_servers_become(&first, &["web ready"]);
+    mcp(&["enable", "docs"]);
+    daemon.mcp_servers_become(&first, &["web ready", "docs ready"]);
+    daemon.mcp_servers_become(&second, &["web ready"]);
+
+    // A server set up anew is connected again with its new configuration, even
+    // while a turn runs.
+    send(&first, &format!("/slow {}", words(40)));
+    daemon.wait_for(&first, "turn/started");
+    mcp(&["add", "web", "--url", "https://example.com/fail"]);
+    daemon.mcp_servers_become(&first, &["web failed", "docs ready"]);
+    assert!(daemon.thread(&first)["turn_started_at"].is_u64(), "the turn goes on");
+    assert!(daemon.qcc(&["thread", "stop", &first]).ok);
+
+    // Removed, it is gone from every session.
+    mcp(&["remove", "web"]);
+    daemon.mcp_servers_become(&first, &["docs ready"]);
+    daemon.mcp_servers_become(&second, &[]);
+    send(&first, "/mcp");
+    assert_eq!(told(&first), "docs stdio npx -y docs");
+    send(&second, "/mcp");
+    assert_eq!(told(&second), "no MCP servers");
 }
 
 #[test]

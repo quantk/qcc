@@ -27,8 +27,9 @@
 //! A message steered into a running `/slow` turn is appended to what it streams.
 //!
 //! Each MCP server it is given is reported ready at once, or failed when its
-//! command or URL contains `fail`, or off when the thread keeps it off. It turns
-//! servers on and off in a running session (`mcp-toggle`).
+//! command or URL contains `fail`. It changes the servers of a running session
+//! (`mcp-live`): a new one or one set up anew is reported again, one dropped is
+//! removed.
 //!
 //! It offers a skill on request, `echo-demo`, for tests of skill switching, and
 //! compacts a session's context when asked, at once.
@@ -56,8 +57,18 @@ struct Echo {
     settings: Vec<(String, String)>,
 }
 
-/// How a server the session was given is doing while it is on.
-fn mcp_on_status(server: &McpServer) -> McpStatus {
+/// How `/mcp` lists a server.
+fn mcp_line(server: &McpServer) -> String {
+    match &server.transport {
+        McpTransport::Stdio(stdio) => {
+            format!("{} stdio {} {}", server.name, stdio.command, stdio.args.join(" "))
+        }
+        McpTransport::Http(http) => format!("{} http {}", server.name, http.url),
+    }
+}
+
+/// How a server the session was given is doing.
+fn mcp_status(server: &McpServer) -> McpStatus {
     let target = match &server.transport {
         McpTransport::Stdio(stdio) => &stdio.command,
         McpTransport::Http(http) => &http.url,
@@ -81,10 +92,8 @@ struct Session {
     skills: Option<String>,
     /// The model and effort it was started with, in a line.
     agent: String,
-    /// The MCP servers it was given, one line each.
-    mcp_servers: Vec<String>,
-    /// How each of them is doing while on.
-    mcp_on: Vec<McpStatus>,
+    /// The MCP servers it was given, at the start or since.
+    mcp_servers: Vec<McpServer>,
 }
 
 /// What the running turn is waiting for.
@@ -369,7 +378,7 @@ impl Echo {
                 let reply = if session.mcp_servers.is_empty() {
                     "no MCP servers".to_owned()
                 } else {
-                    session.mcp_servers.join("\n")
+                    session.mcp_servers.iter().map(mcp_line).collect::<Vec<_>>().join("\n")
                 };
                 out.push(text(reply.clone()));
                 out.push(text_close());
@@ -483,7 +492,7 @@ impl Provider for Echo {
                     PermissionMode::Auto,
                     PermissionMode::Full,
                 ],
-                mcp_toggle: true,
+                mcp_live: true,
                 compact: true,
                 list_skills: true,
                 context_usage: true,
@@ -501,33 +510,14 @@ impl Provider for Echo {
                 start.model.as_deref().unwrap_or("default"),
                 start.effort.as_deref().unwrap_or("default")
             ),
-            mcp_servers: start
-                .mcp_servers
-                .iter()
-                .map(|server| match &server.transport {
-                    McpTransport::Stdio(stdio) => {
-                        format!("{} stdio {} {}", server.name, stdio.command, stdio.args.join(" "))
-                    }
-                    McpTransport::Http(http) => format!("{} http {}", server.name, http.url),
-                })
-                .collect(),
+            mcp_servers: start.mcp_servers.clone(),
             ..Session::default()
         };
         self.sessions.insert(start.thread.clone(), session);
         // Every server it is given connects at once, but one whose command or URL
-        // says `fail` fails: what a test needs to see both. One the thread keeps off
-        // is reported off.
-        let mcp_on: Vec<McpStatus> = start.mcp_servers.iter().map(mcp_on_status).collect();
+        // says `fail` fails: what a test needs to see both.
         let mut reset = vec![Delta::SessionReset];
-        reset.extend(mcp_on.iter().map(|on| {
-            let mut status = on.clone();
-            if start.mcp_disabled.contains(&status.name) {
-                status.state = McpState::Disabled;
-                status.error = None;
-            }
-            Delta::McpStatus(status)
-        }));
-        self.sessions.get_mut(&start.thread).expect("just inserted").mcp_on = mcp_on;
+        reset.extend(start.mcp_servers.iter().map(|server| Delta::McpStatus(mcp_status(server))));
         deltas::emit(&start.thread, &reset)?;
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt, &start.prompt_notes, &start.prompt_attachments)?;
@@ -555,19 +545,20 @@ impl Provider for Echo {
         deltas::emit(&thread, &[Delta::TurnOpen, Delta::ContextCompacted(compaction), completed()])
     }
 
-    fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
-        let session = self.sessions.get(&switch.thread).ok_or("the session was not started")?;
-        let on = session
-            .mcp_on
+    fn set_mcp_servers(&mut self, update: McpServersUpdate) -> Result<(), String> {
+        let session = self.sessions.get_mut(&update.thread).ok_or("the session was not started")?;
+        let before = std::mem::replace(&mut session.mcp_servers, update.servers.clone());
+        let removed = before
             .iter()
-            .find(|status| status.name == switch.name)
-            .ok_or_else(|| format!("no MCP server {:?} in this session", switch.name))?;
-        let status = if switch.enabled {
-            on.clone()
-        } else {
-            McpStatus { name: on.name.clone(), state: McpState::Disabled, error: None }
-        };
-        deltas::emit(&switch.thread, &[Delta::McpStatus(status)])
+            .filter(|old| !update.servers.iter().any(|server| server.name == old.name))
+            .map(|old| Delta::McpRemoved(old.name.clone()));
+        let changed = update
+            .servers
+            .iter()
+            .filter(|server| !before.contains(server))
+            .map(|server| Delta::McpStatus(mcp_status(server)));
+        let out: Vec<Delta> = removed.chain(changed).collect();
+        if out.is_empty() { Ok(()) } else { deltas::emit(&update.thread, &out) }
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {

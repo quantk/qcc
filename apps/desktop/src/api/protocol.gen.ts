@@ -635,10 +635,11 @@ export type ProviderCapabilities = {
 	/**  The permission modes the provider can enforce. */
 	permission_modes?: PermissionMode[],
 	/**
-	 *  MCP servers of a running session can be turned on and off. Without it, a
-	 *  thread's change waits for its next session.
+	 *  The MCP servers set up in qcc can be changed in a running session: added,
+	 *  removed, turned on and off. Without it, a change waits for the thread's next
+	 *  session.
 	 */
-	mcp_toggle?: boolean,
+	mcp_live?: boolean,
 	/**  The session's context can be compacted when the user asks. */
 	compact?: boolean,
 	/**  The provider can tell which skills its agent finds by itself. */
@@ -751,7 +752,8 @@ export type Settings = {
 	providers?: { [key in ProviderId]: ProviderSettings },
 	/**
 	 *  MCP servers every agent session gets on top of those the agent's own
-	 *  configuration names, by server name.
+	 *  configuration names, by server name. A change reaches running sessions the
+	 *  way `thread.set_mcp` does.
 	 */
 	mcp_servers?: { [key in string]: McpServerSettings },
 	/**  What the user set for skills plugins offer, by skill name. */

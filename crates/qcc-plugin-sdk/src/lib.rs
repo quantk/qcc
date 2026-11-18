@@ -18,7 +18,7 @@
 //!                 resume: false,
 //!                 steer: false,
 //!                 permission_modes: vec![],
-//!                 mcp_toggle: false,
+//!                 mcp_live: false,
 //!                 compact: false,
 //!                 list_skills: false,
 //!                 context_usage: false,
@@ -89,9 +89,10 @@ use types::{
     AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution, Delta,
     EnvironmentChanges, EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
-    InteractionOption, McpSwitch, ModelInfo, OptionKind, Outcome, ProviderInfo, ProviderRequest,
-    SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo, SkillRef, ThreadInput,
-    TokenUsage, TurnBoundary, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
+    ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo,
+    SkillRef, ThreadInput, TokenUsage, TurnBoundary, TurnStatus, UiAction, UiItem, UiRender,
+    UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -162,11 +163,11 @@ pub trait Provider {
         Err(format!("no interaction {:?} is pending", answer.request_id))
     }
 
-    /// Turn an MCP server of the running session on or off. Called only if the
-    /// provider declared the `mcp_toggle` capability.
-    fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
-        let _ = switch;
-        Err("this provider cannot turn MCP servers of a running session on and off".into())
+    /// Change the qcc MCP servers of the running session to `update.servers`. Called
+    /// only if the provider declared the `mcp_live` capability.
+    fn set_mcp_servers(&mut self, update: McpServersUpdate) -> Result<(), String> {
+        let _ = update;
+        Err("this provider cannot change the MCP servers of a running session".into())
     }
 
     /// Compact the session's context. Called only if the provider declared the
@@ -583,8 +584,8 @@ pub mod __private {
                     ProviderRequest::ListSkills => {
                         provider.skills().map(|r| reply(r, Outcome::Skills))
                     }
-                    ProviderRequest::SetMcpServer(switch) => {
-                        provider.set_mcp_server(switch).map(done)
+                    ProviderRequest::SetMcpServers(update) => {
+                        provider.set_mcp_servers(update).map(done)
                     }
                     ProviderRequest::Compact(thread) => provider.compact(thread).map(done),
                 }

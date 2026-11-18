@@ -43,8 +43,9 @@ export function McpView() {
           <div>
             <h2 className="text-base font-semibold">Set up in qcc</h2>
             <p className="text-[13px] text-muted-foreground">
-              Every agent gets these on top of the servers of its own configuration. A change reaches the sessions that
-              start after it; a running thread gets it when its session starts again.
+              Every agent gets these on top of the servers of its own configuration. A change reaches running sessions
+              too: an agent that can change its servers on the fly takes it at once, even mid-turn; another one's
+              session starts again after the running turn and goes on where it was.
             </p>
           </div>
           {ours.length === 0 && (
@@ -104,7 +105,7 @@ function ServerCard({ name, server, usage }: { name: string; server: McpServerSe
         </Button>
         <Switch
           aria-label={`Give agents ${name}`}
-          title={enabled ? "New sessions get it" : "Kept, but no session gets it"}
+          title={enabled ? "Every thread gets it" : "Kept, but no session gets it"}
           checked={enabled}
           onCheckedChange={toggle}
         />
@@ -115,7 +116,7 @@ function ServerCard({ name, server, usage }: { name: string; server: McpServerSe
       {enabled ? (
         <UsageLine usage={usage} />
       ) : (
-        <p className="text-xs text-muted-foreground">Off: sessions started from now on do not get it.</p>
+        <p className="text-xs text-muted-foreground">Off: kept in the settings, but no session gets it.</p>
       )}
     </article>
   );

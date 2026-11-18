@@ -621,33 +621,13 @@ impl Core {
         } else {
             disabled.push(server.clone());
         }
-        let toggle = self
-            .host
-            .provider(&thread.provider)
-            .is_some_and(|(_, info)| info.capabilities.mcp_toggle);
         self.check_open(&thread_id)?;
-        if toggle && self.in_transition(&thread_id) {
-            return Err(RpcError::new(
-                codes::THREAD_BUSY,
-                "the provider session is starting or stopping; try again",
-            ));
-        }
+        let before = self.thread_mcp(&thread_id);
         let engine =
             self.supervisor.engine(&thread_id).map_err(|_| thread_not_found(&thread_id))?;
-        let live = engine.session_live();
         let events = engine.set_mcp_disabled(disabled, now_ms());
-        let changed = !events.is_empty();
         self.commit(events);
-        if changed && toggle && live {
-            // The running session takes the switch at once, even mid-turn.
-            self.call_provider(&thread_id, Action::SwitchMcp, None, |thread| {
-                ProviderRequest::SetMcpServer { thread, name: server, enabled }
-            });
-        } else if changed && (live || self.in_transition(&thread_id)) {
-            // Another provider takes it in a new session, which the next message
-            // resumes; a running turn is let finish first.
-            self.sessions.entry(thread_id.clone()).or_default().release_when_idle = true;
-        }
+        self.mcp_changed(&thread_id, &before);
         self.thread_result(&thread_id)
     }
 

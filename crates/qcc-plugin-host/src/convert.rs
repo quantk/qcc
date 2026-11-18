@@ -172,6 +172,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                 error: status.error,
             },
         },
+        wit::Delta::McpRemoved(name) => Delta::McpRemoved { name },
         wit::Delta::ContextUsage(c) => Delta::ContextUsage { context: context_usage(c) },
         wit::Delta::ContextCompacted(c) => Delta::ContextCompacted {
             compaction: Compaction {
@@ -226,7 +227,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             capabilities: ProviderCapabilities {
                 resume: p.capabilities.resume,
                 steer: p.capabilities.steer,
-                mcp_toggle: p.capabilities.mcp_toggle,
+                mcp_live: p.capabilities.mcp_live,
                 compact: p.capabilities.compact,
                 list_skills: p.capabilities.list_skills,
                 context_usage: p.capabilities.context_usage,
@@ -503,7 +504,6 @@ fn session_start(start: SessionStart, images: bool) -> wit::SessionStart {
             .collect(),
         extra_dirs: start.extra_dirs,
         mcp_servers: start.mcp_servers.into_iter().map(mcp_server).collect(),
-        mcp_disabled: start.mcp_disabled,
     }
 }
 
@@ -548,11 +548,10 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                 ProviderRequest::Interrupt { thread } => wit::ProviderRequest::Interrupt(thread.0),
                 ProviderRequest::Stop { thread } => wit::ProviderRequest::Stop(thread.0),
                 ProviderRequest::Compact { thread } => wit::ProviderRequest::Compact(thread.0),
-                ProviderRequest::SetMcpServer { thread, name, enabled } => {
-                    wit::ProviderRequest::SetMcpServer(wit::McpSwitch {
+                ProviderRequest::SetMcpServers { thread, servers } => {
+                    wit::ProviderRequest::SetMcpServers(wit::McpServersUpdate {
                         thread: thread.0,
-                        name,
-                        enabled,
+                        servers: servers.into_iter().map(mcp_server).collect(),
                     })
                 }
                 ProviderRequest::ResolveInteraction { thread, request_id, resolution: r } => {

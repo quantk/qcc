@@ -1,10 +1,12 @@
 //! Provider sessions: starting them, calling providers and taking their deltas.
 
+use std::collections::BTreeMap;
+
 use qcc_domain::{
     Delta, EnvironmentState, EventPayload, McpServer, ProviderId, Role, ThreadId, UserInput,
 };
 use qcc_plugin_host::{Outcome, PluginError, PluginRequest, ProviderRequest, SessionStart};
-use qcc_protocol::methods::Empty;
+use qcc_protocol::methods::{Empty, McpServerSettings};
 use qcc_protocol::paths;
 
 use super::{Action, Command, Core, Responder, now_ms};
@@ -54,8 +56,7 @@ impl Core {
             return;
         };
         let extra_dirs = self.extra_dirs(&thread);
-        let (mcp_servers, mcp_disabled) =
-            self.session_mcp(&thread.mcp_disabled, info.capabilities.mcp_toggle);
+        let mcp_servers = mcp_servers_for(&self.settings.mcp_servers, &thread.mcp_disabled);
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
         let prompt = match prompt {
@@ -78,7 +79,6 @@ impl Core {
                 skills: self.session_skills(&thread.skills_enabled, &thread.skills_disabled),
                 extra_dirs,
                 mcp_servers,
-                mcp_disabled,
             })),
         };
         let session = self.sessions.entry(id.clone()).or_default();
@@ -92,31 +92,65 @@ impl Core {
         });
     }
 
-    /// The MCP servers a session gets, and those of them it starts off.
-    ///
-    /// A provider that switches servers of a running session gets every server the
-    /// user did not turn off, the thread's choice among them included, so that one
-    /// can be switched on later without a new session. Another one is given only
-    /// the servers the thread wants.
-    fn session_mcp(&self, disabled: &[String], toggle: bool) -> (Vec<McpServer>, Vec<String>) {
-        let servers: Vec<McpServer> = self
-            .settings
-            .mcp_servers
-            .iter()
-            .filter(|(name, server)| !server.disabled && (toggle || !disabled.contains(name)))
-            .map(|(name, server)| McpServer {
-                name: name.clone(),
-                transport: server.transport.clone(),
-            })
-            .collect();
-        // Only qcc's servers are the thread's to switch, and only those the session
-        // gets: the agent's own stay as its configuration says.
-        let disabled = disabled
-            .iter()
-            .filter(|name| servers.iter().any(|server| &&server.name == name))
-            .cloned()
-            .collect();
-        (servers, disabled)
+    /// The qcc MCP servers the thread's session should have now.
+    pub(super) fn thread_mcp(&self, id: &ThreadId) -> Vec<McpServer> {
+        self.supervisor
+            .thread(id)
+            .map(|thread| mcp_servers_for(&self.settings.mcp_servers, &thread.mcp_disabled))
+            .unwrap_or_default()
+    }
+
+    /// The thread's qcc MCP servers were `before` and may be other now: bring its
+    /// session along. A provider that changes them in a running session is told at
+    /// once; another one's session is released when no turn runs, and the next
+    /// message resumes it with the change. A thread without a session gets the
+    /// servers when one starts.
+    pub(super) fn mcp_changed(&mut self, id: &ThreadId, before: &[McpServer]) {
+        if self.thread_mcp(id) == before {
+            return;
+        }
+        let Some(thread) = self.supervisor.thread(id) else { return };
+        let live_update = self
+            .host
+            .provider(&thread.provider)
+            .is_some_and(|(_, info)| info.capabilities.mcp_live);
+        if live_update {
+            self.push_mcp(id);
+        } else if self.supervisor.engine_ref(id).is_some_and(|engine| engine.session_live())
+            || self.in_transition(id)
+        {
+            self.sessions.entry(id.clone()).or_default().release_when_idle = true;
+        }
+    }
+
+    /// Send the thread's qcc MCP servers to its running session, or remember to once
+    /// the session can take them. Each update carries the whole set, so one at a
+    /// time is enough for the last to win.
+    fn push_mcp(&mut self, id: &ThreadId) {
+        let live = self.supervisor.engine_ref(id).is_some_and(|engine| engine.session_live());
+        let session = self.sessions.entry(id.clone()).or_default();
+        if session.starting || session.stopping || session.mcp_updating {
+            session.mcp_stale = true;
+            return;
+        }
+        session.mcp_stale = false;
+        // A session that starts later is given the servers at its start.
+        if !live {
+            return;
+        }
+        session.mcp_updating = true;
+        let servers = self.thread_mcp(id);
+        self.call_provider(id, Action::UpdateMcp, None, |thread| ProviderRequest::SetMcpServers {
+            thread,
+            servers,
+        });
+    }
+
+    /// Send a change of the MCP servers the session could not take earlier.
+    fn push_stale_mcp(&mut self, id: &ThreadId) {
+        if self.sessions.get(id).is_some_and(|session| session.mcp_stale) {
+            self.push_mcp(id);
+        }
     }
 
     /// The folders of the thread's project other than the one it works in. A thread
@@ -217,6 +251,7 @@ impl Core {
         let next = self.sessions.get_mut(&id).expect("the entry stays in the map");
         next.release_when_idle = session.release_when_idle;
         next.notes = session.notes;
+        next.mcp_stale = session.mcp_stale;
         match result {
             Ok(Outcome::SessionStarted { provider_session }) => {
                 if let Ok(engine) = self.supervisor.engine(&id) {
@@ -224,6 +259,8 @@ impl Core {
                     self.commit(events);
                 }
                 self.apply_deltas(&id, session.buffered);
+                // A change of the MCP servers that came while it started.
+                self.push_stale_mcp(&id);
                 // The session was started to be compacted.
                 if session.compact_after_start {
                     self.call_provider(&id, Action::Compact, None, |thread| {
@@ -324,7 +361,7 @@ impl Core {
             Action::Input
             | Action::Steer
             | Action::Resolve
-            | Action::SwitchMcp
+            | Action::UpdateMcp
             | Action::Compact => {}
             Action::Interrupt => {
                 // The backstop: a bridge that settled its own turn makes this a no-op.
@@ -341,6 +378,14 @@ impl Core {
                 }
             }
         }
+        if matches!(action, Action::UpdateMcp)
+            && let Some(session) = self.sessions.get_mut(&id)
+        {
+            session.mcp_updating = false;
+        }
+        // A change that waited for this call: after an interrupt the session takes
+        // it, after a release the next session starts with it anyway.
+        self.push_stale_mcp(&id);
         if matches!(action, Action::Release)
             && let Some(environment) =
                 self.sessions.get_mut(&id).and_then(|session| session.prepare_after_release.take())
@@ -427,4 +472,17 @@ impl Core {
             }
         }
     }
+}
+
+/// The qcc MCP servers a thread's session gets: those on in the settings that the
+/// thread does not keep off. The agent's own servers are its configuration's.
+fn mcp_servers_for(
+    settings: &BTreeMap<String, McpServerSettings>,
+    disabled: &[String],
+) -> Vec<McpServer> {
+    settings
+        .iter()
+        .filter(|(name, server)| !server.disabled && !disabled.contains(name))
+        .map(|(name, server)| McpServer { name: name.clone(), transport: server.transport.clone() })
+        .collect()
 }

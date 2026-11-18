@@ -38,7 +38,7 @@ impl Provider for Codex {
                 ],
                 // Codex reads its MCP servers when a thread starts: qcc's servers a
                 // thread keeps off are left out of the new session.
-                mcp_toggle: false,
+                mcp_live: false,
                 compact: true,
                 list_skills: true,
                 context_usage: false,

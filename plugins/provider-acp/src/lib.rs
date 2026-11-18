@@ -59,7 +59,7 @@ impl Provider for AcpProvider {
                     PermissionMode::Full,
                 ],
                 // ACP has no way to turn a server off; qcc's are left out instead.
-                mcp_toggle: false,
+                mcp_live: false,
                 // ACP has no way to ask for it.
                 compact: false,
                 // The protocol's command list mixes skills with commands, and

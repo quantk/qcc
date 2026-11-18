@@ -250,9 +250,9 @@ pub struct ThreadSetModeParams {
 method!(
     /// Turn an MCP server set up in qcc on or off for one thread. The agent's own
     /// servers are not qcc's to switch. The threads it starts are not affected.
-    /// A provider that declared `mcp_toggle` switches it in the running session at
-    /// once; for another the session is released as soon as no turn runs, so that
-    /// the next message resumes it with the change.
+    /// A provider that declared `mcp_live` changes the running session at once; for
+    /// another the session is released as soon as no turn runs, so that the next
+    /// message resumes it with the change.
     ThreadSetMcp, "thread.set_mcp", ThreadSetMcpParams => ThreadResult
 );
 
@@ -969,7 +969,8 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub providers: BTreeMap<ProviderId, ProviderSettings>,
     /// MCP servers every agent session gets on top of those the agent's own
-    /// configuration names, by server name.
+    /// configuration names, by server name. A change reaches running sessions the
+    /// way `thread.set_mcp` does.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub mcp_servers: BTreeMap<String, McpServerSettings>,
     /// What the user set for skills plugins offer, by skill name.

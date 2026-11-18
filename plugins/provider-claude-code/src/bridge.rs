@@ -30,8 +30,8 @@ use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
 const MCP_QUERY: &str = "qcc-mcp-";
-/// The prefix of the ids of our requests that turn a server on or off.
-const MCP_SWITCH: &str = "qcc-switch-";
+/// The prefix of the ids of our requests that replace qcc's servers of the session.
+const MCP_SET: &str = "qcc-set-mcp-";
 /// The prefix of the ids of our context breakdown requests.
 const CONTEXT_QUERY: &str = "qcc-context-";
 /// Entries kept per part of the context: the largest, which are the ones worth
@@ -144,9 +144,6 @@ pub struct Bridge {
     mcp_queries: u32,
     /// How many times in a row the agent said a server was still connecting.
     mcp_polls: u32,
-    /// Switches sent and not yet answered, by request id: the server and whether it
-    /// was being turned on.
-    mcp_switches: HashMap<String, (String, bool)>,
     /// Context breakdown requests sent, which names them.
     context_queries: u32,
 }
@@ -277,7 +274,6 @@ impl Bridge {
             interrupts: 0,
             mcp_queries: 0,
             mcp_polls: 0,
-            mcp_switches: HashMap::new(),
             context_queries: 0,
         }
     }
@@ -550,15 +546,18 @@ impl Bridge {
         .to_string()
     }
 
-    /// Turn an MCP server of the session on or off, then ask how the servers are.
-    pub fn switch_mcp(&mut self, name: &str, enabled: bool) -> Output {
+    /// Replace qcc's MCP servers of the session (those `--mcp-config` gave it, which
+    /// Claude Code manages as its dynamic ones) with `servers`, then ask how the
+    /// servers are. Claude Code connects the new ones, drops the missing ones and
+    /// connects one with another configuration again; the servers of the user's own
+    /// configuration stay. It takes the request mid-turn as well.
+    pub fn set_mcp_servers(&mut self, servers: &[McpServer]) -> Output {
         self.mcp_queries += 1;
-        let request_id = format!("{MCP_SWITCH}{}", self.mcp_queries);
-        let switch = json!({"type": "control_request", "request_id": request_id,
-            "request": {"subtype": "mcp_toggle", "serverName": name, "enabled": enabled}});
-        self.mcp_switches.insert(request_id, (name.to_owned(), enabled));
+        let request_id = format!("{MCP_SET}{}", self.mcp_queries);
+        let set = json!({"type": "control_request", "request_id": request_id,
+            "request": {"subtype": "mcp_set_servers", "servers": mcp_servers_json(servers)}});
         self.mcp_polls = 0;
-        Output { writes: vec![switch.to_string(), self.mcp_status_request()], ..Output::default() }
+        Output { writes: vec![set.to_string(), self.mcp_status_request()], ..Output::default() }
     }
 
     /// Ask the agent what its context window holds. `summary` answers from the
@@ -585,14 +584,8 @@ impl Bridge {
             }
             return;
         }
-        if let Some((name, enabled)) = self.mcp_switches.remove(str_field(response, "request_id")) {
-            if str_field(response, "subtype") != "success" {
-                let verb = if enabled { "on" } else { "off" };
-                let reason = str_field(response, "error");
-                output.deltas.push(Delta::ProviderWarning(format!(
-                    "Claude Code could not turn the MCP server {name} {verb}: {reason}"
-                )));
-            }
+        if str_field(response, "request_id").starts_with(MCP_SET) {
+            self.mcp_servers_set(response, output);
             return;
         }
         // An agent too old to tell answers with an error, which is ignored.
@@ -625,6 +618,23 @@ impl Bridge {
             self.mcp_polls += 1;
             output.wake_after_ms = Some(MCP_POLL_MS);
         }
+    }
+
+    /// Claude Code's answer to `mcp_set_servers`: the servers it dropped leave the
+    /// list. Those it could not connect are reported failed by the status query
+    /// sent along.
+    fn mcp_servers_set(&mut self, response: &Value, output: &mut Output) {
+        if str_field(response, "subtype") != "success" {
+            let reason = str_field(response, "error");
+            output.deltas.push(Delta::ProviderWarning(format!(
+                "Claude Code could not change the MCP servers of the session: {reason}"
+            )));
+            return;
+        }
+        let removed = response["response"]["removed"].as_array().into_iter().flatten();
+        output.deltas.extend(
+            removed.filter_map(Value::as_str).map(|name| Delta::McpRemoved(name.to_owned())),
+        );
     }
 
     /// Remember the usage of one of the main agent's requests. A sub-agent's requests
@@ -935,6 +945,11 @@ pub fn mcp_config(servers: &[McpServer]) -> Option<String> {
     if servers.is_empty() {
         return None;
     }
+    Some(json!({ "mcpServers": mcp_servers_json(servers) }).to_string())
+}
+
+/// qcc's MCP servers as Claude Code configures them: an object by name.
+fn mcp_servers_json(servers: &[McpServer]) -> Value {
     let servers: serde_json::Map<String, Value> = servers
         .iter()
         .map(|server| {
@@ -954,7 +969,7 @@ pub fn mcp_config(servers: &[McpServer]) -> Option<String> {
             (server.name.clone(), config)
         })
         .collect();
-    Some(json!({ "mcpServers": servers }).to_string())
+    Value::Object(servers)
 }
 
 fn pairs(pairs: &[(String, String)]) -> serde_json::Map<String, Value> {
@@ -1394,29 +1409,40 @@ mod tests {
     }
 
     #[test]
-    fn mcp_servers_are_switched_in_the_running_session() {
+    fn mcp_servers_are_replaced_in_the_running_session() {
         let mut bridge = Bridge::new(None);
-        let switched = bridge.switch_mcp("playwright", false);
+        let docs = McpServer {
+            name: "docs".into(),
+            transport: McpTransport::Stdio(McpStdio {
+                command: "npx".into(),
+                args: vec!["docs-mcp".into()],
+                env: Vec::new(),
+            }),
+        };
+        let set = bridge.set_mcp_servers(&[docs]);
         let requests: Vec<Value> =
-            switched.writes.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
+            set.writes.iter().map(|line| serde_json::from_str(line).unwrap()).collect();
         assert_eq!(
             requests[0]["request"],
-            json!({"subtype": "mcp_toggle", "serverName": "playwright", "enabled": false})
+            json!({"subtype": "mcp_set_servers", "servers": {
+                "docs": {"type": "stdio", "command": "npx", "args": ["docs-mcp"], "env": {}}}})
         );
         assert_eq!(requests[1]["request"]["subtype"], "mcp_status");
 
+        // What Claude Code dropped leaves the list.
         let id = requests[0]["request_id"].as_str().unwrap();
-        let done = json!({"type": "control_response",
-                          "response": {"subtype": "success", "request_id": id}});
-        assert_eq!(bridge.on_line(&done.to_string()), Output::default());
+        let done = json!({"type": "control_response", "response": {"subtype": "success",
+            "request_id": id, "response": {"added": ["docs"], "removed": ["web"], "errors": {}}}});
+        assert_eq!(bridge.on_line(&done.to_string()).deltas, [Delta::McpRemoved("web".into())]);
 
-        let again = bridge.switch_mcp("nope", true);
-        let id = serde_json::from_str::<Value>(&again.writes[0]).unwrap()["request_id"].clone();
+        let again = bridge.set_mcp_servers(&[]);
+        let request: Value = serde_json::from_str(&again.writes[0]).unwrap();
+        assert_eq!(request["request"]["servers"], json!({}));
         let refused = json!({"type": "control_response", "response": {"subtype": "error",
-                             "request_id": id, "error": "Server not found: nope"}});
+            "request_id": request["request_id"], "error": "unknown subtype"}});
         let warned = bridge.on_line(&refused.to_string());
         assert!(
-            matches!(&warned.deltas[..], [Delta::ProviderWarning(w)] if w.contains("nope on: Server not found")),
+            matches!(&warned.deltas[..], [Delta::ProviderWarning(w)] if w.contains("unknown subtype")),
             "{warned:?}"
         );
     }

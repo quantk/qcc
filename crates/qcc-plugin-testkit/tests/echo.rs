@@ -49,7 +49,7 @@ fn declares_its_provider_and_its_ui() {
             resume: true,
             steer: true,
             permission_modes: PermissionMode::ALL.to_vec(),
-            mcp_toggle: true,
+            mcp_live: true,
             compact: true,
             list_skills: true,
             context_usage: true,

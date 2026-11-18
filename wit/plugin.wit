@@ -258,6 +258,9 @@ interface types {
     /// How one MCP server of the session is doing now, the agent's own servers
     /// included. A fresh session (`session-reset`) starts with none known.
     mcp-status(mcp-status),
+    /// An MCP server left the session (`set-mcp-servers` dropped it): it is no
+    /// longer listed.
+    mcp-removed(string),
     /// What the context window holds now, part by part. Only from a provider that
     /// declares `context-usage`.
     context-usage(context-usage),
@@ -292,9 +295,10 @@ interface types {
     /// The permission modes the provider can enforce. A thread is never started in
     /// a mode its provider did not list.
     permission-modes: list<permission-mode>,
-    /// The provider turns MCP servers of a running session on and off
-    /// (`set-mcp-server`). Without it, a thread's change waits for its next session.
-    mcp-toggle: bool,
+    /// The provider changes the MCP servers set up in qcc of a running session
+    /// (`set-mcp-servers`): adds, removes and replaces them. Without it, a change
+    /// waits for the thread's next session.
+    mcp-live: bool,
     /// The provider compacts the session's context when asked (`compact`).
     compact: bool,
     /// The provider can tell which skills its agent finds by itself (`list-skills`).
@@ -550,13 +554,10 @@ interface types {
     /// bridge passes them the way its agent takes extra directories, or tells it
     /// about them (`qcc_plugin_sdk::extra_dirs_prompt`).
     extra-dirs: list<string>,
-    /// MCP servers the user set up in qcc. The bridge adds them to those the
-    /// agent's own configuration names, the way its agent takes them.
+    /// MCP servers the user set up in qcc and the thread wants: those turned off
+    /// for every thread or for this one are left out. The bridge adds them to
+    /// those the agent's own configuration names, the way its agent takes them.
     mcp-servers: list<mcp-server>,
-    /// Which of `mcp-servers` the thread keeps off, by name. Given only to a
-    /// provider that declared `mcp-toggle`, which starts them off and can switch
-    /// them on later; another provider is not given those servers at all.
-    mcp-disabled: list<string>,
   }
 
   record session-started {
@@ -564,10 +565,13 @@ interface types {
     provider-session: option<string>,
   }
 
-  record mcp-switch {
+  record mcp-servers-update {
     thread: thread-id,
-    name: string,
-    enabled: bool,
+    /// Every MCP server set up in qcc the session should have now. It replaces
+    /// what `session-start` or the previous update gave: a server missing here is
+    /// to be dropped, a new one connected, one with another configuration
+    /// connected again. The agent's own servers stay as they are.
+    servers: list<mcp-server>,
   }
 
   record thread-input {
@@ -606,9 +610,9 @@ interface types {
     /// The skills the agent finds by itself (its own folders, its plugins), as it
     /// reports them. Answered with `skills`, usually `deferred`.
     list-skills,
-    /// Turn an MCP server of the running session on or off. Sent only to a provider
-    /// that declared `mcp-toggle`.
-    set-mcp-server(mcp-switch),
+    /// Change the qcc MCP servers of the running session, even mid-turn. Sent only
+    /// to a provider that declared `mcp-live`.
+    set-mcp-servers(mcp-servers-update),
     /// Compact the session's context: the agent sums up the conversation so far.
     /// Sent only to a provider that declared `compact`, and only while no turn runs.
     /// The work is a turn: open it (`turn-open`), report `context-compacted`, and

@@ -297,6 +297,13 @@ impl ThreadEngine {
                     }
                     payloads.push(EventPayload::McpServersChanged { servers: mcp.clone() });
                 }
+                Delta::McpRemoved { name } => {
+                    let before = mcp.len();
+                    mcp.retain(|known| known.name != name);
+                    if mcp.len() != before {
+                        payloads.push(EventPayload::McpServersChanged { servers: mcp.clone() });
+                    }
+                }
                 Delta::SessionReset => {
                     // The servers of the old session say nothing about the new one.
                     if !mcp.is_empty() {

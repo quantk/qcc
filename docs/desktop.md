@@ -175,7 +175,9 @@ palette.
 The "MCP servers" screen and the palette: qcc servers with an on/off switch, editing and deletion;
 an add dialog (a program with arguments and environment, or HTTP with headers); and for each
 server, in how many threads it is ready or failed, and why. Below are the servers the agents take
-from their own configs. Changes are written to the daemon immediately. A thread has an "MCP" tab
+from their own configs. Changes are written to the daemon immediately and reach running threads
+too: Claude Code takes them at once, Codex and opencode after the current turn (see
+[Changes reach running sessions](agents.md#changes-reach-running-sessions)). A thread has an "MCP" tab
 with the status of each server of its session and switches next to the qcc servers that turn them
 off in this thread only. A failed server is also visible on the card in the overview.
 

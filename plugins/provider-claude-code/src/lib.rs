@@ -36,7 +36,7 @@ impl Provider for ClaudeCode {
                     PermissionMode::Auto,
                     PermissionMode::Full,
                 ],
-                mcp_toggle: true,
+                mcp_live: true,
                 compact: true,
                 list_skills: true,
                 context_usage: true,
@@ -100,10 +100,6 @@ impl Provider for ClaudeCode {
 
         self.sessions.insert(&start.thread, process, Bridge::new(start.resume.clone()));
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
-        // Off before the first prompt can use them.
-        for name in &start.mcp_disabled {
-            self.sessions.run(&start.thread, |bridge| bridge.switch_mcp(name, false))?;
-        }
         if let Some(prompt) = &start.prompt {
             let prompt = message(prompt, &start.prompt_notes, &start.prompt_attachments, true);
             self.sessions.run(&start.thread, |bridge| bridge.prompt_message(&prompt))?;
@@ -152,8 +148,8 @@ impl Provider for ClaudeCode {
         deltas::emit(&thread, &bridge.stopped())
     }
 
-    fn set_mcp_server(&mut self, switch: McpSwitch) -> Result<(), String> {
-        self.sessions.run(&switch.thread, |bridge| bridge.switch_mcp(&switch.name, switch.enabled))
+    fn set_mcp_servers(&mut self, update: McpServersUpdate) -> Result<(), String> {
+        self.sessions.run(&update.thread, |bridge| bridge.set_mcp_servers(&update.servers))
     }
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {

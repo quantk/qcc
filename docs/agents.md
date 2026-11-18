@@ -127,12 +127,29 @@ qcc mcp enable docs
 qcc mcp remove search
 ```
 
-Changes apply to sessions started after them. A thread that is already running gets them when its
-session starts again. A server name consists of Latin letters, digits, `_` and `-`. Bridges pass
-the servers the way the agent accepts them: Claude Code through `--mcp-config`, Codex through an
-override of `mcp_servers` in the thread's config, opencode through `mcpServers` of the ACP
-protocol. If an ACP agent does not support HTTP servers, it gets only the stdio servers, and a
-warning appears in the timeline.
+A server name consists of Latin letters, digits, `_` and `-`. Bridges pass the servers the way the
+agent accepts them: Claude Code through `--mcp-config`, Codex through an override of `mcp_servers`
+in the thread's config, opencode through `mcpServers` of the ACP protocol. If an ACP agent does not
+support HTTP servers, it gets only the stdio servers, and a warning appears in the timeline.
+
+### Changes reach running sessions
+
+A change of the settings — a server added, replaced, turned on or off, removed — reaches every
+thread that is running, not only the sessions started after it. Each thread gets the servers that
+are on in the settings minus those it keeps off (see [below](#turning-a-server-off-in-one-thread)).
+How the change gets into a running session depends on the agent:
+
+- **Claude Code** takes it at once, even in the middle of a turn: the bridge replaces qcc's servers
+  of the session with the `mcp_set_servers` request. A new server connects, a removed one is shut
+  down and leaves the status list, one set up anew (`qcc mcp add` with the same name) connects
+  again with its new configuration. The servers of Claude Code's own configuration stay as they
+  are.
+- **Codex and opencode** cannot change the servers of a running session. qcc releases their session
+  as soon as the current turn ends, and the next message continues it (`resume`) with the new
+  servers. A thread without a session gets them when its next session starts.
+
+A provider tells qcc that it can do the former with the `mcp_live` capability (see
+`qcc plugin list`).
 
 ### Status
 
@@ -155,10 +172,10 @@ qcc thread mcp <id> --off docs
 qcc thread mcp <id> --on docs
 ```
 
-Claude Code toggles a server in a running session immediately, even in the middle of a turn (the
-`mcp_toggle` request): it receives all qcc servers and shuts the disabled ones down at startup.
-Codex and opencode cannot do that: a disabled server is simply not passed to them. So qcc releases
-their session as soon as the current turn ends, and the next message continues it with the change.
+A server kept off is not given to the agent at all. The switch reaches a running session the same
+way a change of the settings does (see [above](#changes-reach-running-sessions)): Claude Code drops
+or connects the server at once, Codex and opencode get the change in the session that continues
+after the current turn.
 
 ## Permission mode
 

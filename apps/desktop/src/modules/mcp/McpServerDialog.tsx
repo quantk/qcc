@@ -134,7 +134,7 @@ export function McpServerDialog(props: { close: () => void; name?: string; serve
                 type="button"
                 variant={confirmRemove ? "destructive" : "ghost"}
                 onClick={() => (confirmRemove ? void remove() : setConfirmRemove(true))}
-                title="Sessions started from now on do not get it"
+                title="Sessions lose it, running ones included"
               >
                 {confirmRemove ? "Really remove it" : "Remove server"}
               </Button>

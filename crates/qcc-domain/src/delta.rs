@@ -120,6 +120,10 @@ pub enum Delta {
     #[serde(rename = "mcp.status")]
     McpStatus { server: McpServerStatus },
 
+    /// An MCP server left the session: it is no longer listed.
+    #[serde(rename = "mcp.removed")]
+    McpRemoved { name: String },
+
     /// What the context window holds now, part by part.
     #[serde(rename = "context.usage")]
     ContextUsage { context: crate::context::ContextUsage },

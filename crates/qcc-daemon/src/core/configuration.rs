@@ -1,6 +1,6 @@
 //! Projects and daemon settings.
 
-use qcc_domain::{Project, ProjectId, SettingField, ThreadId};
+use qcc_domain::{McpServer, Project, ProjectId, SettingField, ThreadId};
 use qcc_plugin_host::{Contribution, PluginHandle, PluginRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
@@ -23,6 +23,14 @@ impl Core {
         settings::check(&next).map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
         self.check_plugin_settings(&next)?;
         let before = self.settings.plugins.clone();
+        // The qcc MCP servers of every thread, to bring running sessions along with
+        // a change of them.
+        let mcp_before: Vec<(ThreadId, Vec<McpServer>)> = self
+            .supervisor
+            .threads()
+            .filter(|thread| !thread.archived)
+            .map(|thread| (thread.id.clone(), self.thread_mcp(&thread.id)))
+            .collect();
         settings::save(&self.config.settings(), &next).map_err(|error| {
             RpcError::new(codes::INTERNAL_ERROR, format!("cannot save the settings: {error}"))
         })?;
@@ -39,6 +47,9 @@ impl Core {
             .collect();
         for plugin in changed {
             self.post_plugin_settings(&plugin);
+        }
+        for (id, servers) in mcp_before {
+            self.mcp_changed(&id, &servers);
         }
         Ok(self.settings_result())
     }

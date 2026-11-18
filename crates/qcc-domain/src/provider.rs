@@ -66,10 +66,11 @@ pub struct ProviderCapabilities {
     /// The permission modes the provider can enforce.
     #[serde(default)]
     pub permission_modes: Vec<PermissionMode>,
-    /// MCP servers of a running session can be turned on and off. Without it, a
-    /// thread's change waits for its next session.
+    /// The MCP servers set up in qcc can be changed in a running session: added,
+    /// removed, turned on and off. Without it, a change waits for the thread's next
+    /// session.
     #[serde(default)]
-    pub mcp_toggle: bool,
+    pub mcp_live: bool,
     /// The session's context can be compacted when the user asks.
     #[serde(default)]
     pub compact: bool,

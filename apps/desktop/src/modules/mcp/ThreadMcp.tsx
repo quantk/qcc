@@ -11,7 +11,7 @@ import { MCP_VIEW } from "./open";
 export function ThreadMcp({ thread, provider }: { thread: Thread; provider: ProviderInfo | undefined }) {
   const settings = useApp((state) => state.settings?.settings);
   const rows = threadMcpRows(thread, settings);
-  const live = provider?.capabilities.mcp_toggle ?? false;
+  const live = provider?.capabilities.mcp_live ?? false;
 
   return (
     <div className="flex w-full max-w-3xl flex-col gap-3 overflow-auto px-6 py-5">

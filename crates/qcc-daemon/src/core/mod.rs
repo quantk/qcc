@@ -71,8 +71,8 @@ pub(crate) enum Action {
     Resolve,
     Interrupt,
     Release,
-    /// Turn an MCP server of the running session on or off.
-    SwitchMcp,
+    /// Change the qcc MCP servers of the running session.
+    UpdateMcp,
     /// Compact the session's context, in a turn of the provider's own.
     Compact,
     /// Release, then start the conversation afresh: the old session's end belongs
@@ -225,6 +225,11 @@ struct Session {
     /// The thread's MCP servers changed and its provider takes that only in a new
     /// session: release this one as soon as no turn runs.
     release_when_idle: bool,
+    /// The provider is changing the session's MCP servers and has not answered yet.
+    mcp_updating: bool,
+    /// The thread's MCP servers changed while the session could not take it (it was
+    /// starting, stopping or taking an earlier change): send them once it can.
+    mcp_stale: bool,
     /// What qcc has to tell the agent with its next message: news since the
     /// session started. A new session is told everything anyway and drops them.
     notes: Vec<String>,

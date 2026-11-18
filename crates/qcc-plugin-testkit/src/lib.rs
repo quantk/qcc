@@ -232,7 +232,6 @@ impl Harness {
             skills: Vec::new(),
             extra_dirs: Vec::new(),
             mcp_servers: Vec::new(),
-            mcp_disabled: Vec::new(),
         })));
         match outcome {
             Ok(Outcome::SessionStarted { provider_session }) => {

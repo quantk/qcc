@@ -295,6 +295,7 @@ pub fn plugin(plugin: &PluginInfo) -> String {
         for (name, on) in [
             ("resume", capabilities.resume),
             ("steer", capabilities.steer),
+            ("mcp_live", capabilities.mcp_live),
             ("compact", capabilities.compact),
             ("context_usage", capabilities.context_usage),
             ("images", capabilities.images),

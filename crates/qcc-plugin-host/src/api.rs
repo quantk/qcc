@@ -36,10 +36,8 @@ pub struct SessionStart {
     pub skills: Vec<SkillRef>,
     /// Other folders of the thread's project.
     pub extra_dirs: Vec<String>,
-    /// MCP servers to add to the agent's own.
+    /// MCP servers to add to the agent's own: those of qcc the thread wants.
     pub mcp_servers: Vec<McpServer>,
-    /// MCP servers the thread keeps off, by name.
-    pub mcp_disabled: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,11 +58,11 @@ pub enum ProviderRequest {
     Stop {
         thread: ThreadId,
     },
-    /// Only for providers that declared `mcp_toggle`.
-    SetMcpServer {
+    /// The qcc MCP servers the running session should have now, replacing those it
+    /// got. Only for providers that declared `mcp_live`.
+    SetMcpServers {
         thread: ThreadId,
-        name: String,
-        enabled: bool,
+        servers: Vec<McpServer>,
     },
     ResolveInteraction {
         thread: ThreadId,

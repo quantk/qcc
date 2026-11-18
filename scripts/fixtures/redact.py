@@ -9,7 +9,8 @@ crossed the agent's stdio (see record-claude.py and record-jsonrpc.py).
 Redaction keeps the traffic a bridge reads and removes what identifies the machine
 it was recorded on: absolute paths become /work and /home/user, stderr is dropped,
 and bulky or personal fields the bridges never look at (tool catalogues, account and
-rate-limit details, thinking signatures) are cut. It never invents traffic.
+billing details, thinking signatures) are cut; of the usage limits only the windows
+are kept. It never invents traffic.
 """
 import argparse, json, re, sys
 
@@ -54,7 +55,34 @@ def claude(msg):
         return keep(msg, ["type", "subtype", "session_id", "cwd", "model", "permissionMode",
                           "claude_code_version", "uuid"])
     if kind == "rate_limit_event":
-        return {"type": "rate_limit_event", "rate_limit_info": {"status": msg["rate_limit_info"].get("status")}}
+        info = msg["rate_limit_info"]
+        kept = keep(info, ["status", "resetsAt", "rateLimitType", "utilization"])
+        if isinstance(info.get("unifiedWindows"), dict):
+            kept["unifiedWindows"] = {name: keep(window, ["utilization", "resetsAt", "status"])
+                                      for name, window in info["unifiedWindows"].items()}
+        return {"type": "rate_limit_event", "rate_limit_info": kept}
+    if kind == "control_response" and isinstance(msg.get("response", {}).get("response"), dict) \
+            and "rate_limits_available" in msg["response"]["response"]:
+        # The answer to get_usage: the plan's windows only, not spending or billing.
+        usage = msg["response"]["response"]
+        limits = usage.get("rate_limits") or {}
+        kept = {name: keep(limits[name], ["utilization", "resets_at"])
+                for name in ("five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet")
+                if isinstance(limits.get(name), dict)}
+        if isinstance(limits.get("model_scoped"), list):
+            kept["model_scoped"] = [keep(row, ["display_name", "utilization", "resets_at"])
+                                    for row in limits["model_scoped"]]
+        if isinstance(limits.get("limits"), list):
+            kept["limits"] = [dict(keep(row, ["kind", "percent", "resets_at"]),
+                                   scope={"model": keep((row.get("scope") or {}).get("model") or {},
+                                                        ["display_name"])})
+                              for row in limits["limits"]]
+        msg["response"]["response"] = {
+            "subscription_type": usage.get("subscription_type"),
+            "rate_limits_available": usage.get("rate_limits_available"),
+            "rate_limits": kept if usage.get("rate_limits") is not None else None,
+        }
+        return msg
     if kind == "result":
         out = keep(msg, ["type", "subtype", "is_error", "result", "errors", "stop_reason",
                          "terminal_reason", "num_turns", "session_id", "duration_ms"])
@@ -94,13 +122,26 @@ def acp(msg):
     return msg
 
 
-CODEX_DROP = {"account/updated", "account/rateLimits/updated", "remoteControl/status/changed",
+CODEX_DROP = {"account/updated", "remoteControl/status/changed",
               "mcpServer/startupStatus/updated", "hook/started", "hook/completed"}
+
+
+CODEX_LIMITS = ["limitId", "limitName", "primary", "secondary", "planType", "rateLimitReachedType"]
 
 
 def codex(msg):
     if msg.get("method") in CODEX_DROP:
         return None
+    # Usage limits: the windows and the plan, not the account, credits or offers.
+    if msg.get("method") == "account/rateLimits/updated":
+        msg["params"] = {"rateLimits": keep(msg["params"]["rateLimits"], CODEX_LIMITS)}
+    result = msg.get("result")
+    if isinstance(result, dict) and "rateLimits" in result:
+        msg["result"] = {"rateLimits": keep(result["rateLimits"], CODEX_LIMITS)}
+        if isinstance(result.get("rateLimitsByLimitId"), dict):
+            msg["result"]["rateLimitsByLimitId"] = {
+                bucket: keep(snapshot, CODEX_LIMITS)
+                for bucket, snapshot in result["rateLimitsByLimitId"].items()}
     if isinstance(msg.get("result"), dict) and "userAgent" in msg["result"]:
         msg["result"] = {"userAgent": "qcc/0.166.0", "codexHome": "/home/user/.codex",
                          "platformFamily": "unix", "platformOs": "linux"}

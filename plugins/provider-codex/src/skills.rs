@@ -12,7 +12,7 @@ pub fn requests() -> Vec<String> {
 }
 
 pub fn probe() -> ListProbe {
-    ListProbe { what: "skills", parse: |data| Outcome::Skills(parse(data)) }
+    ListProbe { what: "skills", parse: |result| Outcome::Skills(parse(&result["data"])) }
 }
 
 /// One entry per working directory asked about, each with its skills.

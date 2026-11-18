@@ -1,5 +1,5 @@
 //! Questions asked of a short-lived `codex app-server`: the handshake, then one
-//! list request, whose response is the answer.
+//! request, whose response is the answer.
 
 use qcc_plugin_sdk::stdio::{ProbeParser, exit_reason};
 use qcc_plugin_sdk::types::Outcome;
@@ -24,7 +24,7 @@ pub fn requests(method: &str) -> Vec<String> {
 pub struct ListProbe {
     /// What is being listed, for the error message.
     pub what: &'static str,
-    /// Reads the outcome out of the response's `result.data`.
+    /// Reads the outcome out of the response's `result`.
     pub parse: fn(&Value) -> Outcome,
 }
 
@@ -38,7 +38,7 @@ impl ProbeParser for ListProbe {
             let error = error["message"].as_str().unwrap_or("the request failed");
             return Some(Err(format!("codex could not list its {}: {error}", self.what)));
         }
-        Some(Ok((self.parse)(&message["result"]["data"])))
+        Some(Ok((self.parse)(&message["result"])))
     }
 
     fn exited(&mut self, code: Option<i32>, stderr: Option<&str>) -> Result<Outcome, String> {

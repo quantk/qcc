@@ -3,6 +3,7 @@
 
 usage: rec_rpc.py OUT.ndjson STEPS_JSON -- cmd args...
 Steps: {"request": {method, params}, "as": "name"}  send request, remember its id under name
+                                    ("id": "x" sends it with that id instead of the next number)
        {"notify": {method, params}}
        {"wait_response": "name"}     wait for the response to a named request (stored for $refs)
        {"wait_method": "m"}          wait for an incoming request/notification with method m
@@ -51,7 +52,9 @@ def wait(pred, what, timeout=180):
         backlog.append(m)
 for step in steps:
     if "request" in step:
-        rid = next_id[0]; next_id[0] += 1; ids[step.get("as", str(rid))] = rid
+        if "id" in step: rid = step["id"]
+        else: rid = next_id[0]; next_id[0] += 1
+        ids[step.get("as", str(rid))] = rid
         send({"jsonrpc": "2.0", "id": rid, **resolve(step["request"])})
     elif "notify" in step: send({"jsonrpc": "2.0", **resolve(step["notify"])})
     elif "wait_response" in step:

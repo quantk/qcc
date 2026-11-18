@@ -5,6 +5,7 @@
 //! process and the bridge.
 
 pub mod bridge;
+pub mod limits;
 pub mod models;
 mod probe;
 pub mod skills;
@@ -41,6 +42,7 @@ impl Provider for ClaudeCode {
                 list_skills: true,
                 context_usage: true,
                 images: true,
+                rate_limits: true,
             },
         }
     }
@@ -110,6 +112,8 @@ impl Provider for ClaudeCode {
             let mut query = bridge.query_mcp();
             // What the context holds before a word is said: prompts, tools, memory.
             query.writes.extend(bridge.query_context().writes);
+            // The account's limits, before the first turn reports them.
+            query.writes.extend(bridge.query_limits().writes);
             if let Err(error) = self.sessions.apply(&start.thread, query) {
                 log::debug(format!("thread {}: cannot ask for MCP status: {error}", start.thread));
             }
@@ -166,6 +170,10 @@ impl Provider for ClaudeCode {
 
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
         self.probe(&skills::requests(), skills::probe())
+    }
+
+    fn rate_limits(&mut self) -> Result<Reply<RateLimits>, String> {
+        self.probe(&[limits::probe_request()], limits::probe())
     }
 }
 

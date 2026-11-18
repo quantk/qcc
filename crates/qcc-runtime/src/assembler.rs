@@ -249,6 +249,9 @@ impl DeltaAssembler {
             Delta::ContextCompacted { compaction } => {
                 out.push(EventPayload::ContextCompacted { compaction });
             }
+            // The account's, not the thread's: the core keeps it per provider before
+            // deltas reach a thread, so one arriving here has nowhere to go.
+            Delta::RateLimits { .. } => {}
             Delta::InteractionRequest { request_id, item, request } => {
                 if self.interactions.iter().any(|pending| pending.request_id == request_id) {
                     self.violations.push(GrammarViolation::InteractionAlreadyPending(request_id));

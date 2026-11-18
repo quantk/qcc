@@ -1,13 +1,13 @@
 //! The core task: the single owner of all daemon state.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
     AgentSkill, Automation, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
-    ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, UserInput,
+    ProviderLimits, RateLimits, ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -33,6 +33,7 @@ mod comments;
 mod configuration;
 mod environments;
 mod extensions;
+mod limits;
 mod rpc;
 mod sessions;
 mod skills;
@@ -186,6 +187,12 @@ pub(crate) enum Command {
         result: Result<Vec<AgentSkill>, String>,
         responder: Responder,
     },
+    /// The providers asked by `provider.limits` answered (or gave up).
+    LimitsRead {
+        only: Option<ProviderId>,
+        results: Vec<(ProviderId, Result<RateLimits, String>)>,
+        responder: Responder,
+    },
     /// A `thread.wait` ran out of time.
     WaitTimedOut {
         waiter: u64,
@@ -288,6 +295,8 @@ pub(crate) struct Core {
     models: HashMap<ProviderId, Vec<ModelInfo>>,
     /// The skills each provider's agent said it finds by itself, until asked again.
     agent_skills: HashMap<ProviderId, Vec<AgentSkill>>,
+    /// The latest usage limits each provider reported, saved in the store.
+    limits: BTreeMap<ProviderId, ProviderLimits>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
     cli_dir: Option<PathBuf>,
     /// Set when the journal cannot be written. The daemon stops rather than let
@@ -356,6 +365,11 @@ impl Core {
 
         let projects = store.projects()?;
         let automations = store.automations()?;
+        let limits = store
+            .provider_limits()?
+            .into_iter()
+            .map(|limits| (limits.provider.clone(), limits))
+            .collect();
         let mut supervisor = Supervisor::new(|| Box::new(UuidMint));
         let mut queued = HashSet::new();
         let now = now_ms();
@@ -399,6 +413,7 @@ impl Core {
             skills,
             models: HashMap::new(),
             agent_skills: HashMap::new(),
+            limits,
             projects,
             automations,
             automation_timer: 0,
@@ -490,6 +505,9 @@ impl Core {
             }
             Command::SkillsListed { provider, result, responder } => {
                 self.skills_listed(provider, result, responder);
+            }
+            Command::LimitsRead { only, results, responder } => {
+                self.limits_read(only, results, responder);
             }
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {

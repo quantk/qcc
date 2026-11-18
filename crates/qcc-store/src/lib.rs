@@ -11,8 +11,8 @@ use std::sync::{Mutex, MutexGuard};
 
 use qcc_domain::{
     Automation, AutomationId, AutomationRun, CommentId, EventPayload, Item, ItemShape, LineComment,
-    Project, ProjectId, Role, Thread, ThreadEvent, ThreadId, ThreadUsage, ToolBucket, ToolUse,
-    TranscriptEntry, UsageBucket,
+    Project, ProjectId, ProviderLimits, Role, Thread, ThreadEvent, ThreadId, ThreadUsage,
+    ToolBucket, ToolUse, TranscriptEntry, UsageBucket,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -88,6 +88,12 @@ const MIGRATIONS: &[&str] = &[
     ) STRICT;
 
     CREATE INDEX automation_runs_by_automation ON automation_runs (automation_id, id);
+",
+    "
+    CREATE TABLE provider_limits (
+        provider    TEXT PRIMARY KEY,
+        data        TEXT NOT NULL
+    ) STRICT;
 ",
 ];
 
@@ -464,6 +470,28 @@ impl Store {
         Ok(())
     }
 
+    /// The latest usage limits each provider reported, by provider id. Not history:
+    /// a provider's row is replaced by its next report.
+    pub fn provider_limits(&self) -> Result<Vec<ProviderLimits>> {
+        let conn = self.lock();
+        let mut statement = conn.prepare("SELECT data FROM provider_limits ORDER BY provider")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut limits = Vec::new();
+        for data in rows {
+            limits.push(decode(&data?)?);
+        }
+        Ok(limits)
+    }
+
+    pub fn save_provider_limits(&self, limits: &ProviderLimits) -> Result<()> {
+        self.lock().execute(
+            "INSERT INTO provider_limits (provider, data) VALUES (?1, ?2) \
+             ON CONFLICT (provider) DO UPDATE SET data = excluded.data",
+            params![limits.provider.as_str(), encode(limits)?],
+        )?;
+        Ok(())
+    }
+
     /// Every automation, oldest first. Like projects they are settings, not
     /// history: a row is replaced when the automation changes.
     pub fn automations(&self) -> Result<Vec<Automation>> {
@@ -632,6 +660,29 @@ mod tests {
         assert_eq!(store.projects().unwrap(), [project.clone()]);
         store.delete_project(&project.id).unwrap();
         assert!(store.projects().unwrap().is_empty());
+    }
+
+    #[test]
+    fn provider_limits_are_kept_per_provider_and_replaced() {
+        use qcc_domain::{LimitWindow, RateLimits};
+        let store = Store::open_in_memory().unwrap();
+        let window = |used| LimitWindow {
+            id: "five_hour".into(),
+            label: "5-hour".into(),
+            scope: None,
+            used_percent: used,
+            resets_at: Some(1_000),
+            window_minutes: Some(300),
+            status: None,
+        };
+        let report = |used| RateLimits { plan: None, windows: vec![window(used)], complete: true };
+        let codex = ProviderLimits::new("codex".into(), report(4), 1);
+        let mut claude = ProviderLimits::new("claude-code".into(), report(10), 1);
+        store.save_provider_limits(&codex).unwrap();
+        store.save_provider_limits(&claude).unwrap();
+        claude.merge(report(42), 2);
+        store.save_provider_limits(&claude).unwrap();
+        assert_eq!(store.provider_limits().unwrap(), [claude, codex]);
     }
 
     #[test]

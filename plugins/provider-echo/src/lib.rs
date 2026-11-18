@@ -21,6 +21,7 @@
 //! | `/attachments`       | lists the files attached to the message and how each came    |
 //! | `/settings`          | lists the plugin's own settings as the daemon told them      |
 //! | `/context`           | reports a made-up breakdown of its context window            |
+//! | `/limits <percent>`  | reports its account's 5-hour window spent that much (`42`)   |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
 //!
@@ -32,7 +33,9 @@
 //! removed.
 //!
 //! It offers a skill on request, `echo-demo`, for tests of skill switching, and
-//! compacts a session's context when asked, at once.
+//! compacts a session's context when asked, at once. Asked for its account's usage
+//! limits without a session, it reports a 5-hour window 10% spent and a weekly one
+//! 20% spent.
 //!
 //! It also contributes UI: an "Echo" tab on its own threads and the drawing of its
 //! `/card` items, both built from the fixed set of UI nodes.
@@ -433,6 +436,19 @@ impl Echo {
                 out.push(Delta::ContextUsage(session.context()));
                 out.push(completed());
             }
+            "/limits" => {
+                let used = rest.trim().parse().unwrap_or(42);
+                let reply = format!("limits reported: 5-hour {used}%");
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                // Only the window the turn spent, as a real agent's rate-limit event
+                // reports it: the others are left as they were.
+                let window = limit_window("five_hour", "5-hour", 300, used);
+                let limits = RateLimits { plan: None, windows: vec![window], complete: false };
+                out.push(Delta::RateLimits(limits));
+                out.push(completed());
+            }
             "/skills" => {
                 let reply = session.skills.clone().unwrap_or_else(|| "no skills".into());
                 out.push(text(reply.clone()));
@@ -497,6 +513,7 @@ impl Provider for Echo {
                 list_skills: true,
                 context_usage: true,
                 images: true,
+                rate_limits: true,
             },
         }
     }
@@ -632,6 +649,17 @@ impl Provider for Echo {
         Ok(Reply::Now(vec![model("echo-1", "Echo 1", true), model("echo-2", "Echo 2", false)]))
     }
 
+    fn rate_limits(&mut self) -> Result<Reply<RateLimits>, String> {
+        Ok(Reply::Now(RateLimits {
+            plan: Some("echo".into()),
+            windows: vec![
+                limit_window("five_hour", "5-hour", 300, 10),
+                limit_window("seven_day", "Weekly", 7 * 24 * 60, 20),
+            ],
+            complete: true,
+        }))
+    }
+
     /// One skill of its "own", as a real agent finds them in its folders.
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
         Ok(Reply::Now(vec![AgentSkill {
@@ -640,6 +668,28 @@ impl Provider for Echo {
             source: Some("user".into()),
             path: Some("/echo/skills/echo-own/SKILL.md".into()),
         }]))
+    }
+}
+
+/// A usage window that started now, `used` percent spent.
+fn limit_window(id: &str, label: &str, minutes: u64, used: u32) -> LimitWindow {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0);
+    let status = match used {
+        0..80 => LimitStatus::Allowed,
+        80..100 => LimitStatus::Warning,
+        _ => LimitStatus::Exceeded,
+    };
+    LimitWindow {
+        id: id.into(),
+        label: label.into(),
+        scope: None,
+        used_percent: used,
+        resets_at: Some(now + minutes * 60_000),
+        window_minutes: Some(minutes),
+        status: Some(status),
     }
 }
 

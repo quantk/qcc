@@ -18,6 +18,7 @@ pub mod event;
 pub mod ids;
 pub mod interaction;
 pub mod item;
+pub mod limits;
 pub mod project;
 pub mod provider;
 pub mod stats;
@@ -38,6 +39,7 @@ pub use ids::{
 };
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
+pub use limits::{LimitStatus, LimitWindow, ProviderLimits, RateLimits};
 pub use project::{Project, project_of};
 pub use provider::{
     AgentSkill, ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode,

@@ -258,6 +258,50 @@ give a breakdown. For them the app shows an estimate from the usage reports (the
 in a conversation is its beginning: the system prompt, tools and the first message; the rest is
 the conversation), clearly marked "estimate".
 
+## Subscription usage limits
+
+```sh
+qcc provider limits [<provider>] [--refresh] [--json]
+```
+
+```
+claude-code (max)  as of 3m ago
+  5-hour                 42%  resets in 2h 10m
+  Weekly                 44%  resets in 6h 40m
+  Weekly · Fable         26%  resets in 6h 40m
+codex (prolite)  as of 3m ago
+  Weekly                  4%  resets in 1d 12h
+```
+
+Claude and ChatGPT subscriptions limit how much an agent may do in a 5-hour window and in a week
+(and, on some plans, per model). These limits belong to the account an agent signs in with, not to
+a thread: every thread of the provider spends the same allowance. So qcc keeps them per provider —
+the latest report and when it came — in its database, where they survive a restart of the daemon.
+Each window has a stable id, a label (`5-hour`, `Weekly`), a scope when it covers one model only,
+the share spent in percent, when it starts over (`resets_at`, milliseconds since the epoch), its
+length and, when the agent says, a status (`allowed`, `warning`, `exceeded`).
+
+Where the numbers come from (the `rate_limits` capability, visible in `qcc plugin list`):
+
+- **Claude Code.** When a session starts, the bridge sends the `get_usage` control request (what
+  `/usage` shows, read from the claude.ai usage endpoint; the model is not called): the plan, the
+  5-hour and weekly windows and the per-model weekly ones. After that every `rate_limit_event`
+  Claude Code sends when a response moved a limit updates the 5-hour and weekly windows. An account
+  signed in with an API key or through a cloud provider has no such limits, and none are shown.
+- **Codex.** After the handshake the bridge asks `account/rateLimits/read`, and Codex sends
+  `account/rateLimits/updated` after every turn. Its windows are named by their length: on some
+  plans there is only a weekly one. Buckets of single models (`rateLimitsByLimitId`) are listed
+  with their name as the scope.
+- **opencode** does not say, so nothing is shown for it.
+
+Without `--refresh` the command shows what the daemon remembers and asks the agents only when it
+knows nothing yet. `--refresh` (and the method `provider.limits` with `refresh`) asks each
+provider now: it starts the agent for a moment without a prompt (`claude -p` answering `get_usage`,
+`codex app-server` answering `account/rateLimits/read`), which costs nothing of the limits
+themselves. A client that watches threads (`thread.watch`) also gets `limits.updated` with a
+provider's limits whenever they change. A window whose reset time has passed is shown as reset:
+what was spent in it no longer counts.
+
 ## Notes on a message
 
 Along with a message, qcc can tell the agent a few facts the user did not write: what the message

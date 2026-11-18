@@ -9,15 +9,16 @@ use qcc_protocol::methods::{
     AutomationSetEnabled, AutomationUpdate, CommandList, CommandRun, CommentAdd, CommentDelete,
     CommentList, CommentResolve, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
     PluginDisable, PluginEnable, PluginList, ProjectCreate, ProjectDelete, ProjectList,
-    ProjectListResult, ProjectUpdate, ProviderModels, ProviderSkills, SettingsGet, SettingsSet,
-    SkillList, ThreadArchive, ThreadAttachment, ThreadChanges, ThreadCompact, ThreadDeliver,
-    ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
-    ThreadListParams, ThreadListResult, ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent,
-    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn,
-    ThreadStop, ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
-    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
-    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
-    UsageHistoryResult, UsageTools, UsageToolsResult,
+    ProjectListResult, ProjectUpdate, ProviderModels, ProviderRateLimits, ProviderSkills,
+    SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges,
+    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams,
+    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename, ThreadReset,
+    ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject,
+    ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
+    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
+    UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -281,6 +282,10 @@ impl Core {
             },
             ProviderSkills::NAME => match params::<ProviderSkills>(raw) {
                 Ok(p) => self.provider_skills(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ProviderRateLimits::NAME => match params::<ProviderRateLimits>(raw) {
+                Ok(p) => self.provider_limits(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             CommandList::NAME => responder.reply(Ok(self.command_list())),

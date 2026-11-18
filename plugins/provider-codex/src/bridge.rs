@@ -11,7 +11,9 @@
 //! * items have their own ids and lifecycle (`item/started`, deltas,
 //!   `item/completed` with the full item);
 //! * approvals are requests (`item/commandExecution/requestApproval`,
-//!   `item/fileChange/requestApproval`) answered with a `decision`.
+//!   `item/fileChange/requestApproval`) answered with a `decision`;
+//! * the account's usage limits answer `account/rateLimits/read` and come again in
+//!   `account/rateLimits/updated` after each turn (see [`crate::limits`]).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -364,6 +366,12 @@ impl Bridge {
                 output.writes.push(self.peer.notify("initialized", Value::Null));
                 let request = self.thread_request();
                 output.writes.push(request);
+                // The account's limits, before the first turn brings them.
+                output.writes.push(
+                    json!({"jsonrpc": "2.0", "id": crate::limits::READ_ID,
+                           "method": crate::limits::READ, "params": {}})
+                    .to_string(),
+                );
             }
             (Call::Thread, Ok(result)) => {
                 let thread = str_field(&result["thread"], "id").to_owned();
@@ -490,6 +498,11 @@ impl Bridge {
     }
 
     fn notification(&mut self, method: &str, params: &Value, output: &mut Output) {
+        // The account's, whatever the turn is doing.
+        if method == "account/rateLimits/updated" {
+            output.deltas.extend(crate::limits::from_update(params).map(Delta::RateLimits));
+            return;
+        }
         // MCP servers start with the thread, before any turn, and report one by one.
         if method == "mcpServer/startupStatus/updated" {
             let state = match str_field(params, "status") {
@@ -675,6 +688,17 @@ impl LineBridge for Bridge {
     /// One line of the agent's stdout.
     fn on_line(&mut self, line: &str) -> Output {
         let mut output = Output::default();
+        // The answer to our own read of the limits, which the peer does not number.
+        if line.contains(crate::limits::READ_ID)
+            && let Ok(message) = serde_json::from_str::<Value>(line)
+            && message["id"] == crate::limits::READ_ID
+        {
+            // An account without such limits (an API key) answers with an error.
+            if let Some(result) = message.get("result") {
+                output.deltas.push(Delta::RateLimits(crate::limits::from_read(result)));
+            }
+            return output;
+        }
         match self.peer.classify(line) {
             Incoming::Response { tag, result } => self.response(tag, result, &mut output),
             Incoming::Notification { method, params } => {
@@ -727,6 +751,8 @@ mod tests {
         Config { cwd: "/work".into(), ..Config::default() }
     }
 
+    /// The methods written, but for the read of the account's limits that follows
+    /// every handshake (`handshake_then_prompt` checks it).
     fn methods(output: &Output) -> Vec<String> {
         output
             .writes
@@ -735,6 +761,7 @@ mod tests {
                 let value: Value = serde_json::from_str(line).unwrap();
                 value["method"].as_str().unwrap_or("response").to_owned()
             })
+            .filter(|method| method != crate::limits::READ)
             .collect()
     }
 
@@ -798,6 +825,7 @@ mod tests {
 
         let initialized = bridge.on_line(r#"{"id":1,"result":{"userAgent":"x"}}"#);
         assert_eq!(methods(&initialized), ["initialized", "thread/start"]);
+        assert!(initialized.writes[2].contains("\"id\":\"qcc-rate-limits\""));
         assert!(initialized.writes[1].contains("\"model\":\"gpt-x\""));
         assert!(!initialized.writes[1].contains("writable_roots"));
         assert!(!initialized.writes[1].contains("model_reasoning_effort"));

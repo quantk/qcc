@@ -5,6 +5,7 @@
 //! process and the bridge.
 
 pub mod bridge;
+pub mod limits;
 pub mod models;
 mod probe;
 pub mod skills;
@@ -45,6 +46,7 @@ impl Provider for Codex {
                 // Codex reads images from their files (`localImage`); the bytes it
                 // is given go unused.
                 images: true,
+                rate_limits: true,
             },
         }
     }
@@ -120,6 +122,10 @@ impl Provider for Codex {
 
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
         self.probe(skills::requests(), skills::probe())
+    }
+
+    fn rate_limits(&mut self) -> Result<Reply<RateLimits>, String> {
+        self.probe(limits::requests(), limits::probe())
     }
 }
 

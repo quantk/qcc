@@ -70,7 +70,7 @@ fn basic_turn() {
     );
     assert_eq!(
         sent_methods(&processes),
-        ["initialize", "initialized", "thread/start", "turn/start"]
+        ["initialize", "initialized", "thread/start", "account/rateLimits/read", "turn/start"]
     );
     let thread_start = &processes.stdin_messages()[2]["params"];
     assert_eq!(thread_start["cwd"], "/work");
@@ -210,4 +210,59 @@ fn a_message_sent_mid_turn_is_steered_into_it() {
     // Codex only accepts a steer that names the turn it is meant for.
     assert_eq!(steer["params"]["expectedTurnId"], "01a1de9e-fd6e-7770-a949-51ee730040f4");
     assert_eq!(sent.iter().filter(|m| m["method"] == "turn/start").count(), 1);
+}
+
+/// A session reads the account's limits after the handshake, and each turn brings
+/// them again.
+#[test]
+fn usage_limits() {
+    let (mut harness, processes) = replay(&["limits"]);
+    harness.start(Some("Reply with exactly: ok")).unwrap();
+    harness.wait_turns(1);
+    golden(&harness, "limits");
+    assert_eq!(harness.agent_messages(), ["ok"]);
+
+    let reports = harness.rate_limits();
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert!(reports[0].complete);
+    assert!(!reports[1].complete);
+    for report in reports {
+        assert_eq!(report.plan.as_deref(), Some("prolite"));
+        let window = &report.windows[0];
+        assert_eq!(
+            (window.id.as_str(), window.label.as_str(), window.used_percent),
+            ("codex:primary", "Weekly", 4)
+        );
+        assert_eq!(window.window_minutes, Some(10_080));
+        assert_eq!(window.resets_at, Some(1_795_158_968_000));
+    }
+    assert!(sent_methods(&processes).iter().any(|m| m == "account/rateLimits/read"));
+}
+
+/// Asked without a session, a short-lived `codex app-server` reads them.
+#[test]
+fn usage_limits_are_read_without_a_session() {
+    let recording = std::fs::read_to_string(fixture("limits.ndjson")).unwrap();
+    let answer = recording
+        .lines()
+        .map(|entry| {
+            let entry: serde_json::Value = serde_json::from_str(entry).unwrap();
+            entry["line"].as_str().unwrap().to_owned()
+        })
+        .find(|line| line.contains("\"id\":\"qcc-rate-limits\",\"result\""))
+        .unwrap()
+        // The probe numbers its question after the handshake.
+        .replace("\"id\":\"qcc-rate-limits\"", "\"id\":2");
+    let processes = ScriptedProcesses::new([vec![
+        ScriptStep::AwaitMessage("method:account/rateLimits/read".into()),
+        ScriptStep::line(&answer),
+    ]]);
+    let mut harness = Harness::bundled("provider-codex").processes(processes.clone()).build();
+    let outcome = harness.call(qcc_plugin_testkit::ProviderRequest::ReadRateLimits).unwrap();
+    let qcc_plugin_testkit::Outcome::RateLimits(limits) = outcome else {
+        panic!("not limits: {outcome:?}");
+    };
+    assert!(limits.complete);
+    assert_eq!(limits.windows.len(), 1);
+    assert_eq!(processes.spawns()[0].args, ["app-server"]);
 }

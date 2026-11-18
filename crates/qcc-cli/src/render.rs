@@ -3,8 +3,8 @@
 use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
 use qcc_domain::{
     Attachment, ChangeKind, ContextKind, EnvironmentChanges, EnvironmentState, EventPayload,
-    InteractionRequest, Item, ItemShape, ItemStatus, McpState, SettingKind, Thread, ThreadEvent,
-    ThreadId, ThreadState, ThreadStatus, TurnStatus,
+    InteractionRequest, Item, ItemShape, ItemStatus, LimitStatus, McpState, ProviderLimits,
+    SettingKind, Thread, ThreadEvent, ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 
 fn status(status: ThreadStatus) -> &'static str {
@@ -524,4 +524,49 @@ pub fn setting_kind(kind: &SettingKind) -> String {
         SettingKind::Effort { model, .. } => format!("an effort level of the model in {model}"),
         SettingKind::PermissionMode => "ask | accept-edits | auto | full".into(),
     }
+}
+
+/// A span of time the way people say it: `45m`, `2h 10m`, `3d 4h`.
+pub fn span(ms: u64) -> String {
+    let minutes = ms / 60_000;
+    match minutes {
+        0 => "<1m".to_owned(),
+        1..60 => format!("{minutes}m"),
+        60..1440 => format!("{}h {}m", minutes / 60, minutes % 60),
+        _ => format!("{}d {}h", minutes / 1440, minutes % 1440 / 60),
+    }
+}
+
+/// A provider's usage limits: a heading with the plan and how old the news is, then
+/// a line per window.
+pub fn limits(limits: &ProviderLimits, now: u64) -> Vec<String> {
+    let plan = limits.plan.as_deref().map(|plan| format!(" ({plan})")).unwrap_or_default();
+    let age = span(now.saturating_sub(limits.updated_at));
+    let mut lines = vec![format!("{}{plan}  as of {age} ago", limits.provider)];
+    if limits.windows.is_empty() {
+        lines.push("  no usage limits on this account".to_owned());
+    }
+    for window in &limits.windows {
+        let name = match &window.scope {
+            Some(scope) => format!("{} · {scope}", window.label),
+            None => window.label.clone(),
+        };
+        let reset = match window.resets_at {
+            // The window started over since: what was spent is no longer.
+            Some(at) if at <= now => "reset since".to_owned(),
+            Some(at) => format!("resets in {}", span(at - now)),
+            None => String::new(),
+        };
+        let status = match window.status {
+            Some(LimitStatus::Exceeded) => "  limit reached",
+            Some(LimitStatus::Warning) => "  warning",
+            _ => "",
+        };
+        lines.push(
+            format!("  {name:<20} {:>4}%  {reset}{status}", window.used_percent)
+                .trim_end()
+                .to_owned(),
+        );
+    }
+    lines
 }

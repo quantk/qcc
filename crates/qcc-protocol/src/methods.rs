@@ -6,8 +6,8 @@ use qcc_domain::{
     AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, CommandInfo,
     CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo, InteractionId,
     InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode, Project,
-    ProjectId, ProviderId, ProviderInfo, SettingField, Thread, ThreadEvent, ThreadId, ThreadState,
-    ToolBucket, UiViewInfo, UsageBucket,
+    ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField, Thread, ThreadEvent,
+    ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1062,6 +1062,50 @@ pub struct ProviderSkillsResult {
 pub struct ProviderModelsResult {
     /// In the agent's order. Empty when the agent cannot tell.
     pub models: Vec<ModelInfo>,
+}
+
+method!(
+    /// What the providers' accounts have spent of their subscriptions' usage limits,
+    /// as last reported: by an agent during a session, or when asked. `refresh` asks
+    /// the providers that report limits now (it runs their agents, without a
+    /// prompt) and answers once they did.
+    ProviderRateLimits, "provider.limits", ProviderLimitsParams => ProviderLimitsResult
+);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderLimitsParams {
+    /// Only this provider. Absent: every provider that reports limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<ProviderId>,
+    #[serde(default)]
+    pub refresh: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderLimitsResult {
+    /// By provider id; a provider whose limits were never reported is not listed.
+    pub limits: Vec<ProviderLimits>,
+    /// Providers a refresh could not read, with why. What they reported before
+    /// stays in `limits`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<ProviderLimitsError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderLimitsError {
+    pub provider: ProviderId,
+    pub message: String,
+}
+
+/// Notification to connections that watch threads: a provider reported its
+/// account's usage limits. Carries what is known of that provider now.
+pub const LIMITS_UPDATED: &str = "limits.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct LimitsUpdatedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub limits: ProviderLimits,
 }
 
 // ----- settings ---------------------------------------------------------------------

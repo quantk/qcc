@@ -11,7 +11,7 @@ pub fn requests() -> Vec<String> {
 }
 
 pub fn probe() -> ListProbe {
-    ListProbe { what: "models", parse: |data| Outcome::Models(parse(data)) }
+    ListProbe { what: "models", parse: |result| Outcome::Models(parse(&result["data"])) }
 }
 
 fn parse(models: &Value) -> Vec<ModelInfo> {

@@ -10,6 +10,7 @@ use qcc_domain::{
     UiViewInfo, UsageSnapshot, UserInput,
 };
 use qcc_domain::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
+use qcc_domain::{LimitStatus, LimitWindow, RateLimits};
 
 use crate::api::{
     Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
@@ -181,10 +182,35 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
                 tokens_after: c.tokens_after,
             },
         },
+        wit::Delta::RateLimits(limits) => Delta::RateLimits { limits: rate_limits(limits) },
         wit::Delta::ProviderError(message) => Delta::ProviderError { message },
         wit::Delta::ProviderWarning(message) => Delta::ProviderWarning { message },
         wit::Delta::Unhandled(payload) => Delta::Unhandled { payload: json(&payload)? },
     })
+}
+
+fn rate_limits(limits: wit::RateLimits) -> RateLimits {
+    RateLimits {
+        plan: limits.plan,
+        windows: limits
+            .windows
+            .into_iter()
+            .map(|window| LimitWindow {
+                id: window.id,
+                label: window.label,
+                scope: window.scope,
+                used_percent: window.used_percent,
+                resets_at: window.resets_at,
+                window_minutes: window.window_minutes,
+                status: window.status.map(|status| match status {
+                    wit::LimitStatus::Allowed => LimitStatus::Allowed,
+                    wit::LimitStatus::Warning => LimitStatus::Warning,
+                    wit::LimitStatus::Exceeded => LimitStatus::Exceeded,
+                }),
+            })
+            .collect(),
+        complete: limits.complete,
+    }
 }
 
 fn context_usage(context: wit::ContextUsage) -> ContextUsage {
@@ -232,6 +258,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 list_skills: p.capabilities.list_skills,
                 context_usage: p.capabilities.context_usage,
                 images: p.capabilities.images,
+                rate_limits: p.capabilities.rate_limits,
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -406,6 +433,7 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                 })
                 .collect(),
         ),
+        wit::Outcome::RateLimits(limits) => Outcome::RateLimits(rate_limits(limits)),
         wit::Outcome::EnvironmentReady(cwd) => Outcome::EnvironmentReady { cwd },
         wit::Outcome::UiTree(tree) => Outcome::UiTree(tree),
         wit::Outcome::EnvironmentChanges(changes) => {
@@ -563,6 +591,7 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                 }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
                 ProviderRequest::ListSkills => wit::ProviderRequest::ListSkills,
+                ProviderRequest::ReadRateLimits => wit::ProviderRequest::ReadRateLimits,
             },
             provider: provider.0,
         }),

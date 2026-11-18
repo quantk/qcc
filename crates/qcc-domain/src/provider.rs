@@ -85,6 +85,10 @@ pub struct ProviderCapabilities {
     /// it, it is told where they are saved, like any other attached file.
     #[serde(default)]
     pub images: bool,
+    /// The provider reports its account's usage limits (`rate.limits` deltas) and
+    /// can be asked for them without a session.
+    #[serde(default)]
+    pub rate_limits: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

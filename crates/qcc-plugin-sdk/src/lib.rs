@@ -22,6 +22,7 @@
 //!                 compact: false,
 //!                 list_skills: false,
 //!                 context_usage: false,
+//!                 rate_limits: false,
 //!             },
 //!         }
 //!     }
@@ -189,6 +190,13 @@ pub trait Provider {
     /// [`Provider::models`], usually answered later, with [`Outcome::Skills`].
     fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
         Ok(Reply::Now(Vec::new()))
+    }
+
+    /// The account's usage limits as they are now, without a session. Called only if
+    /// the provider declared the `rate_limits` capability. Like [`Provider::models`],
+    /// usually answered later, with [`Outcome::RateLimits`] (a complete report).
+    fn rate_limits(&mut self) -> Result<Reply<types::RateLimits>, String> {
+        Ok(Reply::Now(types::RateLimits { plan: None, windows: Vec::new(), complete: true }))
     }
 }
 
@@ -583,6 +591,9 @@ pub mod __private {
                     }
                     ProviderRequest::ListSkills => {
                         provider.skills().map(|r| reply(r, Outcome::Skills))
+                    }
+                    ProviderRequest::ReadRateLimits => {
+                        provider.rate_limits().map(|r| reply(r, Outcome::RateLimits))
                     }
                     ProviderRequest::SetMcpServers(update) => {
                         provider.set_mcp_servers(update).map(done)

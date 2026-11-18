@@ -195,6 +195,44 @@ interface types {
     tokens-after: option<u64>,
   }
 
+  /// Where a usage window stands, as the agent's service says.
+  enum limit-status {
+    allowed,
+    /// Past a warning threshold, still allowed.
+    warning,
+    /// The limit is reached.
+    exceeded,
+  }
+
+  /// One usage window of the account's subscription: a share of an allowance that
+  /// starts over at a set time.
+  record limit-window {
+    /// Stable within the provider: a later report of the same id replaces this one.
+    id: string,
+    /// How the service names the window, for people (`5-hour`, `Weekly`).
+    label: string,
+    /// What the window is limited to when not everything counts against it (a
+    /// model); absent for the account's main windows.
+    scope: option<string>,
+    /// How much of the allowance is spent, in percent; can go past 100.
+    used-percent: u32,
+    /// When the window starts over, in milliseconds since the Unix epoch.
+    resets-at: option<u64>,
+    window-minutes: option<u64>,
+    status: option<limit-status>,
+  }
+
+  /// How much of its account's usage limits the agent has spent. Limits belong to
+  /// the account, not to a thread; the core keeps the latest per provider.
+  record rate-limits {
+    /// The subscription the account is on (`max`, `plus`), when known.
+    plan: option<string>,
+    windows: list<limit-window>,
+    /// Every window the account has is listed; otherwise only the listed windows
+    /// are updated and the others are kept.
+    complete: bool,
+  }
+
   /// What a part of the context window is: only `used` parts are in the context.
   enum context-kind {
     used,
@@ -266,6 +304,9 @@ interface types {
     context-usage(context-usage),
     /// The agent compacted its context, asked to (`compact`) or on its own.
     context-compacted(compaction),
+    /// The account's usage limits, as the agent reported them during the session.
+    /// Only from a provider that declares `rate-limits`.
+    rate-limits(rate-limits),
     provider-error(string),
     provider-warning(string),
     /// Provider traffic the bridge did not recognise, kept for diagnostics.
@@ -310,6 +351,9 @@ interface types {
     /// bytes (`attachment.data`) and hands them over the way its agent takes them.
     /// Without it, attachments come with their paths only.
     images: bool,
+    /// The provider reports its account's usage limits: `rate-limits` deltas during
+    /// sessions, and an answer to `read-rate-limits` without one.
+    rate-limits: bool,
   }
 
   record provider-info {
@@ -618,6 +662,11 @@ interface types {
     /// The work is a turn: open it (`turn-open`), report `context-compacted`, and
     /// settle it.
     compact(thread-id),
+    /// The account's usage limits as they are now, asked without a session. Sent
+    /// only to a provider that declared `rate-limits`. Answered with `rate-limits`
+    /// (a complete report; no windows when the account has no such limits), usually
+    /// `deferred`.
+    read-rate-limits,
   }
 
   record provider-call {
@@ -824,6 +873,7 @@ interface types {
     session-started(session-started),
     models(list<model-info>),
     skills(list<agent-skill>),
+    rate-limits(rate-limits),
     /// The working directory prepared for the thread.
     environment-ready(string),
     environment-changes(environment-changes),

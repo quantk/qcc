@@ -68,6 +68,7 @@ impl Provider for AcpProvider {
                 context_usage: false,
                 // As images when the agent says it takes them, by path otherwise.
                 images: true,
+                rate_limits: false,
             },
         }
     }

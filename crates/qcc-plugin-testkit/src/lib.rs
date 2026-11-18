@@ -17,13 +17,14 @@ use std::time::{Duration, Instant};
 
 use qcc_domain::{
     Delta, EventPayload, InteractionId, InteractionResolution, Item, ItemShape, PermissionMode,
-    ProviderId, Thread, ThreadEvent, ThreadId, TurnStatus, UserInput,
+    ProviderId, RateLimits, Thread, ThreadEvent, ThreadId, TurnStatus, UserInput,
 };
 use qcc_plugin_host::services::{KvStore, ProcessBackend};
 use qcc_plugin_host::{
-    Grant, Manifest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
-    ProviderRequest, Services, SessionStart,
+    Grant, Manifest, PluginError, PluginHandle, PluginHost, PluginRequest, Services, SessionStart,
 };
+/// What a test asks of a provider beyond a session's own requests, and its answers.
+pub use qcc_plugin_host::{Outcome, ProviderRequest};
 use qcc_runtime::{GrammarViolation, NewThread, SequentialMint, ThreadEngine, Timeline};
 
 pub use scripted::{ScriptStep, ScriptedProcesses, message_key, script_from_recording};
@@ -118,6 +119,7 @@ impl HarnessBuilder {
             violations: Vec::new(),
             crash,
             foreign_deltas: 0,
+            rate_limits: Vec::new(),
             model: None,
             effort: None,
             permission_mode: None,
@@ -138,6 +140,9 @@ pub struct Harness {
     violations: Vec<GrammarViolation>,
     crash: Arc<Mutex<Option<String>>>,
     foreign_deltas: usize,
+    /// Reports of the account's usage limits, which the daemon keeps per provider
+    /// and never puts in the timeline.
+    rate_limits: Vec<RateLimits>,
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<PermissionMode>,
@@ -395,6 +400,11 @@ impl Harness {
             .collect()
     }
 
+    /// The usage-limit reports the bridge made, in order.
+    pub fn rate_limits(&self) -> &[RateLimits] {
+        &self.rate_limits
+    }
+
     pub fn count(&self, matches: impl Fn(&EventPayload) -> bool) -> usize {
         self.events.iter().filter(|event| matches(&event.payload)).count()
     }
@@ -404,6 +414,12 @@ impl Harness {
             self.foreign_deltas += deltas.len();
             return;
         }
+        let (limits, deltas): (Vec<Delta>, Vec<Delta>) =
+            deltas.into_iter().partition(|delta| matches!(delta, Delta::RateLimits { .. }));
+        self.rate_limits.extend(limits.into_iter().filter_map(|delta| match delta {
+            Delta::RateLimits { limits } => Some(limits),
+            _ => None,
+        }));
         let events = self.engine.apply_deltas(deltas, 0);
         self.events.extend(events);
         self.violations.extend(self.engine.take_violations());

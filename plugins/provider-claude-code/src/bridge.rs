@@ -17,7 +17,9 @@
 //!   input as `answers`, keyed by the text of each question; allowing it without
 //!   them tells the agent nobody answered;
 //! * a `control_request` of subtype `get_context_usage` is answered with what
-//!   `/context` shows, at any time and without a request to the model.
+//!   `/context` shows, at any time and without a request to the model;
+//! * the account's usage limits come in `rate_limit_event`s and in the answer to
+//!   `get_usage` (see [`crate::limits`]).
 
 use std::collections::{HashMap, HashSet};
 
@@ -34,6 +36,8 @@ const MCP_QUERY: &str = "qcc-mcp-";
 const MCP_SET: &str = "qcc-set-mcp-";
 /// The prefix of the ids of our context breakdown requests.
 const CONTEXT_QUERY: &str = "qcc-context-";
+/// Request ids of our `get_usage` requests: the account's usage limits.
+const USAGE_QUERY: &str = "qcc-usage-";
 /// Entries kept per part of the context: the largest, which are the ones worth
 /// knowing about.
 const CONTEXT_ENTRIES: usize = 20;
@@ -146,6 +150,7 @@ pub struct Bridge {
     mcp_polls: u32,
     /// Context breakdown requests sent, which names them.
     context_queries: u32,
+    usage_queries: u32,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -275,6 +280,7 @@ impl Bridge {
             mcp_queries: 0,
             mcp_polls: 0,
             context_queries: 0,
+            usage_queries: 0,
         }
     }
 
@@ -574,7 +580,23 @@ impl Bridge {
         .to_string()
     }
 
+    /// Ask how much of the account's usage limits is spent. Answered from the
+    /// usage endpoint, without a turn; `rate_limit_event`s keep it current after.
+    pub fn query_limits(&mut self) -> Output {
+        self.usage_queries += 1;
+        let request = crate::limits::request(&format!("{USAGE_QUERY}{}", self.usage_queries));
+        Output { writes: vec![request], ..Output::default() }
+    }
+
     fn control_response(&mut self, response: &Value, output: &mut Output) {
+        if str_field(response, "request_id").starts_with(USAGE_QUERY) {
+            // An agent too old to tell answers with an error, which is ignored.
+            if str_field(response, "subtype") == "success" {
+                let limits = crate::limits::from_usage(&response["response"]);
+                output.deltas.push(Delta::RateLimits(limits));
+            }
+            return;
+        }
         if str_field(response, "request_id").starts_with(CONTEXT_QUERY) {
             // An agent too old to tell answers with an error, which is ignored.
             if str_field(response, "subtype") == "success"
@@ -788,6 +810,13 @@ impl LineBridge for Bridge {
             self.control_response(&message["response"], &mut output);
             return output;
         }
+        // The account's limits, whatever the turn is doing.
+        if kind == "rate_limit_event" {
+            if let Some(limits) = crate::limits::from_event(&message["rate_limit_info"]) {
+                output.deltas.push(Delta::RateLimits(limits));
+            }
+            return output;
+        }
         if self.draining > 0 {
             match kind {
                 "result" => self.draining -= 1,
@@ -831,7 +860,7 @@ impl LineBridge for Bridge {
                 output.writes.push(self.context_request());
             }
             // Bookkeeping the timeline has no use for.
-            "rate_limit_event" | "keep_alive" => {}
+            "keep_alive" => {}
             _ => output.deltas.push(Delta::Unhandled(message.to_string())),
         }
         output

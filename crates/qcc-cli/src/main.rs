@@ -23,8 +23,8 @@ use qcc_client::Client;
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Empty, InteractionResolve,
     InteractionResolveParams, PluginDisable, PluginDisableParams, PluginEnable, PluginEnableParams,
-    PluginList, ProviderModels, ProviderModelsParams, ProviderSkills, ProviderSkillsParams,
-    SettingsGet, SettingsSet, SettingsSetParams,
+    PluginList, ProviderLimitsParams, ProviderModels, ProviderModelsParams, ProviderRateLimits,
+    ProviderSkills, ProviderSkillsParams, SettingsGet, SettingsSet, SettingsSetParams,
 };
 use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
@@ -174,6 +174,17 @@ enum ProviderCommand {
     Skills {
         provider: String,
         /// Ask the agent again instead of using what the daemon remembers.
+        #[arg(long)]
+        refresh: bool,
+    },
+    /// How much of the subscription's usage limits each provider's account has
+    /// spent (the 5-hour and weekly windows) and when they start over, as the agents
+    /// last reported. Asks the agents when nothing is known yet.
+    Limits {
+        /// Only this provider.
+        provider: Option<String>,
+        /// Ask the agents now (without a prompt) instead of using what the daemon
+        /// remembers.
         #[arg(long)]
         refresh: bool,
     },
@@ -382,6 +393,35 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     out(format!("{}{source}", skill.name));
                     let about = skill.path.as_deref().unwrap_or(&skill.description);
                     out(format!("    {about}"));
+                }
+            }
+        }
+
+        Command::Provider(ProviderCommand::Limits { provider, refresh }) => {
+            let provider = provider.map(ProviderId::new);
+            let params = ProviderLimitsParams { provider: provider.clone(), refresh };
+            let mut result = client.call::<ProviderRateLimits>(params).await?;
+            if !refresh && result.limits.is_empty() {
+                let params = ProviderLimitsParams { provider, refresh: true };
+                result = client.call::<ProviderRateLimits>(params).await?;
+            }
+            if json {
+                print_json(&result)?;
+            } else {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis() as u64)
+                    .unwrap_or(0);
+                for limits in &result.limits {
+                    for line in render::limits(limits, now) {
+                        out(line);
+                    }
+                }
+                for error in &result.errors {
+                    eprintln!("{}: {}", error.provider, error.message);
+                }
+                if result.limits.is_empty() && result.errors.is_empty() {
+                    out("no provider reports usage limits");
                 }
             }
         }

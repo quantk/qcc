@@ -413,15 +413,24 @@ impl Core {
     }
 
     pub(super) fn deltas(&mut self, plugin: &str, id: ThreadId, deltas: Vec<Delta>) {
-        let owner = self
-            .supervisor
-            .thread(&id)
-            .and_then(|thread| self.host.provider(&thread.provider))
-            .map(|(owner, _)| owner.id().to_owned());
+        let Some(provider) = self.supervisor.thread(&id).map(|thread| thread.provider.clone())
+        else {
+            return;
+        };
+        let owner = self.host.provider(&provider).map(|(owner, _)| owner.id().to_owned());
         if owner.as_deref() != Some(plugin) {
             // A plugin may only speak for threads of its own providers.
             tracing::warn!(plugin, thread = %id, "dropped deltas for a thread the plugin does not own");
             return;
+        }
+        // Usage limits are the account's, not the thread's: they go to the provider
+        // at once, whatever state the session is in.
+        let (limits, deltas): (Vec<Delta>, Vec<Delta>) =
+            deltas.into_iter().partition(|delta| matches!(delta, Delta::RateLimits { .. }));
+        for delta in limits {
+            if let Delta::RateLimits { limits } = delta {
+                self.limits_reported(provider.clone(), limits);
+            }
         }
         match self.sessions.get_mut(&id) {
             Some(session) if session.starting => session.buffered.extend(deltas),

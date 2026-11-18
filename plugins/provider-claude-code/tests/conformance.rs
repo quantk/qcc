@@ -288,3 +288,56 @@ fn each_permission_mode_maps_to_a_claude_flag() {
     // No mode: the user's own Claude Code settings decide.
     assert_eq!(flag_for(None), None);
 }
+
+fn limit_rows(limits: &qcc_domain::RateLimits) -> Vec<(&str, Option<&str>, u32)> {
+    limits.windows.iter().map(|w| (w.id.as_str(), w.scope.as_deref(), w.used_percent)).collect()
+}
+
+/// A session asks for the account's limits before its first turn, and every
+/// `rate_limit_event` brings the windows it tells of.
+#[test]
+fn usage_limits() {
+    let (mut harness, processes) = replay(&["limits"]);
+    harness.start(Some("Reply with the single word: ok")).unwrap();
+    harness.wait_turns(1);
+    golden(&harness, "limits");
+
+    let reports = harness.rate_limits();
+    assert_eq!(reports.len(), 2, "{reports:?}");
+    assert!(reports[0].complete);
+    assert_eq!(reports[0].plan.as_deref(), Some("max"));
+    assert_eq!(
+        limit_rows(&reports[0]),
+        [("five_hour", None, 42), ("seven_day", None, 44), ("seven_day:fable", Some("Fable"), 26)]
+    );
+    assert!(!reports[1].complete);
+    assert_eq!(limit_rows(&reports[1]), [("five_hour", None, 42), ("seven_day", None, 43)]);
+    assert_eq!(reports[1].windows[0].resets_at, Some(1_795_036_800_000));
+    let asked = processes.stdin_messages();
+    assert!(asked.iter().any(|m| m["request"]["subtype"] == "get_usage"));
+}
+
+/// Asked without a session, a short-lived `claude` answers `get_usage`.
+#[test]
+fn usage_limits_are_read_without_a_session() {
+    let answer = recording("limits")
+        .lines()
+        .map(|entry| {
+            serde_json::from_str::<Value>(entry).unwrap()["line"].as_str().unwrap().to_owned()
+        })
+        .find(|line| line.contains("rate_limits_available"))
+        .unwrap()
+        .replace("qcc-usage-1", "qcc-limits");
+    let processes = ScriptedProcesses::new([vec![
+        ScriptStep::AwaitMessage("type:control_request:get_usage".into()),
+        ScriptStep::line(&answer),
+    ]]);
+    let mut harness = Harness::bundled("provider-claude-code").processes(processes.clone()).build();
+    let outcome = harness.call(qcc_plugin_testkit::ProviderRequest::ReadRateLimits).unwrap();
+    let qcc_plugin_testkit::Outcome::RateLimits(limits) = outcome else {
+        panic!("not limits: {outcome:?}");
+    };
+    assert!(limits.complete);
+    assert_eq!(limit_rows(&limits)[0], ("five_hour", None, 42));
+    assert_eq!(processes.spawns()[0].program, "claude");
+}

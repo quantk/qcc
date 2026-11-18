@@ -4,8 +4,8 @@
 use qcc_domain::{
     AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo,
     InteractionResolution, McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
-    SettingField, SkillInfo, SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry, UiViewInfo,
-    UserInput,
+    RateLimits, SettingField, SkillInfo, SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry,
+    UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +71,8 @@ pub enum ProviderRequest {
     },
     ListModels,
     ListSkills,
+    /// The account's usage limits now. Only for providers that declared `rate_limits`.
+    ReadRateLimits,
     /// Only for providers that declared `compact`, while no turn runs.
     Compact {
         thread: ThreadId,
@@ -215,6 +217,7 @@ pub enum Outcome {
     },
     Models(Vec<ModelInfo>),
     Skills(Vec<AgentSkill>),
+    RateLimits(RateLimits),
     EnvironmentReady {
         cwd: String,
     },

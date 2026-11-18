@@ -54,6 +54,7 @@ fn declares_its_provider_and_its_ui() {
             list_skills: true,
             context_usage: true,
             images: true,
+            rate_limits: true,
         }
     );
     assert_eq!(harness.handle().id(), "provider-echo");

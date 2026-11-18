@@ -2778,3 +2778,69 @@ fn a_run_missed_while_the_daemon_was_down_is_made_up_for_at_most_once() {
     assert_eq!(noted[0]["outcome"], "skipped");
     assert!(noted[0]["thread_id"].is_null());
 }
+
+#[test]
+fn usage_limits_are_kept_per_provider_and_survive_a_restart() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+
+    // Nothing known yet: the CLI asks the agent, without a session. (Only echo's:
+    // asking every provider would run the real agents.)
+    let read = daemon.qcc(&["provider", "limits", "echo", "--json"]).json();
+    let echo = &read["limits"][0];
+    assert_eq!(echo["provider"], "echo", "{read}");
+    assert_eq!(echo["plan"], "echo");
+    assert_eq!(echo["windows"][0]["id"], "five_hour");
+    assert_eq!(echo["windows"][0]["used_percent"], 10);
+    assert_eq!(echo["windows"][1]["label"], "Weekly");
+    assert!(
+        echo["windows"][0]["resets_at"].as_u64().unwrap() > echo["updated_at"].as_u64().unwrap()
+    );
+    // A provider that does not report limits cannot be asked.
+    let refused = daemon.qcc(&["provider", "limits", "opencode"]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("does not report usage limits"), "{}", refused.stderr);
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (client, mut notifications) = Client::connect_raw(&daemon.socket).await.unwrap();
+        client.call_raw("thread.watch", json!({ "subscription": 3 })).await.unwrap();
+
+        // A session reports the window its turn spent; the others stay as they were,
+        // and the thread's timeline never hears of it.
+        let id = daemon.spawn("/limits 85");
+        let limits = loop {
+            let notification = tokio::time::timeout(Duration::from_secs(30), notifications.recv())
+                .await
+                .expect("the watcher is told about the limits")
+                .expect("the connection stays open");
+            if notification.method == "limits.updated" {
+                assert_eq!(notification.params["subscription"], 3);
+                break notification.params["limits"].clone();
+            }
+        };
+        assert_eq!(limits["provider"], "echo");
+        assert_eq!(limits["windows"][0]["used_percent"], 85);
+        assert_eq!(limits["windows"][0]["status"], "warning");
+        assert_eq!(limits["windows"][1]["used_percent"], 20);
+        daemon.wait_for(&id, "turn/completed");
+        let events = daemon.events(&id);
+        assert!(!events.iter().any(|event| event.to_string().contains("used_percent")));
+    });
+
+    let shown = daemon.qcc(&["provider", "limits", "echo"]).stdout;
+    assert!(shown.starts_with("echo (echo)  as of"), "{shown}");
+    assert!(
+        shown.contains("5-hour") && shown.contains("85%  resets in 4h 59m  warning"),
+        "{shown}"
+    );
+
+    daemon.stop();
+    let daemon = Daemon::start(dir.path());
+    // Known now, so nothing is asked.
+    let kept = daemon.qcc(&["provider", "limits", "--json"]).json();
+    assert_eq!(kept["limits"][0]["windows"][0]["used_percent"], 85, "{kept}");
+}

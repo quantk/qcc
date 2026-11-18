@@ -132,6 +132,12 @@ pub enum Delta {
     #[serde(rename = "context.compacted")]
     ContextCompacted { compaction: Compaction },
 
+    /// How much of its account's usage limits the agent has spent. Limits belong to
+    /// the provider's account, not to the thread: the core keeps them per provider
+    /// and they never reach the timeline.
+    #[serde(rename = "rate.limits")]
+    RateLimits { limits: crate::limits::RateLimits },
+
     #[serde(rename = "provider.error")]
     ProviderError { message: String },
 

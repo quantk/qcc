@@ -548,6 +548,47 @@ export type ItemStatus = "pending" | "completed" | "failed" |
 /**  Settled by the core because its turn or session went away. */
 "interrupted";
 
+/**  Where a window stands, as the agent's service says. */
+export type LimitStatus = 
+/**  Within the limit. */
+"allowed" | 
+/**  Past a warning threshold, still allowed. */
+"warning" | 
+/**
+ *  The limit is reached: requests that count against it are refused (or paid for
+ *  as extra usage, where the account allows it).
+ */
+"exceeded";
+
+/**  One usage window: a share of an allowance that starts over at a set time. */
+export type LimitWindow = {
+	/**
+	 *  Stable within the provider, so a later report of the same window replaces
+	 *  this one (`five_hour`, `seven_day`, `seven_day:fable`, `codex:primary`).
+	 */
+	id: string,
+	/**  How the agent's service names the window, for people (`5-hour`, `Weekly`). */
+	label: string,
+	/**
+	 *  What the window is limited to when not everything counts against it: a model
+	 *  (`Opus`), a product line. Absent for the account's main windows.
+	 */
+	scope?: string | null,
+	/**  How much of the allowance is spent, in percent. Can go past 100. */
+	used_percent: number,
+	/**  When the window starts over, in milliseconds since the Unix epoch. */
+	resets_at?: number | null,
+	/**  How long the window is, when the service says. */
+	window_minutes?: number | null,
+	status?: LimitStatus | null,
+};
+
+export type LimitsUpdatedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	limits: ProviderLimits,
+};
+
 /**
  *  A remark on one line of a thread's changes. It stays where it was left while
  *  the code moves on, so it carries the line's text to be found by.
@@ -821,6 +862,11 @@ export type ProviderCapabilities = {
 	 *  it, it is told where they are saved, like any other attached file.
 	 */
 	images?: boolean,
+	/**
+	 *  The provider reports its account's usage limits (`rate.limits` deltas) and
+	 *  can be asked for them without a session.
+	 */
+	rate_limits?: boolean,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -830,6 +876,37 @@ export type ProviderInfo = {
 	id: ProviderId,
 	name: string,
 	capabilities: ProviderCapabilities,
+};
+
+/**  The latest known limits of one provider's account. */
+export type ProviderLimits = {
+	provider: ProviderId,
+	plan?: string | null,
+	/**  In the order the provider reported them. */
+	windows: LimitWindow[],
+	/**  When the provider last reported, in milliseconds since the Unix epoch. */
+	updated_at: number,
+};
+
+export type ProviderLimitsError = {
+	provider: ProviderId,
+	message: string,
+};
+
+export type ProviderLimitsParams = {
+	/**  Only this provider. Absent: every provider that reports limits. */
+	provider?: ProviderId | null,
+	refresh?: boolean,
+};
+
+export type ProviderLimitsResult = {
+	/**  By provider id; a provider whose limits were never reported is not listed. */
+	limits: ProviderLimits[],
+	/**
+	 *  Providers a refresh could not read, with why. What they reported before
+	 *  stays in `limits`.
+	 */
+	errors?: ProviderLimitsError[],
 };
 
 export type ProviderModelsParams = {
@@ -1652,6 +1729,7 @@ export type Methods = {
 	"plugin.disable": { params: PluginDisableParams; result: PluginResult },
 	"provider.models": { params: ProviderModelsParams; result: ProviderModelsResult },
 	"provider.skills": { params: ProviderSkillsParams; result: ProviderSkillsResult },
+	"provider.limits": { params: ProviderLimitsParams; result: ProviderLimitsResult },
 	"settings.get": { params: Empty; result: SettingsResult },
 	"settings.set": { params: SettingsSetParams; result: SettingsResult },
 	"command.list": { params: Empty; result: CommandListResult },
@@ -1671,4 +1749,5 @@ export type Notifications = {
 	"automations.updated": AutomationsUpdatedNotification,
 	"comments.updated": CommentsUpdatedNotification,
 	"plugins.updated": PluginsUpdatedNotification,
+	"limits.updated": LimitsUpdatedNotification,
 };

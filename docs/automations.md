@@ -16,7 +16,10 @@ qcc automation disable "Morning summary"   # and `enable`
 qcc automation remove "Morning summary"    # its threads stay
 ```
 
-An automation is named by its id (`aut_…`) or its exact name. Every command takes `--json`. In
+Without `--provider` the automation uses the agent of the session the command runs in (an agent
+asked to "do this every hour" makes the automation with its own agent), else the default provider
+of `qcc settings`; without `--cwd`, the current directory. An automation is named by its id
+(`aut_…`) or its exact name. Every command takes `--json`. In
 the desktop app the same lives on the **Automations** screen ([desktop.md](desktop.md)).
 
 ## Schedules
@@ -55,6 +58,10 @@ A thread an automation started is named after it and carries its id: `qcc thread
 "started by automation aut_…", the JSON has `"automation": "aut_…"`, and the desktop app links the
 thread to the automation. The thread is the user's own like any other: it belongs to the project
 of its directory, shows in the overview, and can be answered, continued, archived or delivered.
+
+An agent may make automations through the CLI, as the `qcc-orchestration` skill tells it to when
+the user asks for regular work. Like a thread started with `thread spawn --root`, a run is a thread
+of the user's own: it is not held to the permission mode of the agent that made the automation.
 
 Nobody watches a scheduled run. In `ask` mode an agent that wants approval waits in the thread
 until you answer; pick the mode the job needs (`accept-edits` for a job that edits files in a

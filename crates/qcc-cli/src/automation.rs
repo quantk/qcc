@@ -10,10 +10,12 @@ use qcc_client::protocol::methods::{
     AutomationCreate, AutomationDelete, AutomationEntry, AutomationIdParams, AutomationList,
     AutomationResult, AutomationRunNow, AutomationRuns, AutomationRunsParams, AutomationSetEnabled,
     AutomationSetEnabledParams, AutomationUpdate, AutomationUpdateParams, Empty, SettingsGet,
+    ThreadGet, ThreadGetParams,
 };
+use qcc_client::protocol::paths;
 use qcc_domain::{
     AutomationOutcome, AutomationOverlap, AutomationRun, AutomationSpec, AutomationThreadMode,
-    AutomationTrigger, PermissionMode, ProviderId,
+    AutomationTrigger, PermissionMode, ProviderId, ThreadId,
 };
 
 use crate::{absolute, out, print_json};
@@ -64,7 +66,8 @@ pub(crate) struct Options {
     /// The message each run sends the agent.
     #[arg(long)]
     prompt: Option<String>,
-    /// Provider id [default: the default provider of `qcc settings`].
+    /// Provider id [default: the agent of the session it runs in ($QCC_THREAD_ID),
+    /// else the default provider of `qcc settings`].
     #[arg(long)]
     provider: Option<String>,
     /// Directory the agent works in [default: the current directory].
@@ -201,14 +204,7 @@ pub(crate) async fn run(
             };
             let provider = match &options.provider {
                 Some(provider) => ProviderId::new(provider),
-                None => match client.call::<SettingsGet>(Empty {}).await?.settings.default_provider
-                {
-                    Some(provider) => provider,
-                    None => bail!(
-                        "name a provider with --provider (see `qcc plugin list`), or set one \
-                         with `qcc settings default-provider`"
-                    ),
-                },
+                None => default_provider(client).await?,
             };
             let enabled = !options.disabled;
             let spec = AutomationSpec {
@@ -298,6 +294,22 @@ pub(crate) async fn run(
         out(summary(&changed));
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// The agent of the session the command runs in, else the user's default agent.
+async fn default_provider(client: &Client) -> anyhow::Result<ProviderId> {
+    let caller = std::env::var(paths::THREAD_ID_ENV).ok().filter(|id| !id.is_empty());
+    if let Some(thread_id) = caller {
+        let params = ThreadGetParams { thread_id: ThreadId::new(thread_id) };
+        return Ok(client.call::<ThreadGet>(params).await?.thread.provider);
+    }
+    match client.call::<SettingsGet>(Empty {}).await?.settings.default_provider {
+        Some(provider) => Ok(provider),
+        None => bail!(
+            "name a provider with --provider (see `qcc plugin list`), or set one with \
+             `qcc settings default-provider`"
+        ),
+    }
 }
 
 async fn set_enabled(

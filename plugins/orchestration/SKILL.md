@@ -36,6 +36,25 @@ All of them take `--json` for output meant for programs.
   environment changed, and on which branch.
 - `qcc thread stop <id>` interrupts a child's turn.
 
+## Work on a schedule
+
+When the user asks for something to happen regularly ("every hour, check …",
+"every weekday at nine, summarize …"), make an automation instead of waiting or
+looping yourself: qcc then starts a thread with the prompt on that schedule, even
+after your session ends.
+
+- `qcc automation add "<name>" --schedule "<when>" --prompt "<task>"` in the
+  directory to work in. `<when>` is `every 30m`, `every 1h`, a cron expression in
+  local time (`0 9 * * mon-fri`) or `@daily`. Takes `--provider`, `--model`,
+  `--permission-mode`, `--env git-worktree` like `thread spawn`, and
+  `--threads continue` to send every run to one thread instead of a new one.
+- `qcc automation list`, `qcc automation show <name>` (its runs and their
+  threads), `qcc automation run <name>` (once, now), `enable`, `disable`,
+  `remove`.
+
+Write the prompt so it stands on its own, as for a child, and tell the user the
+automation's name and schedule.
+
 ## How to delegate well
 
 1. The child does not see your conversation. Write each prompt so it stands on

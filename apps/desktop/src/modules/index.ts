@@ -2,6 +2,7 @@
 // module that registers its contributions and list it here.
 
 import type { UiModule } from "../ui/registry";
+import { automationsModule } from "./automations";
 import { changesModule } from "./changes";
 import { contextModule } from "./context";
 import { insightsModule } from "./insights";
@@ -35,6 +36,7 @@ export const builtinModules: UiModule[] = [
   pluginUiModule,
   pluginCommandsModule,
   mcpModule,
+  automationsModule,
   skillsModule,
   contextModule,
   insightsModule,

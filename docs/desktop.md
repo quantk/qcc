@@ -31,7 +31,7 @@ The app is a control panel: you see all agents at once and can answer each of th
 
 Screens open with icon buttons in the sidebar (the name and the shortcut are in the tooltip).
 Above the threads are the places where you watch agents (overview, Live, Metrics, plugin screens);
-at the bottom is configuration (MCP servers, Skills, Settings) and the archived threads switch.
+at the bottom is configuration (Automations, MCP servers, Skills, Settings) and the archived threads switch.
 `Alt+1` … `Alt+9` open screens in the order of the buttons, `Ctrl+,` opens the settings. The Live
 button shows how many agents are working or waiting for you; it is blue if someone is waiting.
 
@@ -169,6 +169,28 @@ first; confirming cuts their turns short. See
 [Turning plugins on and off](plugins.md#turning-plugins-on-and-off). Interface scale: `Ctrl+Plus` / `Ctrl+Minus`, as in a
 browser, or the buttons on the "Settings" screen; it can be reset to 100% there or from the
 palette.
+
+### Automations
+
+The "Automations" screen (calendar-clock icon) and the palette ("Automations", "New automation"):
+prompts qcc sends an agent on a schedule (see [automations.md](automations.md)). Each card shows the
+name, the schedule (in words on hover for the simple shapes), the prompt, the agent, model and
+directory, when it runs next and how its latest run went. Buttons run it now (a run that starts a
+thread opens it; a skipped one says why), edit it and delete it (after a confirmation); the switch
+turns its schedule on and off — an automation that is off still runs when you run it by hand.
+"Recent runs" unfolds the last 20 runs: when, why (scheduled, missed, by hand), what came of it
+with the reason, and a link to the thread with its current state.
+
+The dialog for a new or changed automation takes a name, a schedule (an interval like `every 1h`, a
+cron expression like `0 9 * * 1-5`, or a shorthand like `@daily`; the buttons fill in examples), the
+prompt, the agent, the directory (typed, picked from a project's folders or browsed), a separate git
+worktree for each run, model, effort and permission mode, whether each run starts a new thread or
+continues one, what to do while the previous run is still at work (skip, or run alongside / queue),
+whether to make up for a run missed while qcc was down, and whether it is on. What the daemon
+refuses (a schedule it cannot read, a directory that does not exist) is shown in the dialog.
+
+A thread an automation started has a button with the automation's name in its header; it opens the
+Automations screen with that automation's runs unfolded.
 
 ### MCP servers
 

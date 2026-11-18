@@ -6,6 +6,10 @@ import { useSyncExternalStore } from "react";
 import { type Api, ApiError, type DaemonState, type Notification, codes } from "../api/api";
 import type {
   AgentSkill,
+  AutomationEntry,
+  AutomationId,
+  AutomationRun,
+  AutomationSpec,
   CommandRunParams,
   CommandRunResult,
   CommentAddParams,
@@ -32,6 +36,7 @@ import type {
   ThreadSpawnParams,
   ThreadUnqueueResult,
 } from "../api/protocol.gen";
+import { withAutomation } from "./automations";
 import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
@@ -112,6 +117,8 @@ export type AppState = {
   models: Readonly<Record<ProviderId, ModelList>>;
   /** Oldest first. */
   projects: readonly Project[];
+  /** Oldest first, each with its next and latest run. */
+  automations: readonly AutomationEntry[];
   /** The daemon's settings and where its programs are. Null until read. */
   settings: SettingsResult | null;
   /** How far the user has seen each thread; see `reads.ts`. */
@@ -164,6 +171,7 @@ export class AppStore {
     notice: null,
     models: {},
     projects: [],
+    automations: [],
     settings: null,
     seen: readSeen() ?? {},
     history: startHistory,
@@ -242,16 +250,17 @@ export class AppStore {
     const watch = this.nextSubscription++;
     this.watch = watch;
     try {
-      const [list, plugins, projects, settings, skills] = await Promise.all([
+      const [list, plugins, projects, settings, skills, automations] = await Promise.all([
         this.api.call("thread.watch", { subscription: watch }),
         this.api.call("plugin.list", {}),
         this.api.call("project.list", {}),
         this.api.call("settings.get", {}),
         this.api.call("skill.list", {}),
+        this.api.call("automation.list", {}),
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
-      this.set({ projects: projects.projects, settings, skills: skills.skills });
+      this.set({ projects: projects.projects, settings, skills: skills.skills, automations: automations.automations });
       this.setPlugins(plugins.plugins);
       await Promise.all([...this.followed.keys()].map((threadId) => this.followLive(threadId)));
     } catch (error) {
@@ -266,6 +275,8 @@ export class AppStore {
       if (notification.params.subscription === this.watch) this.pluginsChanged(notification.params.plugins);
     } else if (notification.method === "projects.updated") {
       if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
+    } else if (notification.method === "automations.updated") {
+      if (notification.params.subscription === this.watch) this.set({ automations: notification.params.automations });
     } else if (notification.method === "comments.updated") {
       const { subscription, thread_id, comments } = notification.params;
       if (subscription === this.watch) this.setComments(thread_id, comments);
@@ -779,6 +790,50 @@ export class AppStore {
   async deleteProject(id: ProjectId) {
     const done = await this.attempt(() => this.api.call("project.delete", { id }));
     if (done) this.set({ projects: this.state.projects.filter((project) => project.id !== id) });
+  }
+
+  /**
+   * Make an automation (no `id`) or replace what it is. The daemon's refusal (a
+   * schedule it cannot read, a directory that is not there) comes back for the dialog.
+   */
+  async saveAutomation(id: AutomationId | null, spec: AutomationSpec): Promise<AutomationEntry | { error: string }> {
+    try {
+      const { automation } = id
+        ? await this.api.call("automation.update", { id, spec })
+        : await this.api.call("automation.create", spec);
+      this.putAutomation(automation);
+      return automation;
+    } catch (error) {
+      return { error: errorMessage(error) };
+    }
+  }
+
+  async setAutomationEnabled(id: AutomationId, enabled: boolean) {
+    const result = await this.attempt(() => this.api.call("automation.set_enabled", { id, enabled }));
+    if (result) this.putAutomation(result.automation);
+  }
+
+  async deleteAutomation(id: AutomationId) {
+    const done = await this.attempt(() => this.api.call("automation.delete", { id }));
+    if (done) this.set({ automations: this.state.automations.filter((entry) => entry.automation.id !== id) });
+  }
+
+  /** Run an automation now. Resolves to the run, which may have been skipped. */
+  async runAutomation(id: AutomationId): Promise<AutomationRun | null> {
+    const result = await this.attempt(() => this.api.call("automation.run", { id }));
+    if (!result) return null;
+    const known = this.state.automations.find((entry) => entry.automation.id === id);
+    if (known) this.putAutomation({ ...known, last_run: result.run });
+    return result.run;
+  }
+
+  /** An automation's latest runs, newest first; null when they cannot be read (the error is shown). */
+  automationRuns(id: AutomationId, limit?: number): Promise<AutomationRun[] | null> {
+    return this.attempt(async () => (await this.api.call("automation.runs", { id, limit: limit ?? null })).runs);
+  }
+
+  private putAutomation(entry: AutomationEntry) {
+    this.set({ automations: withAutomation(this.state.automations, entry) });
   }
 
   /** Turn a skill on or off for this thread alone. Resolves to whether the daemon took it. */

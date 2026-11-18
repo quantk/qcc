@@ -60,6 +60,11 @@ export type ThreadGroup =
   | { kind: "project"; key: string; project: Project; threads: Thread[]; latest: number }
   | { kind: "folder"; key: string; folder: string; threads: Thread[]; latest: number };
 
+/** The key of the group a project's threads are in. */
+export function projectGroupKey(project: string): string {
+  return `project:${project}`;
+}
+
 /**
  * Threads by project, and the rest by folder. A family stays together under the
  * group of the thread the user began, wherever its members work. Projects come
@@ -74,12 +79,13 @@ export function threadGroups(
   const known = new Map(projects.map((project) => [project.id, project]));
   const groups = new Map<string, ThreadGroup>();
   for (const project of projects) {
-    groups.set(`project:${project.id}`, { kind: "project", key: `project:${project.id}`, project, threads: [], latest: project.created_at });
+    const key = projectGroupKey(project.id);
+    groups.set(key, { kind: "project", key, project, threads: [], latest: project.created_at });
   }
   for (const thread of threads) {
     const root = rootOf(thread, all);
     const project = root.project ? known.get(root.project) : undefined;
-    const key = project ? `project:${project.id}` : `folder:${folderOf(root)}`;
+    const key = project ? projectGroupKey(project.id) : `folder:${folderOf(root)}`;
     let group = groups.get(key);
     if (!group) {
       group = { kind: "folder", key, folder: folderOf(root), threads: [], latest: 0 };

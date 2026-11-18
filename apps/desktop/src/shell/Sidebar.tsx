@@ -5,6 +5,8 @@ import {
   ArrowRightIcon,
   ChevronDownIcon,
   ChevronRightIcon,
+  ChevronsDownUpIcon,
+  ChevronsUpDownIcon,
   PlusIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -17,8 +19,10 @@ import {
   threadGroups,
   threadTitle,
   threadTree,
+  type ThreadGroup,
   type TreeRow,
 } from "../state/selectors";
+import { groupSummary, visibleRows } from "../state/groups";
 import { SIDEBAR, THREAD_MIN } from "../state/layout";
 import { isUnread } from "../state/reads";
 import { store, useApp } from "../state/store";
@@ -26,9 +30,10 @@ import { BlockMenu, useSlot } from "../ui/blocks";
 import { type AppBlock, type ViewBadge, useUi } from "../ui/registry";
 import { isAppBlock, openViewCommand } from "../ui/views";
 import { ResizeHandle, ThreadMenu } from "../ui/kit";
-import { baseName, plural, relativeTime } from "../util/format";
+import { plural, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
 import { SidebarBlocks } from "./SidebarBlocks";
+import { GroupSection } from "./SidebarGroup";
 import { type DragState, useThreadDrag } from "./useThreadDrag";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -70,6 +75,89 @@ export function Sidebar() {
     () => threadGroups(all.filter((thread) => showArchived || !thread.archived), threads, projects),
     [all, threads, projects, showArchived],
   );
+
+  const foldedGroups = useApp((state) => state.foldedGroups);
+  const allFolded = groups.length > 0 && groups.every((group) => foldedGroups.has(group.key));
+
+  /** One thread's row in `group`, with its family lines and where a dragged thread would land. */
+  const renderRow = (row: TreeRow, group: ThreadGroup) => {
+    const { thread, depth, children } = row;
+    const attention = attentionOf(thread);
+    const unread = isUnread(thread, seen);
+    const provider = providerName(plugins, thread.provider);
+    const indent = Math.min(depth, MAX_INDENT);
+    const over = drag?.over?.target === thread.id ? drag.over : null;
+    const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
+    return (
+      <div
+        key={thread.id}
+        data-thread-id={thread.id}
+        data-group={group.key}
+        className={`relative touch-none select-none${drag?.id === thread.id ? " opacity-40" : ""}${
+          landing === "into" ? " rounded-md bg-primary/15 outline outline-1 outline-primary" : ""
+        }`}
+        onPointerDown={(event) => start(event, thread, group.threads, group.key)}
+      >
+        {landing === "beside" && (
+          // Where it lands among the threads next to this one.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute right-1 bottom-0 z-10 h-0.5 rounded bg-primary"
+            style={{ left: `${8 + indent * INDENT}px` }}
+          />
+        )}
+        {/* A line down from each ancestor's dot ties a family together. */}
+        {Array.from({ length: indent }, (_, level) => (
+          <span
+            key={level}
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 border-l border-muted-foreground/30"
+            style={{ left: `${GUIDE_X + level * INDENT}px` }}
+          />
+        ))}
+        {indent > 0 && (
+          // The elbow from the parent's line to this thread's dot.
+          <span
+            aria-hidden
+            className="pointer-events-none absolute border-t border-muted-foreground/30"
+            style={{ left: `${GUIDE_X + (indent - 1) * INDENT}px`, top: `${DOT_Y}px`, width: `${INDENT - 6}px` }}
+          />
+        )}
+        <ThreadMenu
+          thread={thread}
+          render={
+            <button
+              className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
+              style={depth > 0 ? { paddingLeft: `${8 + indent * INDENT}px` } : undefined}
+              onClick={() => {
+                if (!wasDragged()) store().select(thread.id);
+              }}
+            />
+          }
+        >
+          <span className={`dot ${attention}`} title={attentionLabel[attention]} />
+          <span
+            className={`thread-title${unread ? " font-semibold" : ""}${depth > 0 ? " text-[13px]" : ""}${depth > 0 && !unread && thread.id !== selected ? " text-foreground/80" : ""}`}
+          >
+            {threadTitle(thread)}
+          </span>
+          <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
+          <span className={`thread-meta${children > 0 ? " mr-11" : ""}`}>
+            {attention === "waiting"
+              ? "Needs your answer"
+              : unread && attention === "idle"
+                ? "New reply"
+              : attention === "failed"
+                ? "Failed"
+                : attention === "active" && thread.activity
+                  ? activityText(thread)
+                  : `${provider}${thread.environment ? " · worktree" : ""}`}
+          </span>
+        </ThreadMenu>
+        {children > 0 && <FamilyToggle row={row} />}
+      </div>
+    );
+  };
 
   return (
     <TooltipProvider delay={300}>
@@ -113,8 +201,20 @@ export function Sidebar() {
           </nav>
         )}
         <nav className="thread-list" aria-label="Threads">
-          <div className="flex items-center justify-between pr-1 pl-3">
-            <span className="text-xs text-muted-foreground">{projects.length === 0 ? "Threads by folder" : "Projects"}</span>
+          <div className="flex items-center gap-0.5 pr-1 pl-3">
+            <span className="flex-1 text-xs text-muted-foreground">{projects.length === 0 ? "Threads by folder" : "Projects"}</span>
+            {groups.length > 1 && (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="text-muted-foreground"
+                aria-label={allFolded ? "Expand all groups" : "Collapse all groups"}
+                title={`${allFolded ? "Expand" : "Collapse"} all (Alt+click a group's heading)`}
+                onClick={() => store().foldGroups(groups.map((group) => group.key), !allFolded)}
+              >
+                {allFolded ? <ChevronsUpDownIcon /> : <ChevronsDownUpIcon />}
+              </Button>
+            )}
             {newProject && (
               <Button
                 variant="ghost"
@@ -128,118 +228,33 @@ export function Sidebar() {
             )}
           </div>
           {groups.length === 0 && <p className="hint">No threads yet.</p>}
-          {groups.map((group) => (
-            <section key={group.key} className="group/section">
-              <div
-                data-group-top
-                data-group={group.key}
-                className={`flex items-center gap-1 rounded-md pr-1${
-                  drag?.over?.target === null && drag.drop && "parent" in drag.drop ? " bg-primary/15" : ""
-                }`}
+          {groups.map((group) => {
+            const folded = foldedGroups.has(group.key);
+            const rows = threadTree(group.threads, collapsed, selected);
+            // Folded, the selected thread stays in sight under the heading.
+            const peek = visibleRows(rows, folded, selected);
+            return (
+              <GroupSection
+                key={group.key}
+                group={group}
+                folded={folded}
+                summary={folded ? groupSummary(group.threads, seen) : null}
+                actions={groupActions}
+                connected={connected}
+                dropOnTop={
+                  drag?.over?.target === null &&
+                  !!drag.drop &&
+                  "parent" in drag.drop &&
+                  group.threads.some((thread) => thread.id === drag.id)
+                }
+                onFold={(fold, all) => store().foldGroups(all ? groups.map((each) => each.key) : [group.key], fold)}
+                peek={folded && peek.map((row) => renderRow(row, group))}
               >
-                <h2 className="min-w-0 flex-1 truncate" title={group.kind === "project" ? group.project.folders.join("\n") : `${group.folder}\nNot in a project`}>
-                  {group.kind === "project" ? group.project.name : baseName(group.folder)}
-                </h2>
-                {groupActions
-                  .filter((action) => action.when?.(group) ?? true)
-                  .map((action) => (
-                    <Button
-                      key={action.id}
-                      variant="ghost"
-                      size="icon-xs"
-                      disabled={!connected}
-                      className={
-                        action.onHover ? "opacity-0 group-hover/section:opacity-100 focus-visible:opacity-100" : undefined
-                      }
-                      aria-label={action.label(group)}
-                      title={action.title}
-                      onClick={() => action.run(group)}
-                    >
-                      <action.icon />
-                    </Button>
-                  ))}
-              </div>
-              {group.kind === "project" && group.threads.length === 0 && <p className="hint">No threads yet.</p>}
-              {threadTree(group.threads, collapsed, selected).map((row) => {
-                const { thread, depth, children } = row;
-                const attention = attentionOf(thread);
-                const unread = isUnread(thread, seen);
-                const provider = providerName(plugins, thread.provider);
-                const indent = Math.min(depth, MAX_INDENT);
-                const over = drag?.over?.target === thread.id ? drag.over : null;
-                const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
-                return (
-                  <div
-                    key={thread.id}
-                    data-thread-id={thread.id}
-                    data-group={group.key}
-                    className={`relative touch-none select-none${drag?.id === thread.id ? " opacity-40" : ""}${
-                      landing === "into" ? " rounded-md bg-primary/15 outline outline-1 outline-primary" : ""
-                    }`}
-                    onPointerDown={(event) => start(event, thread, group.threads, group.key)}
-                  >
-                    {landing === "beside" && (
-                      // Where it lands among the threads next to this one.
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute right-1 bottom-0 z-10 h-0.5 rounded bg-primary"
-                        style={{ left: `${8 + indent * INDENT}px` }}
-                      />
-                    )}
-                    {/* A line down from each ancestor's dot ties a family together. */}
-                    {Array.from({ length: indent }, (_, level) => (
-                      <span
-                        key={level}
-                        aria-hidden
-                        className="pointer-events-none absolute inset-y-0 border-l border-muted-foreground/30"
-                        style={{ left: `${GUIDE_X + level * INDENT}px` }}
-                      />
-                    ))}
-                    {indent > 0 && (
-                      // The elbow from the parent's line to this thread's dot.
-                      <span
-                        aria-hidden
-                        className="pointer-events-none absolute border-t border-muted-foreground/30"
-                        style={{ left: `${GUIDE_X + (indent - 1) * INDENT}px`, top: `${DOT_Y}px`, width: `${INDENT - 6}px` }}
-                      />
-                    )}
-                    <ThreadMenu
-                      thread={thread}
-                      render={
-                        <button
-                          className={`thread-row${thread.id === selected ? " selected" : ""}${thread.archived ? " archived" : ""}${depth > 0 ? " child" : ""}`}
-                          style={depth > 0 ? { paddingLeft: `${8 + indent * INDENT}px` } : undefined}
-                          onClick={() => {
-                            if (!wasDragged()) store().select(thread.id);
-                          }}
-                        />
-                      }
-                    >
-                      <span className={`dot ${attention}`} title={attentionLabel[attention]} />
-                      <span
-                        className={`thread-title${unread ? " font-semibold" : ""}${depth > 0 ? " text-[13px]" : ""}${depth > 0 && !unread && thread.id !== selected ? " text-foreground/80" : ""}`}
-                      >
-                        {threadTitle(thread)}
-                      </span>
-                      <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
-                      <span className={`thread-meta${children > 0 ? " mr-11" : ""}`}>
-                        {attention === "waiting"
-                          ? "Needs your answer"
-                          : unread && attention === "idle"
-                            ? "New reply"
-                          : attention === "failed"
-                            ? "Failed"
-                            : attention === "active" && thread.activity
-                              ? activityText(thread)
-                              : `${provider}${thread.environment ? " · worktree" : ""}`}
-                      </span>
-                    </ThreadMenu>
-                    {children > 0 && <FamilyToggle row={row} />}
-                  </div>
-                );
-              })}
-            </section>
-          ))}
+                {group.kind === "project" && group.threads.length === 0 && <p className="hint">No threads yet.</p>}
+                {rows.filter((row) => !folded || row.thread.id !== selected).map((row) => renderRow(row, group))}
+              </GroupSection>
+            );
+          })}
         </nav>
         <SidebarBlocks />
         {(bottom.length > 0 || archivedCount > 0) && (

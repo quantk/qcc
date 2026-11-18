@@ -44,7 +44,8 @@ import { type History, type Place, startHistory, step, visit } from "./history";
 import { limitProviders, mergeLimits, wantsRefresh } from "./limits";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
-import { visiblePlugins, withPlugin } from "./selectors";
+import { groupKeys, pruneFolded, withFolded } from "./groups";
+import { projectGroupKey, visiblePlugins, withPlugin } from "./selectors";
 import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
@@ -52,6 +53,7 @@ import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
 const COLLAPSED = "qcc.collapsed-families";
+const FOLDED_GROUPS = "qcc.collapsed-groups";
 const SIDE_PANEL = "qcc.side-panel";
 const SIDEBAR_WIDTH = "qcc.sidebar-width";
 const BLOCK_LAYOUT = "qcc.block-layout";
@@ -88,8 +90,8 @@ function windowInView(): boolean {
   return typeof document === "undefined" || (document.visibilityState === "visible" && document.hasFocus());
 }
 
-function readCollapsed(): ReadonlySet<ThreadId> {
-  const ids = readJson(COLLAPSED);
+function readStringSet(key: string): ReadonlySet<string> {
+  const ids = readJson(key);
   return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : []);
 }
 
@@ -130,6 +132,8 @@ export type AppState = {
   history: History;
   /** Threads whose children the sidebar keeps folded under them. */
   collapsed: ReadonlySet<ThreadId>;
+  /** Sidebar groups (`ThreadGroup.key`) that show only their heading. */
+  foldedGroups: ReadonlySet<string>;
   sidePanel: SidePanel;
   /** The tab chosen in the selected thread's view, by block id. Null: its first tab.
    * Not remembered: another thread opens on its first tab. */
@@ -184,7 +188,8 @@ export class AppStore {
     settings: null,
     seen: readSeen() ?? {},
     history: startHistory,
-    collapsed: readCollapsed(),
+    collapsed: readStringSet(COLLAPSED),
+    foldedGroups: readStringSet(FOLDED_GROUPS),
     sidePanel: readSidePanel(),
     threadTab: null,
     sidebarWidth: clampWidth(readJson(SIDEBAR_WIDTH), SIDEBAR),
@@ -605,6 +610,18 @@ export class AppStore {
     this.set({ collapsed });
   };
 
+  /** Fold the sidebar groups with these keys, or unfold them. */
+  foldGroups = (keys: readonly string[], fold: boolean) => {
+    let folded = withFolded(this.state.foldedGroups, keys, fold);
+    // Groups that are gone need not be remembered; until the daemon has said which
+    // there are, every one is kept.
+    if (this.state.daemon.status === "connected") folded = pruneFolded(folded, groupKeys(this.state.threads, this.state.projects));
+    saveJson(FOLDED_GROUPS, [...folded]);
+    this.set({ foldedGroups: folded });
+  };
+
+  toggleGroup = (key: string) => this.foldGroups([key], !this.state.foldedGroups.has(key));
+
   select = (threadId: ThreadId | null) => {
     this.go({ thread: threadId, view: this.state.view }, true);
   };
@@ -909,7 +926,11 @@ export class AppStore {
     const result = await this.attempt(() =>
       this.api.call("thread.set_project", { thread_id: threadId, project }),
     );
-    if (result) this.mergeThreads([result.thread]);
+    if (result) {
+      this.mergeThreads([result.thread]);
+      // Moved into a folded project, it would vanish; unfold it so it is seen landing.
+      if (project && this.state.foldedGroups.has(projectGroupKey(project))) this.foldGroups([projectGroupKey(project)], false);
+    }
   }
 
   /**

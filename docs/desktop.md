@@ -179,6 +179,17 @@ first one otherwise).
 In the sidebar threads are grouped by project. A project has the buttons "new thread in the
 project" and "name and folders". To create a project: "+ Project" or the palette; to move a thread:
 the palette, "Move this thread to a project…".
+
+A project, or a folder of threads outside projects, folds with a click on its heading (or `Enter`
+/ `Space` on it; `←` folds, `→` unfolds or goes to its first thread, `←` on a thread goes back to
+its heading). `Alt`+click folds or unfolds every group, as does the button next to "+ Project".
+Folds are remembered between launches. A folded heading sums up what is hidden: a blue pill with
+the number of threads waiting for your answer, red for failed ones, orange for working ones, grey
+for threads with a new reply, and how many threads there are. The thread you have open stays in
+sight under the heading of its folded group, so going to a thread from the overview or a
+notification does not undo a fold; moving a thread into a folded project unfolds it. While the list scrolls,
+the heading of the group in view stays at the top.
+
 `Ctrl+K` opens the command palette, `Ctrl+0` the overview.
 
 ### Back and forward

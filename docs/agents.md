@@ -92,7 +92,8 @@ qcc settings provider opencode --hidden true        # do not offer it in the app
   directory). `LD_*`, `DYLD_*` and `QCC_*` cannot be set.
 
 The same screen has the switch for showing example plugins, the interface scale, and the list of
-plugins with their contributions and permissions.
+plugins with their contributions and permissions, where each can be turned off or on
+([Turning plugins on and off](plugins.md#turning-plugins-on-and-off)).
 
 ### Plugin settings
 

@@ -160,8 +160,13 @@ the arrows in the sidebar header.
 ### Settings
 
 Agents: the program path, and the model, effort, permission mode and environment variables of new
-threads, and whether to show the agent in lists; the default agent; plugins and their permissions;
-whether to show example plugins (echo). Interface scale: `Ctrl+Plus` / `Ctrl+Minus`, as in a
+threads, and whether to show the agent in lists; the default agent; plugins with their version,
+description, contributions and permissions, each with a switch that turns it on or off at once
+(bundled plugins too); whether to show example plugins (echo). A plugin turned off stops: its
+agents, workspaces, commands, skills and screens disappear from the window, and its threads can be
+read but take no messages until it is back on. Turning off a plugin whose agents are working asks
+first; confirming cuts their turns short. See
+[Turning plugins on and off](plugins.md#turning-plugins-on-and-off). Interface scale: `Ctrl+Plus` / `Ctrl+Minus`, as in a
 browser, or the buttons on the "Settings" screen; it can be reset to 100% there or from the
 palette.
 

@@ -78,4 +78,44 @@ permission is needed for this: a plugin sees only its own settings. Example: the
 
 An installed plugin lives in `<data>/plugins/<id>/`. A third-party plugin is granted permissions by
 the file `<data>/grants/<id>.toml`, in the format of the manifest's `[permissions]` section; without
-it the plugin is loaded without permissions.
+it the plugin is loaded without permissions. The manifest may carry a one-line `description`, shown
+in `qcc plugin list` and in the app's settings.
+
+## Turning plugins on and off
+
+Any plugin can be turned off, bundled ones included (they have no privileges, so nothing depends on
+them being there):
+
+```sh
+qcc plugin list                          # every installed plugin; "disabled" marks those turned off
+qcc plugin disable provider-codex        # stop it now and on every later start
+qcc plugin disable provider-codex --force   # even while its agents are working
+qcc plugin enable provider-codex         # start it again, no restart needed
+```
+
+The choice is kept in `settings.json` (`disabled_plugins`) and is changed only by these commands
+(`plugin.enable` / `plugin.disable` in the protocol): `settings.set` leaves it as it is. Both apply
+at once. A plugin turned off is unloaded: its processes are killed, and its agents, environments,
+commands, skills, settings fields and views disappear from the daemon and the app. Watching
+clients get a `plugins.updated` notification. `plugin.list` still lists it, with `enabled: false`
+and what its manifest says (version, description, permissions), but with no contributions. A
+plugin that is on but failed to start is listed with its `error`.
+
+Threads made with a plugin that is off:
+
+- **Working agents block turning it off.** `plugin disable` is refused (`THREAD_BUSY`, naming the
+  threads) while one of its agents is in a turn or starting a session, or while it is preparing or
+  removing a worktree; `--force` cuts those turns short instead (they settle as interrupted). Idle
+  sessions of its agents are closed either way, the way a daemon shutdown closes them: the
+  timeline gets `session/ended` with the reason "plugin … was turned off".
+- **The timeline stays readable**: it lives in the journal, not in the plugin.
+- **New messages are refused** with `PLUGIN_DISABLED` (-32009): `agent "codex" belongs to
+  plugin provider-codex, which is turned off`. So is a new thread with its agent or environment.
+  Messages already queued wait and are delivered once it is back on, and the session is resumed
+  as after a restart. A thread already in a worktree keeps working when only the worktree plugin
+  is off, but its changes cannot be listed, and archiving it needs `--force`, which leaves the worktree on
+  disk.
+
+To tell which plugin an agent or environment belonged to once it is off, the daemon remembers what
+each plugin contributed when it last ran (`<cache>/plugins/<id>.json`); without that record the
+error is the plain "no plugin provides …".

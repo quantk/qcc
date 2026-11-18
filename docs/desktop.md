@@ -75,6 +75,25 @@ calls and skill use are marked by the provider's bridge (the `mcp_server` and `s
 tool item): Claude Code by the `mcp__<server>__<tool>` name and the `Skill` tool, Codex by
 `mcpToolCall`; opencode does not distinguish them yet.
 
+### Usage limits
+
+A section at the bottom of the sidebar, "Usage limits", keeps the subscription limits of the agents
+in view: a line per agent that reports them (Claude Code, Codex; opencode does not say) with its
+main windows as small bars, `Claude 5h 42% · week 18%`. A window turns amber past 80% and red at
+95% or once the agent says the limit is reached. A click opens the details: the plan, every window
+(per-model weekly ones too) with when it resets ("resets in 2h 10m"), how old the numbers are
+("as of 25 min ago", with a clock mark once they are older than 15 minutes) and a Refresh button.
+A window whose reset time has passed shows 0%: what was spent in it no longer counts.
+
+The numbers are the daemon's, kept per agent across restarts (see
+[Agents: subscription usage limits](agents.md#subscription-usage-limits)). Running sessions keep
+them current by themselves. The app asks the agents again (each starts for a moment, without a
+prompt) when it connects or the details are opened and the numbers are older than 5 minutes, and
+on Refresh or the palette command "Refresh usage limits". When an agent cannot be asked, its last
+numbers stay, marked old, with the reason in the details. "Usage limits in full" is a block with
+all of it, offered but not placed: open it from the palette ("Usage limits") or put it where you
+like (Block layout below), for example among the screens.
+
 ### Thread
 
 A timeline with streaming output, commands, diffs of edits and permission requests; a composer

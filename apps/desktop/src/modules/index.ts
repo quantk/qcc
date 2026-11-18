@@ -7,6 +7,7 @@ import { changesModule } from "./changes";
 import { contextModule } from "./context";
 import { insightsModule } from "./insights";
 import { lineageModule } from "./lineage";
+import { limitsModule } from "./limits";
 import { liveModule } from "./live";
 import { mcpModule } from "./mcp";
 import { metricsModule } from "./metrics";
@@ -41,5 +42,6 @@ export const builtinModules: UiModule[] = [
   contextModule,
   insightsModule,
   metricsModule,
+  limitsModule,
   settingsModule,
 ];

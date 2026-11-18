@@ -26,6 +26,8 @@ import type {
   Project,
   ProjectId,
   ProviderId,
+  ProviderLimits,
+  ProviderLimitsError,
   SendMode,
   Settings,
   SettingsResult,
@@ -39,6 +41,7 @@ import type {
 import { withAutomation } from "./automations";
 import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
+import { limitProviders, mergeLimits, wantsRefresh } from "./limits";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { visiblePlugins, withPlugin } from "./selectors";
@@ -144,6 +147,12 @@ export type AppState = {
   /** Comments on each thread's changes, resolved ones too, oldest first. Read for a
    * thread when a view asks (`loadComments`), then kept current by the daemon. */
   comments: Readonly<Record<ThreadId, readonly LineComment[]>>;
+  /** The latest usage limits each provider's account reported; see `limits.ts`. */
+  limits: Readonly<Record<ProviderId, ProviderLimits>>;
+  /** The agents are being asked for their limits now. */
+  limitsRefreshing: boolean;
+  /** Why the last time they were asked some could not tell. */
+  limitErrors: readonly ProviderLimitsError[];
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -184,6 +193,9 @@ export class AppStore {
     skills: [],
     agentSkills: {},
     comments: {},
+    limits: {},
+    limitsRefreshing: false,
+    limitErrors: [],
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -250,18 +262,29 @@ export class AppStore {
     const watch = this.nextSubscription++;
     this.watch = watch;
     try {
-      const [list, plugins, projects, settings, skills, automations] = await Promise.all([
+      const [list, plugins, projects, settings, skills, automations, limits] = await Promise.all([
         this.api.call("thread.watch", { subscription: watch }),
         this.api.call("plugin.list", {}),
         this.api.call("project.list", {}),
         this.api.call("settings.get", {}),
         this.api.call("skill.list", {}),
         this.api.call("automation.list", {}),
+        this.api.call("provider.limits", {}),
       ]);
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
-      this.set({ projects: projects.projects, settings, skills: skills.skills, automations: automations.automations });
+      this.set({
+        projects: projects.projects,
+        settings,
+        skills: skills.skills,
+        automations: automations.automations,
+        limits: mergeLimits(this.state.limits, limits.limits),
+      });
       this.setPlugins(plugins.plugins);
+      // What the daemon remembers may be old: ask the agents, without holding up the rest.
+      if (wantsRefresh(limitProviders(this.state.allPlugins), this.state.limits, Date.now())) {
+        void this.refreshLimits();
+      }
       await Promise.all([...this.followed.keys()].map((threadId) => this.followLive(threadId)));
     } catch (error) {
       this.fail(error);
@@ -277,6 +300,9 @@ export class AppStore {
       if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
     } else if (notification.method === "automations.updated") {
       if (notification.params.subscription === this.watch) this.set({ automations: notification.params.automations });
+    } else if (notification.method === "limits.updated") {
+      const { subscription, limits } = notification.params;
+      if (subscription === this.watch) this.set({ limits: mergeLimits(this.state.limits, [limits]) });
     } else if (notification.method === "comments.updated") {
       const { subscription, thread_id, comments } = notification.params;
       if (subscription === this.watch) this.setComments(thread_id, comments);
@@ -450,6 +476,23 @@ export class AppStore {
       refresh,
       async () => (await this.api.call("provider.skills", { provider, refresh })).skills,
     );
+
+  /**
+   * Ask the agents how much of their accounts' usage limits is spent: each runs for a
+   * moment, without a prompt. Answers also come as `limits.updated`.
+   */
+  refreshLimits = async () => {
+    if (this.state.limitsRefreshing) return;
+    this.set({ limitsRefreshing: true });
+    try {
+      const result = await this.api.call("provider.limits", { refresh: true });
+      this.set({ limits: mergeLimits(this.state.limits, result.limits), limitErrors: result.errors ?? [] });
+    } catch (error) {
+      this.fail(error);
+    } finally {
+      this.set({ limitsRefreshing: false });
+    }
+  };
 
   /** Fill one of the lists a provider is asked for, unless it is known or underway. */
   private async loadList<T>(

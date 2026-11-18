@@ -81,7 +81,7 @@ works as a screen, a tab or a panel tab.
 
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
-| A block: a screen, a sidebar section, a thread tab, a side panel tab or a chip beside the composer | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
+| A block: a screen, a sidebar section, a thread tab, a side panel tab or a chip beside the composer | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/limits`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
 | A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
@@ -110,6 +110,15 @@ user (blue, and the chip is tinted, as on the Live button), work, failed or are 
 leading to its thread, and leads to the full **Agents** tab where their questions can
 be answered. A block can be brought into view where the layout put it with
 `showThreadBlock(id)` from `ui/blocks.tsx`.
+
+The `sidebar` slot is for what is worth having always in view whatever is open. By
+default `modules/limits` puts **Usage limits** there (block `limits.glance`): the
+subscription windows of each agent's account, which belong to the provider and not to a
+thread, as small bars with a popover of details, and offers `limits.view` with all of
+them. The store mirrors the daemon's `provider.limits` (kept current by
+`limits.updated`) and asks the agents again (`refreshLimits`) when it connects or the
+details open and the numbers are older than five minutes; what to show, how worrying
+it is and how old it is comes from `state/limits.ts`.
 
 Header controls, menu entries and item renderers are not blocks: they are small parts of
 a frame the shell already draws, not units the user would move.

@@ -77,7 +77,8 @@ agents start other agents, and is extended with WebAssembly plugins.
     <td valign="top">
       <h3>🔍 Context you can see</h3>
       How full the context window is, what fills it (system prompt, tools, MCP, memory, skills),
-      and compaction on request.
+      and compaction on request. How much of the Claude and Codex subscription limits is left,
+      always in the sidebar.
     </td>
     <td valign="top">
       <h3>🧰 Shared setup</h3>
@@ -185,7 +186,7 @@ temporary daemon.
 
 | | |
 | --- | --- |
-| 🤖 [Agents and sessions](docs/agents.md) | models, effort, switching agents, settings, MCP servers, permission modes, steering, compaction, context, attachments, skills |
+| 🤖 [Agents and sessions](docs/agents.md) | models, effort, switching agents, settings, MCP servers, permission modes, steering, compaction, context, usage limits, attachments, skills |
 | 🌿 [Projects and worktrees](docs/projects-and-worktrees.md) | projects, isolated worktrees, delivering work back, comments on changes |
 | 🪆 [Orchestration](docs/orchestration.md) | agents starting agents, permission inheritance, `handoff` and `review` |
 | ⏰ [Automations](docs/automations.md) | prompts sent to an agent on a schedule: cron or intervals, overlapping and missed runs, history |

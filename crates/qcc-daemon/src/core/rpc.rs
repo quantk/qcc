@@ -6,16 +6,17 @@ use qcc_plugin_host::UiRequest;
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandList, CommandRun, CommentAdd, CommentDelete, CommentList, CommentResolve, DaemonStatus,
-    DaemonStatusResult, Empty, InteractionResolve, PluginList, ProjectCreate, ProjectDelete,
-    ProjectList, ProjectListResult, ProjectUpdate, ProviderModels, ProviderSkills, SettingsGet,
-    SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges, ThreadCompact,
-    ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadList,
-    ThreadListParams, ThreadListResult, ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent,
-    ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn,
-    ThreadStop, ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
-    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
-    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
-    UsageHistoryResult, UsageTools, UsageToolsResult,
+    DaemonStatusResult, Empty, InteractionResolve, PluginDisable, PluginEnable, PluginList,
+    ProjectCreate, ProjectDelete, ProjectList, ProjectListResult, ProjectUpdate, ProviderModels,
+    ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment,
+    ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet,
+    ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename,
+    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
+    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
+    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
+    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
+    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
+    UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -235,6 +236,14 @@ impl Core {
                 responder.reply(result);
             }
             PluginList::NAME => responder.reply(Ok(self.plugin_list())),
+            PluginEnable::NAME => {
+                let result = params::<PluginEnable>(raw).and_then(|p| self.plugin_enable(p));
+                responder.reply(result);
+            }
+            PluginDisable::NAME => {
+                let result = params::<PluginDisable>(raw).and_then(|p| self.plugin_disable(p));
+                responder.reply(result);
+            }
             ProviderModels::NAME => match params::<ProviderModels>(raw) {
                 Ok(p) => self.provider_models(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),

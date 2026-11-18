@@ -36,6 +36,7 @@ mod rpc;
 mod sessions;
 mod skills;
 mod threads;
+mod toggle;
 mod waits;
 
 /// Answers one request on the connection it came from.
@@ -244,6 +245,10 @@ pub(crate) struct Core {
     store: Store,
     supervisor: Supervisor,
     host: PluginHost,
+    /// Every plugin in the plugin directory, running or not.
+    installed: Vec<plugins::Installed>,
+    /// Why plugins that should run could not be started, by id.
+    load_errors: HashMap<String, String>,
     sessions: HashMap<ThreadId, Session>,
     /// Threads with input waiting for their running turn to end.
     queued: HashSet<ThreadId>,
@@ -306,12 +311,7 @@ impl Core {
         &self,
         provider: &ProviderId,
     ) -> Result<(&PluginHandle, &ProviderInfo), RpcError> {
-        self.host.provider(provider).ok_or_else(|| {
-            RpcError::new(
-                codes::PROVIDER_NOT_FOUND,
-                format!("no plugin provides {:?}", provider.as_str()),
-            )
-        })
+        self.host.provider(provider).ok_or_else(|| self.provider_missing(provider))
     }
 
     /// The thread as it is now, as most thread methods answer.
@@ -330,8 +330,10 @@ impl Core {
         let settings = settings::load(&config.settings());
         let programs = ProgramPaths::default();
         programs.set(settings.programs.iter().map(|(name, path)| (name.clone(), path.into())));
-        let host =
-            plugins::load_all(config, &commands, &programs).context("cannot load plugins")?;
+        let installed = plugins::install(config).context("cannot install plugins")?;
+        let (host, load_errors) =
+            plugins::load_all(config, &installed, &settings.disabled_plugins, &commands, &programs)
+                .context("cannot load plugins")?;
         let skills = plugins::write_skills(config, &host);
         let cli_dir = std::env::current_exe()
             .ok()
@@ -368,6 +370,8 @@ impl Core {
             store,
             supervisor,
             host,
+            installed,
+            load_errors,
             sessions: HashMap::new(),
             queued,
             archiving: HashSet::new(),

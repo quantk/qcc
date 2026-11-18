@@ -786,7 +786,10 @@ pub struct InteractionResolveParams {
 
 // ----- plugins ----------------------------------------------------------------------
 
-method!(PluginList, "plugin.list", Empty => PluginListResult);
+method!(
+    /// Every installed plugin, the ones turned off included.
+    PluginList, "plugin.list", Empty => PluginListResult
+);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct PluginListResult {
@@ -798,9 +801,18 @@ pub struct PluginInfo {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// What the plugin is for, from its manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub version: String,
     /// Shipped with the daemon.
     pub bundled: bool,
+    /// Turned on. A plugin turned off is not running: it contributes nothing, and
+    /// what it contributed is listed empty.
+    pub enabled: bool,
+    /// Turned on but could not be started: why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     /// An example or test plugin, not one for everyday use (`example` in its
     /// manifest). Clients hide what it contributes unless asked to show it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -815,6 +827,49 @@ pub struct PluginInfo {
     /// Settings of its own; their values are in `Settings::plugins`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<SettingField>,
+}
+
+method!(
+    /// Turn a plugin on and start it, at once and for later starts of the daemon.
+    PluginEnable, "plugin.enable", PluginEnableParams => PluginResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct PluginEnableParams {
+    pub id: String,
+}
+
+method!(
+    /// Turn a plugin off and stop it, at once and for later starts of the daemon.
+    /// Its agents, environments, commands, skills and views go away; threads made
+    /// with them stay readable but take no messages until it is back. Refused while
+    /// one of its agents is working, unless `force`: then the turn is cut short.
+    /// Idle sessions of its agents are closed either way.
+    PluginDisable, "plugin.disable", PluginDisableParams => PluginResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct PluginDisableParams {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub force: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct PluginResult {
+    pub plugin: PluginInfo,
+}
+
+/// Notification to connections that watch threads: a plugin was turned on or off,
+/// so the agents, environments, commands and views on offer changed. Carries every
+/// plugin, as `plugin.list` does.
+pub const PLUGINS_UPDATED: &str = "plugins.updated";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct PluginsUpdatedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub plugins: Vec<PluginInfo>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -924,6 +979,10 @@ pub struct Settings {
     /// then by setting id. A setting not here has its default.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub plugins: BTreeMap<String, BTreeMap<String, String>>,
+    /// Plugins turned off, by id, sorted. Changed only by `plugin.enable` and
+    /// `plugin.disable`, which start and stop them: `settings.set` keeps it as it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_plugins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

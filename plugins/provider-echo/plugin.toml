@@ -1,5 +1,6 @@
 id = "provider-echo"
 name = "Echo provider"
+description = "The test agent that repeats what it is sent, and the example of the plugin API."
 version = "0.1.0"
 api = "0.1"
 wasm = "plugin.wasm"

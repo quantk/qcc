@@ -5,16 +5,18 @@
 //! chose the daemon, so its own plugins get what they request. Any other plugin gets
 //! only what a grant file gives it.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use qcc_domain::{Delta, SkillRef, ThreadId};
+use qcc_domain::{Delta, ProviderId, SkillRef, ThreadId};
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{
-    Contribution, Grant, MANIFEST_FILE, Permissions, PluginHost, ProgramPaths, Services,
-    ThreadsCall,
+    Contribution, Grant, LoadError, MANIFEST_FILE, Manifest, Permissions, PluginHandle, PluginHost,
+    ProgramPaths, Services, ThreadsCall,
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::Config;
@@ -48,79 +50,177 @@ fn grant_for(config: &Config, id: &str) -> Grant {
     Grant::Only(granted)
 }
 
-pub(crate) fn load_all(
-    config: &Config,
-    commands: &UnboundedSender<Command>,
-    programs: &ProgramPaths,
-) -> anyhow::Result<PluginHost> {
+/// A plugin in the plugin directory, whether it runs or not.
+#[derive(Debug, Clone)]
+pub(crate) struct Installed {
+    pub dir: PathBuf,
+    pub manifest: Manifest,
+}
+
+/// Put the bundled plugins in place and list every plugin in the plugin directory,
+/// in the order they load. The directory name is only a location; the manifest
+/// names the plugin, and of two directories naming the same one the first wins.
+pub(crate) fn install(config: &Config) -> anyhow::Result<Vec<Installed>> {
     let plugins_dir = config.plugins_dir();
     qcc_plugins_bundle::install(&plugins_dir)?;
+    installed(config)
+}
 
-    let mut host = PluginHost::with_cache(Some(&config.cache_dir.join("wasm")))?;
-    let mut dirs: Vec<_> = std::fs::read_dir(&plugins_dir)?
+/// The plugins in the plugin directory, as [`install`] lists them.
+pub(crate) fn installed(config: &Config) -> anyhow::Result<Vec<Installed>> {
+    let mut dirs: Vec<_> = std::fs::read_dir(config.plugins_dir())?
         .filter_map(|entry| Some(entry.ok()?.path()))
         .filter(|path| path.join(MANIFEST_FILE).is_file())
         .collect();
     dirs.sort();
-
+    let mut plugins: Vec<Installed> = Vec::new();
     for dir in dirs {
-        // The directory name is only a location; the manifest names the plugin.
-        let id = match plugin_id(&dir) {
-            Some(id) => id,
-            None => continue,
-        };
-        let grant = grant_for(config, &id);
-        let loaded = host.load_dir(&dir, &grant, |manifest| {
-            let deltas = commands.clone();
-            let crashes = commands.clone();
-            let threads = commands.clone();
-            Services {
-                deltas: Arc::new(move |plugin: &str, thread: ThreadId, deltas_: Vec<Delta>| {
-                    let _ = deltas.send(Command::Deltas {
-                        plugin: plugin.to_owned(),
-                        thread,
-                        deltas: deltas_,
-                    });
-                }),
-                kv: Box::new(DirKv::new(config.plugin_data_dir(&manifest.id).join("kv"))),
-                processes: Arc::new(qcc_plugin_host::services::OsProcesses::with_paths(
-                    programs.clone(),
-                )),
-                threads: Arc::new(move |plugin: &str, call: ThreadsCall| {
-                    let (reply, answer) = std::sync::mpsc::channel();
-                    // Past the deadline the core refuses the call instead of running
-                    // it: a call reported as failed must not happen after all.
-                    let deadline = Instant::now() + THREADS_TIMEOUT;
-                    threads
-                        .send(Command::Threads { plugin: plugin.to_owned(), call, deadline, reply })
-                        .map_err(|_| "the daemon is shutting down".to_owned())?;
-                    // The core answers at once; it never waits on a plugin. It is not
-                    // running yet while plugins are being loaded. The wait outlasts the
-                    // deadline, so whatever the core did is what the plugin hears.
-                    answer.recv_timeout(THREADS_TIMEOUT + THREADS_GRACE).map_err(|_| {
-                        "the daemon did not answer; threads are not available during init"
-                            .to_owned()
-                    })?
-                }),
-                on_crash: Arc::new(move |plugin: &str, reason: &str| {
-                    let _ = crashes.send(Command::PluginCrashed {
-                        plugin: plugin.to_owned(),
-                        reason: reason.to_owned(),
-                    });
-                }),
-            }
-        });
-        match loaded {
-            Ok(plugin) => tracing::info!(
-                plugin = plugin.id(),
-                version = %plugin.manifest().version,
-                "plugin loaded"
-            ),
-            // One broken plugin must not take the daemon down.
-            Err(error) => tracing::error!(dir = %dir.display(), %error, "plugin failed to load"),
+        let Some(manifest) = manifest(&dir) else { continue };
+        if plugins.iter().any(|known| known.manifest.id == manifest.id) {
+            tracing::error!(dir = %dir.display(), plugin = manifest.id, "another directory holds this plugin already");
+            continue;
+        }
+        plugins.push(Installed { dir, manifest });
+    }
+    Ok(plugins)
+}
+
+/// The permissions a plugin would run with: what it requests, as far as granted.
+pub(crate) fn permissions(config: &Config, manifest: &Manifest) -> Permissions {
+    grant_for(config, &manifest.id).effective(&manifest.permissions)
+}
+
+/// Start every installed plugin the user did not turn off. A plugin that fails is
+/// left out with its error: one broken plugin must not take the daemon down.
+pub(crate) fn load_all(
+    config: &Config,
+    installed: &[Installed],
+    disabled: &[String],
+    commands: &UnboundedSender<Command>,
+    programs: &ProgramPaths,
+) -> anyhow::Result<(PluginHost, HashMap<String, String>)> {
+    let mut host = PluginHost::with_cache(Some(&config.cache_dir.join("wasm")))?;
+    let mut errors = HashMap::new();
+    for plugin in installed {
+        if disabled.contains(&plugin.manifest.id) {
+            tracing::info!(plugin = plugin.manifest.id, "plugin is turned off");
+            continue;
+        }
+        if let Err(error) = load(&mut host, config, plugin, commands, programs) {
+            errors.insert(plugin.manifest.id.clone(), error.to_string());
         }
     }
-    Ok(host)
+    Ok((host, errors))
+}
+
+/// Start one plugin and remember what it contributes, so that once it is turned
+/// off the daemon can still tell whose agents and environments were whose.
+pub(crate) fn load(
+    host: &mut PluginHost,
+    config: &Config,
+    plugin: &Installed,
+    commands: &UnboundedSender<Command>,
+    programs: &ProgramPaths,
+) -> Result<PluginHandle, LoadError> {
+    let grant = grant_for(config, &plugin.manifest.id);
+    let loaded = host.load_dir(&plugin.dir, &grant, |manifest| {
+        let deltas = commands.clone();
+        let crashes = commands.clone();
+        let threads = commands.clone();
+        Services {
+            deltas: Arc::new(move |plugin: &str, thread: ThreadId, deltas_: Vec<Delta>| {
+                let _ = deltas.send(Command::Deltas {
+                    plugin: plugin.to_owned(),
+                    thread,
+                    deltas: deltas_,
+                });
+            }),
+            kv: Box::new(DirKv::new(config.plugin_data_dir(&manifest.id).join("kv"))),
+            processes: Arc::new(qcc_plugin_host::services::OsProcesses::with_paths(
+                programs.clone(),
+            )),
+            threads: Arc::new(move |plugin: &str, call: ThreadsCall| {
+                let (reply, answer) = std::sync::mpsc::channel();
+                // Past the deadline the core refuses the call instead of running
+                // it: a call reported as failed must not happen after all.
+                let deadline = Instant::now() + THREADS_TIMEOUT;
+                threads
+                    .send(Command::Threads { plugin: plugin.to_owned(), call, deadline, reply })
+                    .map_err(|_| "the daemon is shutting down".to_owned())?;
+                // The core answers at once; it never waits on a plugin. It is not
+                // running yet while plugins are being loaded. The wait outlasts the
+                // deadline, so whatever the core did is what the plugin hears.
+                answer.recv_timeout(THREADS_TIMEOUT + THREADS_GRACE).map_err(|_| {
+                    "the daemon did not answer; threads are not available during init".to_owned()
+                })?
+            }),
+            on_crash: Arc::new(move |plugin: &str, reason: &str| {
+                let _ = crashes.send(Command::PluginCrashed {
+                    plugin: plugin.to_owned(),
+                    reason: reason.to_owned(),
+                });
+            }),
+        }
+    });
+    match &loaded {
+        Ok(handle) => {
+            tracing::info!(
+                plugin = handle.id(),
+                version = %handle.manifest().version,
+                "plugin loaded"
+            );
+            remember_owned(config, handle);
+        }
+        Err(error) => {
+            tracing::error!(dir = %plugin.dir.display(), %error, "plugin failed to load");
+        }
+    }
+    loaded
+}
+
+/// The agents and environments a plugin contributed when it last ran.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub(crate) struct Owned {
+    pub providers: Vec<ProviderId>,
+    pub environments: Vec<String>,
+}
+
+fn owned_path(config: &Config, plugin: &str) -> PathBuf {
+    config.cache_dir.join("plugins").join(format!("{plugin}.json"))
+}
+
+impl Owned {
+    pub(crate) fn of(plugin: &PluginHandle) -> Self {
+        let mut owned = Self::default();
+        for contribution in plugin.contributions() {
+            match contribution {
+                Contribution::Provider(info) => owned.providers.push(info.id.clone()),
+                Contribution::Environment(info) => owned.environments.push(info.id.clone()),
+                _ => {}
+            }
+        }
+        owned
+    }
+}
+
+fn remember_owned(config: &Config, plugin: &PluginHandle) {
+    let owned = Owned::of(plugin);
+    let path = owned_path(config, plugin.id());
+    let text = serde_json::to_string(&owned).expect("ids serialize");
+    // Only a better error message depends on it.
+    if let Err(error) = path
+        .parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(&path, text))
+    {
+        tracing::warn!(path = %path.display(), %error, "cannot note what the plugin contributes");
+    }
+}
+
+/// What a plugin contributed when it last ran, if that is known.
+pub(crate) fn owned(config: &Config, plugin: &str) -> Option<Owned> {
+    let text = std::fs::read_to_string(owned_path(config, plugin)).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 /// How long a plugin's `threads` call may wait for the core.
@@ -203,10 +303,10 @@ pub(crate) fn write_skills(config: &Config, host: &PluginHost) -> Vec<OfferedSki
     skills
 }
 
-fn plugin_id(dir: &Path) -> Option<String> {
+fn manifest(dir: &Path) -> Option<Manifest> {
     let text = std::fs::read_to_string(dir.join(MANIFEST_FILE)).ok()?;
-    match qcc_plugin_host::Manifest::parse(&text) {
-        Ok(manifest) => Some(manifest.id),
+    match Manifest::parse(&text) {
+        Ok(manifest) => Some(manifest),
         Err(error) => {
             tracing::error!(dir = %dir.display(), %error, "invalid plugin manifest");
             None
@@ -253,7 +353,7 @@ pub(crate) fn read_asset(
     let dir = std::fs::read_dir(&plugins_dir)
         .map_err(|error| error.to_string())?
         .filter_map(|entry| Some(entry.ok()?.path()))
-        .find(|dir| plugin_id(dir).as_deref() == Some(manifest.id.as_str()))
+        .find(|dir| self::manifest(dir).is_some_and(|found| found.id == manifest.id))
         .ok_or("the plugin's directory is gone")?;
     let root = dir.join(web).canonicalize().map_err(|error| match error.kind() {
         std::io::ErrorKind::NotFound => "the plugin's web bundle is missing".to_owned(),

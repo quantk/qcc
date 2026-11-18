@@ -759,6 +759,104 @@ fn plugins_and_daemon_are_listed() {
     assert!(second.unwrap_err().to_string().contains("already listening"));
 }
 
+#[test]
+fn a_plugin_is_turned_off_and_on_without_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let echo = |daemon: &Daemon| {
+        let plugins = daemon.qcc(&["plugin", "list", "--json"]).json();
+        plugins["plugins"].as_array().unwrap().iter().find(|p| p["id"] == "provider-echo").cloned()
+    };
+    let old = daemon.spawn("before");
+    daemon.wait_for(&old, "turn/completed");
+
+    // A working agent keeps its plugin on, unless forced.
+    let busy = daemon.spawn(&format!("/slow {}", words(5000)));
+    daemon.wait_for(&busy, "item/text/delta");
+    let refused = daemon.qcc(&["plugin", "disable", "provider-echo"]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains(&busy), "{}", refused.stderr);
+    assert!(refused.stderr.contains("(code -32005)"), "{}", refused.stderr);
+    let forced = daemon.qcc(&["plugin", "disable", "provider-echo", "--force"]);
+    assert!(forced.ok, "{}", forced.stderr);
+    assert!(forced.stdout.contains("provider-echo 0.1.0  disabled"), "{}", forced.stdout);
+    let events = daemon.events(&busy);
+    let turn = events.iter().find(|e| e["type"] == "turn/completed").expect("turn settled");
+    assert_eq!(turn["status"], "interrupted");
+    let ended = events.last().unwrap();
+    assert_eq!(ended["type"], "session/ended");
+    assert_eq!(ended["reason"], "plugin provider-echo was turned off");
+
+    // Off: listed with what its manifest says, contributing nothing.
+    let off = echo(&daemon).unwrap();
+    assert_eq!(off["enabled"], false);
+    assert_eq!(off["version"], "0.1.0");
+    assert!(off["description"].as_str().unwrap().contains("test agent"));
+    assert_eq!(off["permissions"]["process"][0], "echo");
+    assert_eq!(off["providers"].as_array().unwrap().len(), 0);
+    let commands = daemon.qcc(&["command", "list", "--json"]).json();
+    assert!(!commands.to_string().contains("provider-echo"), "{commands}");
+
+    // New threads cannot use it; old ones are still read, and say why they do not run.
+    let spawned = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--prompt", "hi"]);
+    assert!(!spawned.ok);
+    assert!(
+        spawned.stderr.contains("plugin provider-echo, which is turned off"),
+        "{}",
+        spawned.stderr
+    );
+    assert!(spawned.stderr.contains("(code -32009)"), "{}", spawned.stderr);
+    assert!(messages(&daemon.events(&old)).contains(&"before"));
+    let sent = daemon.qcc(&["thread", "send", &old, "again"]);
+    assert!(!sent.ok);
+    assert!(sent.stderr.contains("qcc plugin enable provider-echo"), "{}", sent.stderr);
+
+    // Off survives a restart.
+    daemon.stop();
+    let daemon = Daemon::start(dir.path());
+    assert_eq!(echo(&daemon).unwrap()["enabled"], false);
+    let settings: Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(settings["disabled_plugins"][0], "provider-echo");
+    // Saving the other settings does not turn it back on.
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let client = qcc_client::Client::connect(&daemon.socket).await.unwrap();
+        let params = serde_json::json!({ "settings": {} });
+        let saved = client.call_raw("settings.set", params).await.unwrap();
+        assert_eq!(saved["settings"]["disabled_plugins"][0], "provider-echo");
+    });
+    assert_eq!(echo(&daemon).unwrap()["enabled"], false);
+
+    // On again: it works, for new threads and old ones.
+    let enabled = daemon.qcc(&["plugin", "enable", "provider-echo"]);
+    assert!(enabled.ok, "{}", enabled.stderr);
+    assert_eq!(echo(&daemon).unwrap()["providers"][0]["id"], "echo");
+    let id = daemon.spawn("after");
+    daemon.wait_for(&id, "turn/completed");
+    let output = daemon.qcc(&["thread", "send", &old, "again", "--json", "--follow"]);
+    assert!(output.ok, "{}", output.stderr);
+    assert!(messages(&daemon.events(&old)).contains(&"again"));
+
+    // An environment goes away with its plugin too.
+    assert!(daemon.qcc(&["plugin", "disable", "env-git-worktree"]).ok);
+    let source = repo(&dir.path().join("src"), &[("a.txt", "a\n")]);
+    let isolated = spawn_in_worktree(&daemon, &source, &[]);
+    assert!(!isolated.ok);
+    assert!(
+        isolated.stderr.contains("plugin env-git-worktree, which is turned off"),
+        "{}",
+        isolated.stderr
+    );
+    assert!(daemon.qcc(&["plugin", "enable", "env-git-worktree"]).ok);
+    assert!(spawn_in_worktree(&daemon, &source, &[]).ok);
+
+    let unknown = daemon.qcc(&["plugin", "disable", "nope"]);
+    assert!(!unknown.ok);
+    assert!(unknown.stderr.contains("no plugin \"nope\" is installed"), "{}", unknown.stderr);
+}
+
 fn words(count: usize) -> String {
     (0..count).map(|n| n.to_string()).collect::<Vec<_>>().join(" ")
 }

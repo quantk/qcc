@@ -33,7 +33,8 @@ impl Core {
         }
         let Some(plugin) = self.host.environment(&environment.id).map(|(plugin, _)| plugin.clone())
         else {
-            let message = format!("no plugin provides environment {:?}", environment.id);
+            let message =
+                self.environment_missing(&environment.id, codes::ENVIRONMENT_ERROR).message;
             self.environment_failed(id, message);
             return;
         };
@@ -120,9 +121,10 @@ impl Core {
         else {
             return Ok(None);
         };
-        let (plugin, _) = self.host.environment(&environment.id).ok_or_else(|| {
-            environment_error(format!("no plugin provides environment {:?}", environment.id))
-        })?;
+        let (plugin, _) = self
+            .host
+            .environment(&environment.id)
+            .ok_or_else(|| self.environment_missing(&environment.id, codes::ENVIRONMENT_ERROR))?;
         Ok(Some((plugin.clone(), environment.id.clone(), thread.cwd.clone())))
     }
 

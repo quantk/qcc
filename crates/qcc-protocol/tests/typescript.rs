@@ -75,6 +75,8 @@ fn generate() -> String {
         .method::<ThreadUnsubscribe>()
         .method::<InteractionResolve>()
         .method::<PluginList>()
+        .method::<PluginEnable>()
+        .method::<PluginDisable>()
         .method::<ProviderModels>()
         .method::<ProviderSkills>()
         .method::<SettingsGet>()
@@ -92,6 +94,7 @@ fn generate() -> String {
         .register::<ThreadUpdatedNotification>()
         .register::<ProjectsUpdatedNotification>()
         .register::<CommentsUpdatedNotification>()
+        .register::<PluginsUpdatedNotification>()
         .register::<RpcError>();
     // Sequence numbers, timestamps and token counts stay far below 2^53.
     let types = Remapper::new().dangerous_bigints_as_number().remap_types(types);
@@ -111,6 +114,7 @@ fn generate() -> String {
     out.push_str(&format!("\t\"{THREAD_UPDATED}\": ThreadUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{PROJECTS_UPDATED}\": ProjectsUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{COMMENTS_UPDATED}\": CommentsUpdatedNotification,\n"));
+    out.push_str(&format!("\t\"{PLUGINS_UPDATED}\": PluginsUpdatedNotification,\n"));
     out.push_str("};\n");
     out
 }

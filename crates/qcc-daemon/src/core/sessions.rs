@@ -305,7 +305,14 @@ impl Core {
             // Reported separately through `PluginCrashed`, which settles every thread
             // of the plugin.
             Err(PluginError::Crashed(_)) => {}
-            Err(PluginError::Gone) => self.session_failed(&id, "provider plugin is gone".into()),
+            // A plugin turned off already ended its threads' sessions.
+            Err(PluginError::Gone) => {
+                let live = self.supervisor.engine(&id).is_ok_and(|engine| engine.session_live());
+                let starting = self.sessions.get(&id).is_some_and(|session| session.starting);
+                if live || starting {
+                    self.session_failed(&id, "provider plugin is gone".into());
+                }
+            }
         }
         let now = now_ms();
         if matches!(action, Action::Interrupt | Action::Release | Action::Reset)

@@ -6,69 +6,18 @@ use qcc_plugin_host::{
 };
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
-    CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, Empty, PluginInfo,
-    PluginListResult, PluginPermissions, ProviderModelsParams, ProviderModelsResult,
-    ProviderSkillsParams, ProviderSkillsResult, SendMode, ThreadSendParams, ThreadSpawnParams,
-    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
+    CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, Empty,
+    ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
+    SendMode, ThreadSendParams, ThreadSpawnParams, UiContributionsResult, UiItemContribution,
+    UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
 use super::{
     Command, Core, MODELS_TIMEOUT, QUERY_TIMEOUT, Responder, Watch, owns_kind, thread_not_found,
 };
-use crate::plugins;
 
 impl Core {
-    pub(super) fn plugin_list(&self) -> PluginListResult {
-        let plugins = self
-            .host
-            .plugins()
-            .iter()
-            .map(|plugin| {
-                let permissions = plugin.permissions();
-                let mut info = PluginInfo {
-                    id: plugin.id().to_owned(),
-                    name: plugin.manifest().name.clone(),
-                    version: plugin.manifest().version.clone(),
-                    bundled: plugins::is_bundled(plugin.id()),
-                    example: plugin.manifest().example,
-                    permissions: PluginPermissions {
-                        deltas: permissions.deltas,
-                        kv: permissions.kv,
-                        timers: permissions.timers,
-                        threads: permissions.threads,
-                        skills: permissions.skills,
-                        process: permissions.process.clone(),
-                    },
-                    providers: Vec::new(),
-                    environments: Vec::new(),
-                    commands: Vec::new(),
-                    skills: Vec::new(),
-                    settings: Vec::new(),
-                };
-                for contribution in plugin.contributions() {
-                    match contribution {
-                        Contribution::Provider(provider) => info.providers.push(provider.clone()),
-                        Contribution::Environment(environment) => {
-                            info.environments.push(environment.clone());
-                        }
-                        Contribution::Command(command) => info.commands.push(command.clone()),
-                        // Listed only if the plugin may offer it.
-                        Contribution::Skill(skill) if permissions.skills => {
-                            info.skills.push(skill.name.clone());
-                        }
-                        Contribution::Setting(field) => info.settings.push(field.clone()),
-                        Contribution::Skill(_)
-                        | Contribution::UiView(_)
-                        | Contribution::UiItem(_) => {}
-                    }
-                }
-                info
-            })
-            .collect();
-        PluginListResult { plugins }
-    }
-
     pub(super) fn provider_models(&mut self, p: ProviderModelsParams, responder: Responder) {
         let ProviderModelsParams { provider, refresh } = p;
         if !refresh && let Some(models) = self.models.get(&provider) {

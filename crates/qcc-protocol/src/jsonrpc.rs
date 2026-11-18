@@ -89,6 +89,8 @@ pub mod codes {
     pub const THREAD_ARCHIVED: i32 = -32007;
     /// No such plugin, or it does not contribute what was asked for, or it failed.
     pub const PLUGIN_ERROR: i32 = -32008;
+    /// What was asked for belongs to a plugin the user turned off.
+    pub const PLUGIN_DISABLED: i32 = -32009;
 }
 
 /// Either kind of message a peer can receive.

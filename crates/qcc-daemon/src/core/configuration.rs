@@ -17,7 +17,9 @@ impl Core {
         &mut self,
         p: SettingsSetParams,
     ) -> Result<SettingsResult, RpcError> {
-        let SettingsSetParams { settings: next } = p;
+        let SettingsSetParams { settings: mut next } = p;
+        // Turning plugins on and off starts and stops them; that takes its own methods.
+        next.disabled_plugins = self.settings.disabled_plugins.clone();
         settings::check(&next).map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
         self.check_plugin_settings(&next)?;
         let before = self.settings.plugins.clone();

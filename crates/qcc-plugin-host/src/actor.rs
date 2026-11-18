@@ -134,6 +134,14 @@ impl PluginHandle {
         self.send(request)?.blocking_recv().map_err(|_| PluginError::Gone)?.map(convert::outcome)
     }
 
+    /// Stop the plugin once it has handled what is already queued, without waiting
+    /// for the last handle to drop. Its processes are killed and callers still
+    /// waiting on a deferred answer hear [`PluginError::Gone`]; a plugin turned off
+    /// must not keep an agent running because a call holds a handle.
+    pub(crate) fn stop(&self) {
+        let _ = self.inner.tx.send(Message::Shutdown);
+    }
+
     /// Wait until the plugin has handled everything queued so far, its own process
     /// output and timers included. For callers that must see a quiet plugin, like
     /// a deterministic test.

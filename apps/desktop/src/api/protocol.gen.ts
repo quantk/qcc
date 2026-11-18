@@ -504,12 +504,30 @@ export type PermissionMode =
 /**  Nothing is asked and nothing is sandboxed. */
 "full";
 
+export type PluginDisableParams = {
+	id: string,
+	force?: boolean,
+};
+
+export type PluginEnableParams = {
+	id: string,
+};
+
 export type PluginInfo = {
 	id: string,
 	name?: string | null,
+	/**  What the plugin is for, from its manifest. */
+	description?: string | null,
 	version: string,
 	/**  Shipped with the daemon. */
 	bundled: boolean,
+	/**
+	 *  Turned on. A plugin turned off is not running: it contributes nothing, and
+	 *  what it contributed is listed empty.
+	 */
+	enabled: boolean,
+	/**  Turned on but could not be started: why. */
+	error?: string | null,
 	/**
 	 *  An example or test plugin, not one for everyday use (`example` in its
 	 *  manifest). Clients hide what it contributes unless asked to show it.
@@ -538,6 +556,16 @@ export type PluginPermissions = {
 	skills: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
+};
+
+export type PluginResult = {
+	plugin: PluginInfo,
+};
+
+export type PluginsUpdatedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	plugins: PluginInfo[],
 };
 
 /**  A program some plugin may run, and which file that is now. */
@@ -733,6 +761,11 @@ export type Settings = {
 	 *  then by setting id. A setting not here has its default.
 	 */
 	plugins?: { [key in string]: { [key in string]: string } },
+	/**
+	 *  Plugins turned off, by id, sorted. Changed only by `plugin.enable` and
+	 *  `plugin.disable`, which start and stop them: `settings.set` keeps it as it is.
+	 */
+	disabled_plugins?: string[],
 };
 
 export type SettingsResult = {
@@ -1434,6 +1467,8 @@ export type Methods = {
 	"thread.unsubscribe": { params: ThreadUnsubscribeParams; result: Empty },
 	"interaction.resolve": { params: InteractionResolveParams; result: Empty },
 	"plugin.list": { params: Empty; result: PluginListResult },
+	"plugin.enable": { params: PluginEnableParams; result: PluginResult },
+	"plugin.disable": { params: PluginDisableParams; result: PluginResult },
 	"provider.models": { params: ProviderModelsParams; result: ProviderModelsResult },
 	"provider.skills": { params: ProviderSkillsParams; result: ProviderSkillsResult },
 	"settings.get": { params: Empty; result: SettingsResult },
@@ -1453,4 +1488,5 @@ export type Notifications = {
 	"thread.updated": ThreadUpdatedNotification,
 	"projects.updated": ProjectsUpdatedNotification,
 	"comments.updated": CommentsUpdatedNotification,
+	"plugins.updated": PluginsUpdatedNotification,
 };

@@ -30,6 +30,9 @@ pub struct Manifest {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// One sentence on what the plugin is for, shown where the user turns it on or off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub version: String,
     /// Plugin API version the component was built against.
     pub api: String,

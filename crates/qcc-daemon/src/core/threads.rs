@@ -100,10 +100,7 @@ impl Core {
         let environment = match p.environment {
             Some(id) => {
                 if self.host.environment(&id).is_none() {
-                    return Err(RpcError::new(
-                        codes::INVALID_PARAMS,
-                        format!("no plugin provides environment {id:?}"),
-                    ));
+                    return Err(self.environment_missing(&id, codes::INVALID_PARAMS));
                 }
                 Some(ThreadEnvironment {
                     id,
@@ -242,6 +239,7 @@ impl Core {
         }
         let notes = context.iter().map(|context| self.context_note(context)).collect();
         self.check_open(&thread_id)?;
+        self.check_runnable(&thread_id)?;
         let attachments = self.store_attachments(&thread_id, attachments)?;
         let input = UserInput { text, notes, attachments };
         let provider = self.supervisor.thread(&thread_id).map(|thread| thread.provider.clone());
@@ -308,10 +306,7 @@ impl Core {
             )));
         }
         if self.host.environment(&environment).is_none() {
-            return Err(RpcError::new(
-                codes::INVALID_PARAMS,
-                format!("no plugin provides environment {environment:?}"),
-            ));
+            return Err(self.environment_missing(&environment, codes::INVALID_PARAMS));
         }
         let attached = ThreadEnvironment {
             id: environment,
@@ -566,7 +561,8 @@ impl Core {
         }
         let now = now_ms();
         for id in self.queued.clone() {
-            if self.in_transition(&id) {
+            // Messages for an agent whose plugin is off wait until it is back on.
+            if self.in_transition(&id) || self.check_runnable(&id).is_err() {
                 continue;
             }
             let Ok(engine) = self.supervisor.engine(&id) else {

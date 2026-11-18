@@ -266,13 +266,24 @@ pub fn changes(changes: &EnvironmentChanges) -> String {
 }
 
 pub fn plugin(plugin: &PluginInfo) -> String {
+    let status = match (&plugin.error, plugin.enabled) {
+        (_, false) => "  disabled",
+        (Some(_), true) => "  failed",
+        (None, true) => "",
+    };
     let mut lines = vec![format!(
-        "{} {}{}{}",
+        "{} {}{status}{}{}",
         plugin.id,
         plugin.version,
         if plugin.bundled { "  (bundled)" } else { "" },
         if plugin.example { "  (example)" } else { "" }
     )];
+    if let Some(description) = &plugin.description {
+        lines.push(format!("  {description}"));
+    }
+    if let Some(error) = &plugin.error {
+        lines.push(format!("  error        {error}"));
+    }
     for provider in &plugin.providers {
         lines.push(format!("  provider     {}  {}", provider.id, provider.name));
         let capabilities = &provider.capabilities;

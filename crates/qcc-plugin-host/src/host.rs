@@ -134,6 +134,16 @@ impl PluginHost {
         self.load(manifest, &wasm, grant, services)
     }
 
+    /// Take a plugin out of the host and stop it. Requests queued before are still
+    /// handled; then it shuts down, its processes are killed and later calls fail
+    /// with [`crate::PluginError::Gone`].
+    pub fn unload(&mut self, id: &str) -> Option<PluginHandle> {
+        let index = self.plugins.iter().position(|plugin| plugin.id() == id)?;
+        let plugin = self.plugins.remove(index);
+        plugin.stop();
+        Some(plugin)
+    }
+
     pub fn plugins(&self) -> &[PluginHandle] {
         &self.plugins
     }

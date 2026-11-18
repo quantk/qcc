@@ -21,8 +21,9 @@ use clap::{Args, Parser, Subcommand};
 use qcc_client::Client;
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Empty, InteractionResolve,
-    InteractionResolveParams, PluginList, ProviderModels, ProviderModelsParams, ProviderSkills,
-    ProviderSkillsParams, SettingsGet, SettingsSet, SettingsSetParams,
+    InteractionResolveParams, PluginDisable, PluginDisableParams, PluginEnable, PluginEnableParams,
+    PluginList, ProviderModels, ProviderModelsParams, ProviderSkills, ProviderSkillsParams,
+    SettingsGet, SettingsSet, SettingsSetParams,
 };
 use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
@@ -134,8 +135,19 @@ struct Answer {
 
 #[derive(Subcommand)]
 enum PluginCommand {
-    /// List loaded plugins and what they contribute.
+    /// List installed plugins, whether each is on, and what it contributes.
     List,
+    /// Turn a plugin on and start it, now and on later starts of the daemon.
+    Enable { plugin: String },
+    /// Turn a plugin off and stop it, now and on later starts of the daemon. Its
+    /// agents, environments, commands and skills go away; threads made with them
+    /// stay readable.
+    Disable {
+        plugin: String,
+        /// Even while its agents are working: their turns are cut short.
+        #[arg(long)]
+        force: bool,
+    },
     /// A plugin's own settings and their values.
     Settings { plugin: String },
     /// Set one of a plugin's own settings; without a value, go back to its default.
@@ -315,6 +327,25 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             let result = client.call::<SettingsSet>(SettingsSetParams { settings }).await?;
             if json {
                 print_json(&result.settings.plugins.get(&plugin))?;
+            }
+        }
+
+        Command::Plugin(PluginCommand::Enable { plugin }) => {
+            let result = client.call::<PluginEnable>(PluginEnableParams { id: plugin }).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(render::plugin(&result.plugin));
+            }
+        }
+
+        Command::Plugin(PluginCommand::Disable { plugin, force }) => {
+            let params = PluginDisableParams { id: plugin, force };
+            let result = client.call::<PluginDisable>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                out(render::plugin(&result.plugin));
             }
         }
 

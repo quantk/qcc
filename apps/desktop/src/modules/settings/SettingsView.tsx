@@ -16,6 +16,16 @@ import { envOf, envRows, providerSettings, withProgram, withProvider } from "../
 import { store, useApp } from "../../state/store";
 import { MAX_ZOOM, MIN_ZOOM, formatZoom, zoomIn, zoomOut } from "../../state/zoom";
 import { Choice, EffortPicker, EnvEditor, ModelPicker } from "../../ui/kit";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -56,10 +66,12 @@ export function SettingsView() {
   const [draft, setDraft] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const settings = draft ?? loaded?.settings ?? {};
+  // MCP servers, skills and plugins turned off are changed from their own screens
+  // and switches at once, not through the draft.
+  const apart = { mcp_servers: undefined, skills: undefined, disabled_plugins: undefined };
   const dirty =
     draft !== null &&
-    JSON.stringify({ ...draft, mcp_servers: undefined, skills: undefined }) !==
-      JSON.stringify({ ...(loaded?.settings ?? {}), mcp_servers: undefined, skills: undefined });
+    JSON.stringify({ ...draft, ...apart }) !== JSON.stringify({ ...(loaded?.settings ?? {}), ...apart });
   const plugins = useMemo(() => visiblePlugins(allPlugins, showExamples), [allPlugins, showExamples]);
   const providers = useMemo(() => providersOf(plugins), [plugins]);
 
@@ -128,7 +140,10 @@ export function SettingsView() {
             />
           ))}
         </Section>
-        <Section title="Plugins" hint="What is loaded, what each one adds and what it is allowed to do.">
+        <Section
+          title="Plugins"
+          hint="What each one adds and what it is allowed to do. A plugin turned off stops at once: what it adds goes away, and threads made with it can be read but take no messages until it is back."
+        >
           {allPlugins.map((plugin) => (
             <PluginCard key={plugin.id} plugin={plugin} settings={settings} providers={providers} change={setDraft} />
           ))}
@@ -310,6 +325,20 @@ function PluginCard(props: {
 }) {
   const { plugin } = props;
   const { permissions } = plugin;
+  const [switching, setSwitching] = useState(false);
+  /** Turning it off was refused: its agents are working. */
+  const [busy, setBusy] = useState(false);
+  const threads = useApp((state) => state.threads);
+  const working = Object.values(threads).filter(
+    (thread) => thread.status === "active" && plugin.providers.some((provider) => provider.id === thread.provider),
+  ).length;
+  const name = plugin.name ?? plugin.id;
+  const toggle = async (enabled: boolean, force = false) => {
+    setSwitching(true);
+    const result = await store().setPluginEnabled(plugin.id, enabled, force);
+    setSwitching(false);
+    setBusy(result.busy !== undefined);
+  };
   const allowed = [
     permissions.deltas && "timeline",
     permissions.kv && "storage",
@@ -327,17 +356,48 @@ function PluginCard(props: {
   return (
     <article className="flex flex-col gap-1 rounded-lg border px-4 py-3 text-sm">
       <header className="flex items-center gap-2">
-        <h3 className="font-semibold">{plugin.name ?? plugin.id}</h3>
-        <span className="font-mono text-xs text-muted-foreground">
+        <h3 className={plugin.enabled ? "shrink-0 font-semibold" : "shrink-0 font-semibold text-muted-foreground"}>{name}</h3>
+        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
           {plugin.id} {plugin.version}
         </span>
         <span className="flex-1" />
         {plugin.bundled && <Badge variant="secondary">bundled</Badge>}
         {plugin.example && <Badge variant="outline">example</Badge>}
+        {!plugin.enabled && <Badge variant="outline">off</Badge>}
+        <Switch
+          aria-label={plugin.enabled ? `Turn off ${name}` : `Turn on ${name}`}
+          title={plugin.enabled ? "Turn off" : "Turn on"}
+          checked={plugin.enabled}
+          disabled={switching}
+          onCheckedChange={(checked) => void toggle(checked)}
+        />
       </header>
+      {plugin.description && <p>{plugin.description}</p>}
+      {plugin.error && (
+        <p className="flex items-center gap-1.5 text-destructive">
+          <CircleAlertIcon className="size-3.5 shrink-0" /> Cannot start: {plugin.error}
+        </p>
+      )}
       {adds.length > 0 && <p className="text-muted-foreground">Adds: {adds.join(" · ")}</p>}
       <p className="text-muted-foreground">May: {allowed.length > 0 ? allowed.join(" · ") : "nothing beyond logging"}</p>
-      {(plugin.settings ?? []).length > 0 && (
+      <AlertDialog open={busy} onOpenChange={(open) => !open && setBusy(false)}>
+        <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Turn off {name} while it works?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {working === 1 ? "One of its threads is" : `${working || "Some"} of its threads are`} working. Turning it off now cuts
+              the turns short; the threads stay and can be read, and take messages again once it is back on.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it on</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={switching} onClick={() => void toggle(false, true)}>
+              Turn off anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {plugin.enabled && (plugin.settings ?? []).length > 0 && (
         <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {(plugin.settings ?? []).map((field) => (
             <PluginSettingField

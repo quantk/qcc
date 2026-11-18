@@ -14,6 +14,7 @@ import {
   threadTitle,
   threadTree,
   visiblePlugins,
+  withPlugin,
 } from "./selectors";
 
 function thread(id: string, created_at: number, parent?: string): Thread {
@@ -77,6 +78,22 @@ describe("example plugins", () => {
     const plugins = [plugin("real", false), plugin("echo", true)];
     expect(visiblePlugins(plugins, false).map((p) => p.id)).toEqual(["real"]);
     expect(visiblePlugins(plugins, true).map((p) => p.id)).toEqual(["real", "echo"]);
+  });
+
+  it("turned off are left out, examples or not", () => {
+    const off = (p: PluginInfo) => ({ ...p, enabled: false });
+    const plugins = [plugin("real", false), off(plugin("codex", false)), off(plugin("echo", true))];
+    expect(visiblePlugins(plugins, true).map((p) => p.id)).toEqual(["real"]);
+  });
+
+  it("are replaced one at a time, in place", () => {
+    const plugins = [plugin("a", false), plugin("b", false)];
+    const changed = withPlugin(plugins, { ...plugin("a", false), enabled: false });
+    expect(changed.map((p) => [p.id, p.enabled])).toEqual([
+      ["a", false],
+      ["b", undefined],
+    ]);
+    expect(withPlugin(plugins, plugin("c", false)).map((p) => p.id)).toEqual(["a", "b", "c"]);
   });
 });
 

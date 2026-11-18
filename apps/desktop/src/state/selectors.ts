@@ -1,9 +1,17 @@
 import { elapsed, relativePath, relativeTime, tailPath } from "../util/format";
 import type { PermissionMode, PluginInfo, Project, ProviderInfo, Settings, Thread } from "../api/protocol.gen";
 
-/** Example plugins are left out unless asked for. */
+/** The plugins whose contributions are offered: those turned on, example plugins
+ * only when asked for. */
 export function visiblePlugins(plugins: readonly PluginInfo[], showExamples: boolean): readonly PluginInfo[] {
-  return showExamples ? plugins : plugins.filter((plugin) => !plugin.example);
+  return plugins.filter((plugin) => plugin.enabled !== false && (showExamples || !plugin.example));
+}
+
+/** The list with one plugin replaced by what the daemon now says about it. */
+export function withPlugin(plugins: readonly PluginInfo[], info: PluginInfo): readonly PluginInfo[] {
+  return plugins.some((plugin) => plugin.id === info.id)
+    ? plugins.map((plugin) => (plugin.id === info.id ? info : plugin))
+    : [...plugins, info];
 }
 
 export function providersOf(plugins: readonly PluginInfo[]): ProviderInfo[] {

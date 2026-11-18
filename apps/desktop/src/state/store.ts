@@ -36,7 +36,7 @@ import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
-import { visiblePlugins } from "./selectors";
+import { visiblePlugins, withPlugin } from "./selectors";
 import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
@@ -252,10 +252,7 @@ export class AppStore {
       if (this.watch !== watch) return;
       this.mergeThreads(list.threads);
       this.set({ projects: projects.projects, settings, skills: skills.skills });
-      this.set({
-        allPlugins: plugins.plugins,
-        plugins: visiblePlugins(plugins.plugins, this.state.showExamples),
-      });
+      this.setPlugins(plugins.plugins);
       await Promise.all([...this.followed.keys()].map((threadId) => this.followLive(threadId)));
     } catch (error) {
       this.fail(error);
@@ -265,6 +262,8 @@ export class AppStore {
   private notified(notification: Notification) {
     if (notification.method === "thread.updated") {
       if (notification.params.subscription === this.watch) this.mergeThreads([notification.params.thread]);
+    } else if (notification.method === "plugins.updated") {
+      if (notification.params.subscription === this.watch) this.pluginsChanged(notification.params.plugins);
     } else if (notification.method === "projects.updated") {
       if (notification.params.subscription === this.watch) this.set({ projects: notification.params.projects });
     } else if (notification.method === "comments.updated") {
@@ -457,6 +456,41 @@ export class AppStore {
       put({ loading: false, items: [], error: errorMessage(error) });
     }
   }
+
+  private setPlugins(allPlugins: readonly PluginInfo[]) {
+    this.set({ allPlugins, plugins: visiblePlugins(allPlugins, this.state.showExamples) });
+  }
+
+  /** A plugin started or stopped: what it offered comes or goes, and with it the
+   * programs and skills the settings list. */
+  private pluginsChanged(allPlugins: readonly PluginInfo[]) {
+    this.setPlugins(allPlugins);
+    void this.reloadSettings();
+    void this.attempt(() => this.api.call("skill.list", {})).then((skills) => {
+      if (skills) this.set({ skills: skills.skills });
+    });
+  }
+
+  /**
+   * Turn a plugin on or off. Turning off one whose agents are working is refused
+   * unless `force`: that refusal comes back as `busy`, for the user to confirm,
+   * rather than as the error.
+   */
+  setPluginEnabled = async (id: string, enabled: boolean, force = false): Promise<{ ok: boolean; busy?: string }> => {
+    try {
+      const result = enabled
+        ? await this.api.call("plugin.enable", { id })
+        : await this.api.call("plugin.disable", { id, force });
+      this.pluginsChanged(withPlugin(this.state.allPlugins, result.plugin));
+      return { ok: true };
+    } catch (error) {
+      if (!enabled && !force && error instanceof ApiError && error.code === codes.threadBusy) {
+        return { ok: false, busy: error.message };
+      }
+      this.fail(error);
+      return { ok: false };
+    }
+  };
 
   /** Offer example plugins (the echo provider and its views) or leave them out. */
   setShowExamples = (show: boolean) => {

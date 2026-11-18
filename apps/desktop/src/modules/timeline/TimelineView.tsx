@@ -326,8 +326,8 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
                     {row.entry ? (
                       <Remembered memory={memory} entryKey={row.key}>
                         <KeepInPlace place={place}>
-                        <EntryView thread={thread} entry={row.entry} />
-                      </KeepInPlace>
+                          <EntryView thread={thread} entry={row.entry} />
+                        </KeepInPlace>
                       </Remembered>
                     ) : (
                       <Button variant="ghost" size="sm" className="self-center" onClick={showEarlier}>

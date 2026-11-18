@@ -238,3 +238,9 @@ Rules that keep modules independent:
   are mounted, so a renderer is unmounted when its item scrolls away. State that should
   survive that, like whether something is unfolded, goes through `useRemembered` from
   `src/ui/kit` instead of `useState`; `ItemTrace` already does this.
+- WebKit has no scroll anchoring. Something in the timeline that opens or closes on a
+  click calls `keep(element)` from `useKeepInPlace` (`src/ui/kit`) right before the
+  change: the element stays put on the screen, and the timeline stops following its end
+  until the reader scrolls. Do not put a box that scrolls by itself into the timeline:
+  it takes the wheel from it; show the start and a button for the rest, as `Code` in
+  `AgentTrace.tsx` does.

@@ -82,6 +82,10 @@ with the queue, steer and attachments (files and images: the paperclip, `Ctrl+V`
 switching agent, model, effort and permission mode; archiving with a confirmation if the worktree
 has uncommitted work.
 
+A command's or tool's output unfolds to its first 12 lines with "Show all N lines" under them;
+it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close
+stays where it is on the screen: the timeline stops following the end until you scroll.
+
 ### Mermaid
 
 A ` ```mermaid ` block in an agent's answer is drawn as a diagram (in the light or dark theme),

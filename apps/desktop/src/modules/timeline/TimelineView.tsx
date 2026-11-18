@@ -5,7 +5,15 @@ import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "r
 import type { Item, Thread } from "../../api/protocol.gen";
 import { estimateEntryHeight, newTurnKey, turnRoom } from "../../state/scroll";
 import { type Entry, type Timeline, conversationStart, earlierConversations } from "../../state/timeline";
-import { DataTrace, InteractionOutcome, InteractionPrompt, MessageAttachments, Remembered } from "../../ui/kit";
+import {
+  DataTrace,
+  InteractionOutcome,
+  InteractionPrompt,
+  KeepInPlace,
+  MessageAttachments,
+  type Place,
+  Remembered,
+} from "../../ui/kit";
 import { itemKey, useUi } from "../../ui/registry";
 import { deferScrollWrites } from "./deferScrollWrites";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -124,12 +132,18 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
   const hold = useRef<{ key: string; offset: number } | null>(null);
   // The user's message that starts the turn under way, while it has room below it.
   const turn = useRef<string | null>(null);
+  // The reader opened or closed something in view: the view keeps still around it
+  // instead of following the end, until they scroll or send the next message.
+  // Following the end moved what they clicked up by all that it unfolded.
+  const pinned = useRef(false);
+  const [, setPinnedAt] = useState(0);
   const previousEntries = useRef(entries);
   if (previousEntries.current !== entries) {
     const key = newTurnKey(previousEntries.current, entries);
     if (key !== null) {
       turn.current = key;
       hold.current = { key, offset: PEEK };
+      pinned.current = false;
     }
     previousEntries.current = entries;
   }
@@ -151,9 +165,9 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
     paddingEnd: PADDING_END,
     gap: GAP,
     overscan: 6,
-    // While a new turn has room below it, the view stays where the turn put it;
-    // otherwise it sticks to the end while it is there.
-    anchorTo: room > 0 ? "start" : "end",
+    // While a new turn has room below it, or the reader has pinned the view, it stays
+    // where it is; otherwise it sticks to the end while it is there.
+    anchorTo: room > 0 || pinned.current ? "start" : "end",
     followOnAppend: true,
     scrollEndThreshold: END_THRESHOLD,
     // A question the agent waits on keeps what was typed into it while out of view.
@@ -236,10 +250,28 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
   // scrolling it set off has stopped. Their scrolling ends any hold, and the
   // virtualizer leaves the scroll position to them meanwhile.
   const gesture = useRef({ on: false, at: 0 });
+  const unpin = useCallback(() => {
+    if (!pinned.current) return;
+    pinned.current = false;
+    setPinnedAt(performance.now());
+  }, []);
   const scrolling = useCallback(() => {
     hold.current = null;
+    unpin();
     gesture.current = { on: true, at: performance.now() };
-  }, []);
+  }, [unpin]);
+  const place = useMemo<Place>(
+    () => ({
+      viewport: () => viewportRef.current,
+      pin: () => {
+        hold.current = null;
+        if (pinned.current) return;
+        pinned.current = true;
+        setPinnedAt(performance.now());
+      },
+    }),
+    [],
+  );
   useLayoutEffect(() => {
     deferScrollWrites(virtualizer, () => {
       const current = gesture.current;
@@ -251,6 +283,7 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
 
   const toEnd = () => {
     hold.current = null;
+    unpin();
     const viewport = viewportRef.current;
     const far = viewport ? contentEnd - viewport.scrollTop > 3 * viewport.clientHeight : true;
     // A long way down smooth scrolling would walk through guessed heights; jump.
@@ -292,7 +325,9 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
                   >
                     {row.entry ? (
                       <Remembered memory={memory} entryKey={row.key}>
+                        <KeepInPlace place={place}>
                         <EntryView thread={thread} entry={row.entry} />
+                      </KeepInPlace>
                       </Remembered>
                     ) : (
                       <Button variant="ghost" size="sm" className="self-center" onClick={showEarlier}>

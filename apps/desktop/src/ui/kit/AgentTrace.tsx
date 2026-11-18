@@ -2,12 +2,15 @@
 // items instead of AI SDK message parts. Each is one line of a trace that unfolds into
 // what the agent saw or thought.
 import { BracesIcon, BrainIcon, TerminalIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import { type MouseEvent, type ReactNode, useMemo, useRef } from "react";
 
 import type { ItemStatus } from "../../api/protocol.gen";
+import { previewText } from "../../state/preview";
+import { useKeepInPlace } from "./KeepInPlace";
 import { Markdown } from "./Markdown";
 import { useRemembered } from "./Remembered";
-import { CodeBlock, CodeBlockContent, CodeBlockLine } from "@/components/ui/code-block";
+import { Button } from "@/components/ui/button";
+import { CodeBlock, CodeBlockContent, CodeBlockFooter, CodeBlockLine } from "@/components/ui/code-block";
 import {
   Trace,
   TraceCollapsible,
@@ -60,6 +63,10 @@ export function ItemTrace(props: {
 }) {
   // Kept while the item is scrolled out of the timeline.
   const [chosen, setChosen] = useRemembered<boolean | null>("trace-open", null);
+  // The line opens downwards, so it stays put on its own, unless the list follows
+  // its end; keeping it in place also stops that.
+  const keep = useKeepInPlace();
+  const trigger = useRef<HTMLButtonElement>(null);
   const end = outcome(props.status);
   const line = (
     <TraceLine status={lineStatus(props.status, props.failed)}>
@@ -74,23 +81,54 @@ export function ItemTrace(props: {
   if (!hasContent(props.children)) return <Trace>{line}</Trace>;
   return (
     <Trace>
-      <TraceCollapsible open={chosen ?? props.open ?? false} onOpenChange={(open) => setChosen(open)}>
-        <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsible
+        open={chosen ?? props.open ?? false}
+        onOpenChange={(open) => {
+          keep(trigger.current);
+          setChosen(open);
+        }}
+      >
+        <TraceCollapsibleTrigger ref={trigger}>{line}</TraceCollapsibleTrigger>
         <TraceCollapsibleContent>{props.children}</TraceCollapsibleContent>
       </TraceCollapsible>
     </Trace>
   );
 }
 
-function Code({ text, language, failed }: { text: string; language: string; failed?: boolean }) {
-  const lines = useHighlightedCode(text, language);
+/**
+ * How much of an output is shown before the reader asks for all of it: about as tall
+ * as the box it replaces. The output has no scrolling of its own: a box that
+ * scrolls inside the timeline took the wheel from it, so the timeline stopped under
+ * the pointer.
+ */
+const PREVIEW = { lines: 12, chars: 1600 };
+
+function Code(props: { text: string; language: string; failed?: boolean; name: string }) {
+  const [all, setAll] = useRemembered(`code-all:${props.name}`, false);
+  const preview = useMemo(() => previewText(props.text, PREVIEW), [props.text]);
+  const lines = useHighlightedCode(all || !preview.clipped ? props.text : preview.text, props.language);
+  const keep = useKeepInPlace();
+  const block = useRef<HTMLDivElement>(null);
+  const toggle = (event: MouseEvent<HTMLButtonElement>) => {
+    // More grows below what is being read, so the block stays; less takes away what
+    // is above the button, so the button stays.
+    keep(all ? event.currentTarget : block.current);
+    setAll(!all);
+  };
   return (
-    <CodeBlock size="sm" variant={failed ? "destructive" : "default"}>
-      <CodeBlockContent wrap className="max-h-64">
+    <CodeBlock ref={block} size="sm" variant={props.failed ? "destructive" : "default"}>
+      <CodeBlockContent wrap>
         {lines.map((line, index) => (
           <CodeBlockLine key={index}>{line}</CodeBlockLine>
         ))}
       </CodeBlockContent>
+      {preview.clipped && (
+        <CodeBlockFooter className="-mt-1.5">
+          <Button variant="ghost" size="xs" className="-ml-2 text-muted-foreground" onClick={toggle}>
+            {all ? "Show less" : preview.lines > 1 ? `Show all ${preview.lines} lines` : "Show all"}
+          </Button>
+        </CodeBlockFooter>
+      )}
     </CodeBlock>
   );
 }
@@ -109,7 +147,7 @@ export function CommandTrace(props: { command: string; output?: string | null; e
       failed={failed}
       open={props.status === "pending" && !!props.output}
     >
-      {props.output ? <Code text={props.output} language="ansi" failed={failed} /> : null}
+      {props.output ? <Code name="output" text={props.output} language="ansi" failed={failed} /> : null}
     </ItemTrace>
   );
 }
@@ -132,8 +170,8 @@ export function ToolTrace(props: {
     <ItemTrace icon={props.icon} title={props.title} hint={props.hint} status={props.status}>
       {hasInput || props.output ? (
         <div className="flex flex-col gap-2">
-          {hasInput && <Code text={JSON.stringify(props.input, null, 2)} language="json" />}
-          {props.output ? <Code text={props.output} language="ansi" failed={props.status === "failed"} /> : null}
+          {hasInput && <Code name="input" text={JSON.stringify(props.input, null, 2)} language="json" />}
+          {props.output ? <Code name="output" text={props.output} language="ansi" failed={props.status === "failed"} /> : null}
         </div>
       ) : null}
     </ItemTrace>
@@ -154,7 +192,7 @@ export function ReasoningTrace(props: { text: string; status: ItemStatus }) {
 export function DataTrace(props: { title: string; status: ItemStatus; value: unknown; description?: ReactNode }) {
   return (
     <ItemTrace icon={<BracesIcon />} title={props.title} status={props.status} description={props.description}>
-      <Code text={JSON.stringify(props.value, null, 2)} language="json" />
+      <Code name="value" text={JSON.stringify(props.value, null, 2)} language="json" />
     </ItemTrace>
   );
 }

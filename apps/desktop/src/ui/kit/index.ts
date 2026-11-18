@@ -14,3 +14,4 @@ export { EnvEditor } from "./EnvEditor";
 export { ResizeHandle } from "./ResizeHandle";
 export { Remembered, useRemembered } from "./Remembered";
 export { AttachmentTile, MessageAttachments, PictureDialog } from "./Attachments";
+export { KeepInPlace, type Place, useKeepInPlace } from "./KeepInPlace";

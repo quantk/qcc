@@ -47,11 +47,17 @@ agent.
 ### Live
 
 `Ctrl+Shift+L`. A wall of tiles for all agents that are working, waiting for you, or finished a
-turn within the last 10 minutes (up to 12 tiles). Order: first those waiting for you, then the
+turn within the last 10 minutes (up to 24 tiles). Order: first those waiting for you, then the
 working ones (the one working longest first), then the recently finished. A tile shows the turn
 time, project, agent, model, tokens spent, context fill, and the agent's latest steps as they
-appear: commands with the tail of their output, edits, reads, tools, the answer being written. A
-question or permission request can be answered right from the tile.
+appear: commands with the tail of their output, edits, reads, tools, the answer being written. The
+steps sit in a box of limited height that always shows the latest one; a click on the tile opens
+the whole timeline. A question or permission request can be answered right from the tile.
+
+The switch in the header sets how big the tiles are, and the choice is remembered. Compact (the
+default) fits a dozen agents or more on a screen: as many columns as the window width allows, the
+last 5 steps with a line of output each. Detailed shows wider tiles with the last 10 steps and
+three lines of output.
 
 ### Metrics
 

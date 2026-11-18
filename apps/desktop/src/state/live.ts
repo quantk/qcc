@@ -9,7 +9,33 @@ import type { Entry } from "./timeline";
 export const RECENT_MS = 10 * 60_000;
 
 /** At most this many tiles: each one follows its thread's events. */
-export const WALL_MAX = 12;
+export const WALL_MAX = 24;
+
+/**
+ * How much each tile shows. Compact tiles are short and narrow, so a screen holds a
+ * dozen agents or more; detailed ones show more of each agent's latest steps.
+ */
+export type Density = "compact" | "detailed";
+
+export type DensityLayout = {
+  /** Steps shown under each agent. */
+  steps: number;
+  /** How much of each step's output is kept. */
+  detail: DetailSize;
+};
+
+export const DENSITY: Record<Density, DensityLayout> = {
+  // A narrow tile fits about 45 characters to a line: two of them hold the end of an answer.
+  compact: { steps: 5, detail: { lines: 1, chars: 80 } },
+  detailed: { steps: 10, detail: { lines: 3, chars: 240 } },
+};
+
+export const DENSITY_KEY = "qcc.live-density";
+
+/** The density saved in storage; compact when nothing (or nothing known) is saved. */
+export function parseDensity(saved: string | null): Density {
+  return saved === "detailed" ? "detailed" : "compact";
+}
 
 const rank = { waiting: 0, failed: 1, active: 2, idle: 3, archived: 4 } as const;
 
@@ -46,16 +72,17 @@ export type TailLine = {
   failed: boolean;
 };
 
-/** Lines of output kept under a step. */
-const DETAIL_LINES = 3;
+/**
+ * How much output is kept under a step: its last `lines` lines, and at most `chars`
+ * characters of them, since an answer streams as one long line and its end is what
+ * matters.
+ */
+export type DetailSize = { lines: number; chars: number };
 
-/** Characters kept under a step: an answer streams as one long line, and its end is what matters. */
-const DETAIL_CHARS = 240;
-
-function lastLines(text: string | null | undefined, count = DETAIL_LINES): string | undefined {
+function lastLines(text: string | null | undefined, size: DetailSize): string | undefined {
   const lines = (text ?? "").trimEnd().split("\n");
-  let kept = lines.slice(-count).join("\n");
-  if (kept.length > DETAIL_CHARS) kept = `…${kept.slice(-DETAIL_CHARS).trimStart()}`;
+  let kept = lines.slice(-size.lines).join("\n");
+  if (kept.length > size.chars) kept = `…${kept.slice(-size.chars).trimStart()}`;
   return kept.trim() ? kept : undefined;
 }
 
@@ -63,7 +90,7 @@ function firstLine(text: string): string {
   return text.trim().split("\n", 1)[0] ?? "";
 }
 
-function lineOf(entry: Entry): TailLine | null {
+function lineOf(entry: Entry, detail: DetailSize): TailLine | null {
   switch (entry.kind) {
     case "user":
       return { key: entry.key, kind: "you", text: firstLine(entry.text), pending: entry.queued, failed: false };
@@ -84,7 +111,7 @@ function lineOf(entry: Entry): TailLine | null {
       switch (item.type) {
         case "agentMessage":
           // The answer as it streams: its end is what is being written now.
-          return { ...base, kind: "message", text: "", detail: lastLines(item.text) };
+          return { ...base, kind: "message", text: "", detail: lastLines(item.text, detail) };
         case "reasoning":
           return pending ? { ...base, kind: "thought", text: "Thinking…" } : null;
         case "plan":
@@ -95,7 +122,7 @@ function lineOf(entry: Entry): TailLine | null {
             failed: failed || (item.exit_code != null && item.exit_code !== 0),
             kind: "command",
             text: item.command,
-            detail: lastLines(item.output),
+            detail: lastLines(item.output, detail),
           };
         case "fileChange":
           return { ...base, kind: "edit", text: item.path };
@@ -104,7 +131,7 @@ function lineOf(entry: Entry): TailLine | null {
         case "search":
           return { ...base, kind: "search", text: item.query };
         case "tool":
-          return { ...base, kind: "tool", text: item.name, detail: lastLines(item.output, 2) };
+          return { ...base, kind: "tool", text: item.name, detail: lastLines(item.output, { ...detail, lines: Math.min(2, detail.lines) }) };
         case "extension":
           return { ...base, kind: "tool", text: item.kind };
       }
@@ -112,11 +139,11 @@ function lineOf(entry: Entry): TailLine | null {
   }
 }
 
-/** The last `count` steps of a timeline, oldest first. */
-export function tailOf(entries: readonly Entry[], count: number): TailLine[] {
+/** The last `count` steps of a timeline, oldest first, each with a little of its output. */
+export function tailOf(entries: readonly Entry[], count: number, detail: DetailSize = DENSITY.detailed.detail): TailLine[] {
   const lines: TailLine[] = [];
   for (let index = entries.length - 1; index >= 0 && lines.length < count; index -= 1) {
-    const line = lineOf(entries[index]!);
+    const line = lineOf(entries[index]!, detail);
     if (line) lines.push(line);
   }
   return lines.reverse();

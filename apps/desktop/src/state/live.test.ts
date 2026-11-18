@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { EventPayload, Item, ItemShape, Thread, ThreadEvent } from "../api/protocol.gen";
-import { RECENT_MS, contextFill, liveCount, tailOf, wallThreads } from "./live";
+import { DENSITY, RECENT_MS, contextFill, liveCount, parseDensity, tailOf, wallThreads } from "./live";
 import { applyEvents, emptyTimeline } from "./timeline";
 
 const NOW = 1_000_000_000;
@@ -71,5 +71,16 @@ describe("the live wall", () => {
     expect(tailOf(long.entries, 1)[0]!.detail).toMatch(/^….*x the end$/);
     // A settled thought says nothing worth a line.
     expect(tailOf(entries, 10).map((line) => line.kind)).toEqual(["edit", "command", "message"]);
+    // A compact tile keeps one line of output, and the end of a long answer.
+    expect(tailOf(entries, 2, DENSITY.compact.detail)[0]).toMatchObject({ detail: "4" });
+    const end = tailOf(long.entries, 1, DENSITY.compact.detail)[0]!.detail!;
+    expect(end).toMatch(/^….*x the end$/);
+    expect(end.length).toBeLessThanOrEqual(DENSITY.compact.detail.chars + 1);
+  });
+
+  it("remembers the density, compact unless detailed was chosen", () => {
+    expect(parseDensity(null)).toBe("compact");
+    expect(parseDensity("something else")).toBe("compact");
+    expect(parseDensity("detailed")).toBe("detailed");
   });
 });

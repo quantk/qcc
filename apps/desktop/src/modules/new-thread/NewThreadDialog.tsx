@@ -5,6 +5,7 @@ import type { PermissionMode, ProjectId } from "../../api/protocol.gen";
 import { environmentsOf, modeLabel, pickableProviders } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
 import { effortFor } from "../../state/models";
+import { newThreadStart, readNewThreadMemory, rememberNewThread } from "../../state/newThread";
 import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
 import { tailPath } from "../../util/format";
 import { readJson, saveJson } from "../../util/storage";
@@ -18,17 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 const REMEMBERED = "qcc.new-thread";
 const OTHER = "\u0000other";
 
-type Remembered = {
-  provider?: string;
-  cwd?: string;
-  mode?: string;
-  model?: string;
-  effort?: string;
-  project?: string;
-};
-
-function remembered(): Remembered {
-  return (readJson(REMEMBERED) as Remembered | null) ?? {};
+function remembered() {
+  return readNewThreadMemory(readJson(REMEMBERED));
 }
 
 export function NewThreadDialog({ close: onClose, project: preset }: { close: () => void; project?: ProjectId }) {
@@ -38,17 +30,15 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
   const providers = useMemo(() => pickableProviders(plugins, settings), [plugins, settings]);
   const environments = useMemo(() => environmentsOf(plugins), [plugins]);
   const last = useMemo(remembered, []);
+  // Only a dialog opened from a project starts in one; see `newThreadStart`.
+  const [initial] = useState(() => newThreadStart(last, preset, projects));
 
   const [providerId, setProviderId] = useState(settings?.default_provider ?? last.provider ?? "");
-  const [projectId, setProjectId] = useState<string | null>(preset ?? last.project ?? null);
+  const [projectId, setProjectId] = useState<string | null>(initial.project);
   const project = projects.find((candidate) => candidate.id === projectId);
   // In a project, the directory is one of its folders unless asked otherwise.
   const [otherDir, setOtherDir] = useState(false);
-  const [cwd, setCwd] = useState(() => {
-    const first = projects.find((candidate) => candidate.id === (preset ?? last.project));
-    if (first && !first.folders.includes(last.cwd ?? "")) return first.folders[0] ?? "";
-    return last.cwd ?? "";
-  });
+  const [cwd, setCwd] = useState(initial.cwd);
   // A separate copy is a decision for each thread: it starts off and is not remembered.
   const [environment, setEnvironment] = useState("");
   const [base, setBase] = useState("");
@@ -90,15 +80,10 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
     });
     setStarting(false);
     if (!thread) return;
-    const next: Remembered = {
-      provider: provider.id,
-      cwd: cwd.trim(),
-      mode,
-      model: model ?? undefined,
-      effort: effort ?? undefined,
-      project: project?.id,
-    };
-    saveJson(REMEMBERED, next);
+    saveJson(
+      REMEMBERED,
+      rememberNewThread(remembered(), { provider: provider.id, mode, model, effort, project, cwd: cwd.trim() }),
+    );
     onClose();
   };
 
@@ -111,7 +96,7 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="sm:max-w-2xl" initialFocus={last.cwd ? message : directory}>
+      <DialogContent className="sm:max-w-2xl" initialFocus={initial.cwd ? message : directory}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(event) => {

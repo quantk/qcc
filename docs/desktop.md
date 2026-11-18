@@ -145,6 +145,12 @@ turn, archive. Modules add items through `ui.threadMenuItem`.
 switch; off by default and not remembered — decided for each thread) and its base, the model (from
 the list the agent returns), effort (the levels of the selected model), the permission mode.
 
+The agent, model, effort and permission mode start as they were for the last thread. The project
+does not: the dialog opened with `Ctrl+N`, the "New thread" button or the palette starts with "No
+project" and the directory of the last thread started outside a project; opened with a project's
+"new thread in the project" button, it starts in that project and the folder last used there (the
+first one otherwise).
+
 ### Projects
 
 In the sidebar threads are grouped by project. A project has the buttons "new thread in the

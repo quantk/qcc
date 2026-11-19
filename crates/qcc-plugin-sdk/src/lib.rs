@@ -49,7 +49,8 @@
 //! The plugin is a single-threaded actor: the host calls it with one event at a time
 //! and no host import blocks on the outside world. Process output, timers and watched
 //! threads come back through [`Plugin::on_process`], [`Plugin::on_timer`] and
-//! [`Plugin::on_thread_settled`].
+//! [`Plugin::on_thread_settled`]; every thread's changes, for a plugin allowed to hear
+//! them, through [`Plugin::on_thread_changed`].
 
 // The generated bindings carry the component's raw ABI glue.
 #[allow(unsafe_code, clippy::all, missing_docs)]
@@ -85,7 +86,7 @@ pub mod ui;
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
 pub use bindings::qcc::plugin::{
-    comments, completions, deltas, files, kv, process, threads, timers, views,
+    comments, completions, deltas, files, kv, notifications, process, threads, timers, views,
 };
 
 use types::{
@@ -94,8 +95,8 @@ use types::{
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
     InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
     ProviderModels, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
-    SkillInfo, SkillRef, ThreadChanges, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary,
-    TurnEnded, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    SkillInfo, SkillRef, ThreadChange, ThreadChanges, ThreadDiff, ThreadInput, TokenUsage,
+    TurnBoundary, TurnEnded, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -103,8 +104,9 @@ pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
-        attachments_note, boundary, comments, completions, deltas, files, kv, log, message, option,
-        process, session_context, skills_prompt, threads, timers, views, with_notes,
+        attachments_note, boundary, comments, completions, deltas, files, kv, log, message,
+        notifications, option, process, session_context, skills_prompt, threads, timers, views,
+        with_notes,
     };
 }
 
@@ -518,6 +520,13 @@ pub trait Plugin: Default + 'static {
         let _ = models;
     }
 
+    /// A thread changed: it moved to another state, a turn ended, or it waits on
+    /// another request. Only for a plugin with the `thread-events` permission, which
+    /// hears of every thread. Wider than [`Plugin::on_turn_ended`].
+    fn on_thread_changed(&mut self, change: ThreadChange) {
+        let _ = change;
+    }
+
     fn on_process(&mut self, event: ProcessEvent) {
         let _ = event;
     }
@@ -687,6 +696,10 @@ pub mod __private {
             }
             Event::ProviderModels(models) => {
                 plugin.on_provider_models(models);
+                Ok(Outcome::Done)
+            }
+            Event::ThreadChanged(change) => {
+                plugin.on_thread_changed(change);
                 Ok(Outcome::Done)
             }
             Event::ProcessStdout(output) => {

@@ -1,0 +1,12 @@
+id = "notify"
+name = "Notifications"
+description = "Desktop notifications when an agent finishes its turn, fails or waits for an answer."
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+# Hear when any thread's turn ends, fails or stops for the user.
+thread-events = true
+# Show those as desktop notifications through the app.
+notifications = true

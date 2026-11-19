@@ -860,6 +860,16 @@ impl imports::comments::Host for State {
     }
 }
 
+impl imports::notifications::Host for State {
+    fn show(&mut self, notification: imports::notifications::Notification) -> Result<(), String> {
+        if !self.permissions.notifications {
+            return Err(self.denied("notifications"));
+        }
+        (self.services.notifications)(&self.plugin_id, convert::notification(notification));
+        Ok(())
+    }
+}
+
 impl State {
     fn process(&mut self, process: u64) -> Result<&mut Box<dyn ProcessHandle>, String> {
         self.processes.get_mut(&process).ok_or_else(|| format!("no process {process}"))

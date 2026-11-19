@@ -20,6 +20,11 @@ pub struct Permissions {
     pub comments: bool,
     /// Read files in threads' working directories and in the plugin's own folder.
     pub files: bool,
+    /// Hear of every thread's changes (`thread-changed` events): what each agent
+    /// does, and the start of what it says, across all threads.
+    pub thread_events: bool,
+    /// Show the user notifications on their desktop.
+    pub notifications: bool,
     /// Executables the plugin may run, matched exactly against `spawn`'s `program`.
     pub process: Vec<String>,
 }
@@ -35,6 +40,8 @@ impl Permissions {
             turn_events: self.turn_events && other.turn_events,
             comments: self.comments && other.comments,
             files: self.files && other.files,
+            thread_events: self.thread_events && other.thread_events,
+            notifications: self.notifications && other.notifications,
             process: self.process.iter().filter(|p| other.process.contains(p)).cloned().collect(),
         }
     }

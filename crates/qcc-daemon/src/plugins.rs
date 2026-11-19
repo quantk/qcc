@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 use qcc_domain::{Delta, ProviderId, SkillRef, ThreadId};
 use qcc_plugin_host::services::DirKv;
 use qcc_plugin_host::{
-    Contribution, Grant, LoadError, MANIFEST_FILE, Manifest, Permissions, PluginHandle, PluginHost,
-    ProgramPaths, Services, ThreadsCall,
+    Contribution, Grant, LoadError, MANIFEST_FILE, Manifest, Notification, Permissions,
+    PluginHandle, PluginHost, ProgramPaths, Services, ThreadsCall,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -127,6 +127,7 @@ pub(crate) fn load(
         let deltas = commands.clone();
         let crashes = commands.clone();
         let threads = commands.clone();
+        let notifications = commands.clone();
         Services {
             deltas: Arc::new(move |plugin: &str, thread: ThreadId, deltas_: Vec<Delta>| {
                 let _ = deltas.send(Command::Deltas {
@@ -153,6 +154,10 @@ pub(crate) fn load(
                 answer.recv_timeout(THREADS_TIMEOUT + THREADS_GRACE).map_err(|_| {
                     "the daemon did not answer; threads are not available during init".to_owned()
                 })?
+            }),
+            notifications: Arc::new(move |plugin: &str, notification: Notification| {
+                let _ =
+                    notifications.send(Command::Notify { plugin: plugin.to_owned(), notification });
             }),
             on_crash: Arc::new(move |plugin: &str, reason: &str| {
                 let _ = crashes.send(Command::PluginCrashed {

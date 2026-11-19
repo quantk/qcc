@@ -167,6 +167,9 @@ pub enum PluginRequest {
     /// A watched thread settled. Nobody waits for the answer; see
     /// [`crate::PluginHandle::post`].
     ThreadSettled(Box<SettledThread>),
+    /// A thread changed. Only for plugins with the `thread-events` permission; posted
+    /// like [`PluginRequest::ThreadSettled`].
+    ThreadChanged(Box<ThreadChange>),
     /// The plugin's settings, by id, defaults filled in. Posted like
     /// [`PluginRequest::ThreadSettled`].
     Settings(Vec<(String, String)>),
@@ -213,6 +216,30 @@ pub struct ThreadSummary {
 pub struct SettledThread {
     pub summary: ThreadSummary,
     pub last_message: Option<String>,
+}
+
+/// What happened to a thread since a plugin last heard of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadChange {
+    pub summary: ThreadSummary,
+    /// Absent for a thread new since then.
+    pub previous: Option<ThreadState>,
+    /// A turn ended since then; `summary.thread.last_turn_status` says how.
+    pub turn_ended: bool,
+    /// The agent's latest message, for a thread that is not working.
+    pub last_message: Option<String>,
+    /// What a waiting agent asks: the title of its oldest approval or question.
+    pub request: Option<String>,
+}
+
+/// Something a plugin asks to show the user (`notifications` import).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notification {
+    pub title: String,
+    pub body: String,
+    pub thread: Option<ThreadId>,
+    /// Not worth showing while the user looks at `thread` in a focused window.
+    pub quiet_when_shown: bool,
 }
 
 /// What a plugin may ask of threads through the `threads` import.

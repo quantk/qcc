@@ -8,7 +8,8 @@
 /// as events, and a request that has to wait for one is answered later (`deferred`).
 ///
 /// Every import but `log`, `completions` and `views` is gated by a permission the
-/// plugin requests in its manifest.
+/// plugin requests in its manifest, and so are the events about every thread
+/// (`turn-ended`: `turn-events`; `thread-changed`: `thread-events`).
 package qcc:plugin@0.1.0;
 
 /// The vocabulary shared by imports and exports.
@@ -531,6 +532,27 @@ interface types {
     last-message: option<string>,
   }
 
+  /// Something a person following the thread would notice happened to it: it moved
+  /// to another state, a turn ended, or it waits on another request. Wider than
+  /// `turn-ended`: it also tells of a thread that starts waiting for the user or
+  /// whose session fails without a turn.
+  record thread-change {
+    /// The thread as it is now.
+    thread: thread-info,
+    /// Its state when the plugin last heard of it. Absent for a thread that is new
+    /// since then.
+    previous: option<thread-state>,
+    /// A turn ended since the plugin last heard of the thread: `thread.last-turn`
+    /// says how. A turn can start and end between two reports, so the state alone
+    /// does not tell.
+    turn-ended: bool,
+    /// The text of the agent's latest message, for a thread that is not working.
+    last-message: option<string>,
+    /// What the agent waits on, for a waiting thread: the title of the approval or
+    /// the question, the oldest one first asked.
+    request: option<string>,
+  }
+
   /// A turn of a thread ended. Delivered to plugins with the `turn-events`
   /// permission, for every thread.
   record turn-ended {
@@ -937,6 +959,10 @@ interface types {
     /// The comments on a thread's changes changed: left, resolved, reopened, sent
     /// to the agent or deleted, by anyone (permission `comments`).
     comments-changed(thread-id),
+    /// Any thread changed (`thread-change` says how). Delivered to every plugin with
+    /// the `thread-events` permission, for every thread, hidden ones included,
+    /// from the moment the plugin starts; what happened before is not replayed.
+    thread-changed(thread-change),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -1211,6 +1237,28 @@ interface files {
   %list: func(root: root, dir: string) -> result<list<string>, string>;
 }
 
+/// Permission `notifications`. Tell the user something on their desktop.
+interface notifications {
+  use types.{thread-id};
+
+  record notification {
+    /// One line: what it is about.
+    title: string,
+    /// A sentence or two, plain text.
+    body: string,
+    /// The thread it is about. The app opens it when the user clicks the
+    /// notification, where the desktop lets it.
+    thread: option<thread-id>,
+    /// Not worth showing while the user looks at `thread` in a focused window.
+    quiet-when-shown: bool,
+  }
+
+  /// Hand a notification to every desktop app connected to the daemon, which shows
+  /// it the way its system shows notifications. With no app connected it is
+  /// dropped: notifications are not kept for later.
+  show: func(notification: notification) -> result<_, string>;
+}
+
 world plugin {
   import log;
   import completions;
@@ -1222,6 +1270,7 @@ world plugin {
   import comments;
   import files;
   import views;
+  import notifications;
 
   use types.{contribution, event, outcome};
 

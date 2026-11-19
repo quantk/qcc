@@ -369,6 +369,8 @@ pub fn plugin(plugin: &PluginInfo) -> String {
         ("turn-events", permissions.turn_events),
         ("comments", permissions.comments),
         ("files", permissions.files),
+        ("thread-events", permissions.thread_events),
+        ("notifications", permissions.notifications),
     ] {
         if on {
             granted.push(name.to_owned());

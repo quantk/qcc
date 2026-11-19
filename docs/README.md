@@ -17,4 +17,4 @@
 - [development.md](development.md) — dev commands, repository architecture, and recorded agent
   traffic for bridge tests.
 - [plugins.md](plugins.md) — writing a plugin: host limits, plugin UI, commands, skills, threads,
-  settings and permissions.
+  following every thread, desktop notifications (the `notify` plugin), settings and permissions.

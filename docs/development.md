@@ -50,6 +50,7 @@ plugins/provider-echo     example provider
 plugins/provider-claude-code, provider-acp, provider-codex   bridges to real agents
 plugins/env-git-worktree  environment: a git worktree per thread
 plugins/orchestration     skill for agents, handoff and review commands
+plugins/notify            desktop notifications when an agent finishes, fails or asks
 ```
 
 The main rule: **the bridge knows the dialect, the core knows the timeline.** A provider plugin

@@ -863,6 +863,7 @@ fn plugins_and_daemon_are_listed() {
         ids,
         [
             "env-git-worktree",
+            "notify",
             "orchestration",
             "provider-acp",
             "provider-claude-code",
@@ -872,11 +873,15 @@ fn plugins_and_daemon_are_listed() {
         ]
     );
     assert_eq!(plugins["plugins"][0]["environments"][0]["id"], "git-worktree");
-    let orchestration = &plugins["plugins"][1];
+    let notify = &plugins["plugins"][1];
+    assert_eq!(notify["permissions"]["thread_events"], true);
+    assert_eq!(notify["permissions"]["notifications"], true);
+    assert_eq!(notify["permissions"]["threads"], false);
+    let orchestration = &plugins["plugins"][2];
     assert_eq!(orchestration["permissions"]["threads"], true);
     assert_eq!(orchestration["skills"][0], "qcc-orchestration");
     assert_eq!(orchestration["commands"][0]["id"], "handoff");
-    let echo = &plugins["plugins"][5];
+    let echo = &plugins["plugins"][6];
     assert_eq!(echo["bundled"], true);
     assert_eq!(echo["example"], true);
     assert!(plugins["plugins"][0].get("example").is_none());
@@ -2032,6 +2037,10 @@ fn a_watching_client_sees_threads_appear_and_change() {
                 .await
                 .expect("the watcher is told about the approval")
                 .expect("the connection stays open");
+            // The notify plugin also asks the app to tell the user about it.
+            if notification.method == "notification.show" {
+                continue;
+            }
             assert_eq!(notification.method, "thread.updated");
             assert_eq!(notification.params["subscription"], 7);
             let thread = &notification.params["thread"];
@@ -2065,6 +2074,9 @@ fn a_watching_client_sees_threads_appear_and_change() {
                 .await
                 .expect("the watcher is told when the turn ends")
                 .unwrap();
+            if notification.method != "thread.updated" {
+                continue;
+            }
             let thread = &notification.params["thread"];
             if thread["last_turn_status"] == "completed" {
                 assert!(thread.get("pending_interactions").is_none());
@@ -2086,6 +2098,100 @@ fn a_watching_client_sees_threads_appear_and_change() {
             .unwrap();
         let quiet = tokio::time::timeout(Duration::from_millis(400), notifications.recv()).await;
         assert!(quiet.is_err(), "an unsubscribed watcher got {quiet:?}");
+    });
+    daemon.stop();
+}
+
+/// The bundled notify plugin follows every thread and asks the app to tell the
+/// user when a turn ends, fails or waits for them, as its settings say.
+#[test]
+fn the_user_hears_when_an_agent_finishes_fails_or_asks() {
+    use qcc_client::Client;
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let cwd = dir.path().to_str().unwrap().to_owned();
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (client, mut notifications) = Client::connect_raw(&daemon.socket).await.unwrap();
+        client.call_raw("thread.watch", json!({ "subscription": 4 })).await.unwrap();
+        let mut next = async || loop {
+            let notification = tokio::time::timeout(Duration::from_secs(30), notifications.recv())
+                .await
+                .expect("a notification is shown")
+                .expect("the connection stays open");
+            if notification.method == "notification.show" {
+                return notification.params;
+            }
+        };
+        let spawn = async |prompt: &str, parent: Option<&str>| {
+            let spawned = client
+                .call_raw(
+                    "thread.spawn",
+                    json!({ "provider": "echo", "cwd": cwd, "prompt": prompt, "parent": parent }),
+                )
+                .await
+                .unwrap();
+            spawned["thread"]["id"].as_str().unwrap().to_owned()
+        };
+        let settle = async |id: &str| {
+            client.call_raw("thread.wait", json!({ "thread_ids": [id] })).await.unwrap();
+        };
+
+        let done = spawn("hello there", None).await;
+        let shown = next().await;
+        assert_eq!(shown["subscription"], 4);
+        assert_eq!(shown["plugin"], "notify");
+        assert_eq!(shown["thread_id"], done.as_str());
+        // A thread is named after its first message.
+        assert_eq!(shown["title"], "hello there");
+        assert_eq!(shown["body"], "Finished: hello there");
+        assert_eq!(shown["quiet_when_shown"], true);
+
+        let failed = spawn("/fail out of disk", None).await;
+        let shown = next().await;
+        assert_eq!(shown["thread_id"], failed.as_str());
+        assert!(shown["body"].as_str().unwrap().starts_with("Failed"), "{shown}");
+
+        let asks = spawn("/approve rm -rf build", None).await;
+        let shown = next().await;
+        assert_eq!(shown["thread_id"], asks.as_str());
+        assert!(shown["body"].as_str().unwrap().starts_with("Waiting for you: "), "{shown}");
+
+        // A thread another agent started: its end is its parent's business, but what
+        // it asks is the user's.
+        let quiet_child = spawn("done quietly", Some(&done)).await;
+        settle(&quiet_child).await;
+        let asking_child = spawn("/ask which one?", Some(&done)).await;
+        let shown = next().await;
+        assert_eq!(shown["thread_id"], asking_child.as_str(), "{shown}");
+        assert_eq!(shown["body"], "Waiting for you: which one?");
+
+        // The user turns finished turns off: only the failure is told.
+        let set = daemon.qcc(&["plugin", "set", "notify", "on-finished", "false"]);
+        assert!(set.ok, "{}", set.stderr);
+        let unheard = spawn("nobody hears this", None).await;
+        settle(&unheard).await;
+        let failed_again = spawn("/fail again", None).await;
+        let shown = next().await;
+        assert_eq!(shown["thread_id"], failed_again.as_str(), "{shown}");
+
+        // Turned off, the plugin tells nothing; the thread still runs.
+        assert!(daemon.qcc(&["plugin", "disable", "notify"]).ok);
+        let silent = spawn("/fail unheard", None).await;
+        settle(&silent).await;
+        let quiet = tokio::time::timeout(Duration::from_millis(400), async {
+            loop {
+                let notification = notifications.recv().await.unwrap();
+                if notification.method == "notification.show" {
+                    return notification;
+                }
+            }
+        })
+        .await;
+        assert!(quiet.is_err(), "a disabled plugin notified: {quiet:?}");
     });
     daemon.stop();
 }

@@ -1096,6 +1096,12 @@ pub struct PluginPermissions {
     /// Reads files in threads' working directories and its own folder.
     #[serde(default)]
     pub files: bool,
+    /// Hears of every thread's changes.
+    #[serde(default)]
+    pub thread_events: bool,
+    /// Shows the user notifications.
+    #[serde(default)]
+    pub notifications: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
 }
@@ -1212,6 +1218,29 @@ pub struct LimitsUpdatedNotification {
     /// The subscription of the `thread.watch` it is sent for.
     pub subscription: u64,
     pub limits: ProviderLimits,
+}
+
+/// Notification to connections that watch threads: a plugin asks to tell the user
+/// something. A desktop app shows it the way its system shows notifications; it is
+/// not kept for clients that connect later.
+pub const NOTIFICATION_SHOW: &str = "notification.show";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct NotificationShowNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    /// The plugin that asked.
+    pub plugin: String,
+    /// One line: what it is about.
+    pub title: String,
+    /// A sentence or two, plain text.
+    pub body: String,
+    /// The thread it is about, which a click on it opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+    /// Not worth showing while the user looks at `thread_id` in a focused window.
+    #[serde(default)]
+    pub quiet_when_shown: bool,
 }
 
 // ----- settings ---------------------------------------------------------------------

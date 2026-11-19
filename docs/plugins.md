@@ -109,6 +109,50 @@ is `plugins/reviewers`, see [Reviewers](reviewers.md)):
   (`Root::Own`); paths are relative and cannot leave the root, through `..` or a link. Files are
   read up to 1 MiB.
 
+## Following every thread and notifying the user
+
+`threads::watch` follows one thread a plugin is interested in, and `turn-events` tells only of turns
+that end. A plugin with the `thread-events` permission hears of every change of every thread
+instead, waiting for the user and a session that fails without a turn included, through
+`Plugin::on_thread_changed`, without asking: from the moment it starts, for every thread (hidden ones included), whenever a thread moves to another
+state (`working`, `waiting`, `idle`, `failed`, `archived`), a turn ends, or a waiting agent asks
+something new. What happened before the plugin started is not replayed. A `ThreadChange` carries:
+
+- `thread`: the thread as it is now, with `last_turn` saying how its latest turn ended;
+- `previous`: its state when the plugin last heard of it (absent for a new thread);
+- `turn_ended`: a turn ended since then. A short turn can begin and end between two reports, and
+  a thread can go idle without a turn (a session released), so the states alone do not tell;
+- `last_message`: the start of what the agent said last, for a thread that is not working;
+- `request`: what a waiting agent asks (the title of the approval or the question).
+
+The permission is separate from `threads` on purpose: it lets a plugin read what every agent does
+and says, but not start or drive threads.
+
+A plugin with the `notifications` permission can tell the user something on their desktop with
+`notifications::show`: a title, a body, the thread it is about and whether it is worth showing while
+the user looks at that thread. The daemon passes it to every connected client that watches threads
+(the `notification.show` protocol notification); the desktop app shows it as a system notification
+and opens the thread when the user clicks it, where the desktop reports clicks. With no app connected
+the notification is dropped. Titles over 200 characters and bodies over 1,000 are cut.
+
+Both are what the bundled `notify` plugin (`plugins/notify`) is built on. It notifies when an agent
+finishes its turn, fails or waits for an answer; its settings, in the app's plugin card or with
+`qcc plugin set notify …`:
+
+| setting | default | what it does |
+| --- | --- | --- |
+| `on-finished` | `true` | a turn ended as it should |
+| `on-failed` | `true` | a turn failed, or the agent's session could not start or died |
+| `on-waiting` | `true` | the agent waits for an approval or an answer |
+| `children` | `when-waiting` | threads another agent started: `never`, `when-waiting` (their agent cannot answer for the user) or `always` |
+| `quiet-when-shown` | `true` | nothing about the thread open in the app while its window has focus |
+
+A turn the user interrupted is not told. The notification's title is the thread's title, its body
+the state and the start of the agent's last message or of what it asks. Turning the plugin off (`qcc
+plugin disable notify`) stops the notifications.
+
+## Settings
+
 `Plugin::settings` declares the plugin's settings (`SettingField` with `SettingKind`), and
 `Plugin::on_settings` receives their values: after the daemon starts and on every change. No
 permission is needed for this: a plugin sees only its own settings. Example: the settings of

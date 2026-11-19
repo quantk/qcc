@@ -133,6 +133,7 @@ flowchart LR
     wt["env-git-worktree"]
     orch["orchestration"]
     rev["reviewers"]
+    notify["notify"]
   end
   qccd --> claude --> c1["claude -p"]
   qccd --> codex --> c2["codex app-server"]
@@ -140,6 +141,7 @@ flowchart LR
   qccd --> wt --> git["git"]
   qccd --> orch
   qccd --> rev
+  qccd --> notify -. "notification.show" .-> app
 ```
 
 - **`qccd`**, the daemon, holds the threads, the event journal and the plugin host. Agents keep

@@ -747,6 +747,21 @@ export type NewAttachment = {
 	mime?: string | null,
 };
 
+export type NotificationShowNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	/**  The plugin that asked. */
+	plugin: string,
+	/**  One line: what it is about. */
+	title: string,
+	/**  A sentence or two, plain text. */
+	body: string,
+	/**  The thread it is about, which a click on it opens. */
+	thread_id?: ThreadId | null,
+	/**  Not worth showing while the user looks at `thread_id` in a focused window. */
+	quiet_when_shown?: boolean,
+};
+
 export type OptionKind = "allow" | "deny" | "other";
 
 /**  An approval or a question the agent is waiting on. */
@@ -834,6 +849,10 @@ export type PluginPermissions = {
 	comments?: boolean,
 	/**  Reads files in threads' working directories and its own folder. */
 	files?: boolean,
+	/**  Hears of every thread's changes. */
+	thread_events?: boolean,
+	/**  Shows the user notifications. */
+	notifications?: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
 };
@@ -1937,4 +1956,5 @@ export type Notifications = {
 	"plugins.updated": PluginsUpdatedNotification,
 	"limits.updated": LimitsUpdatedNotification,
 	"ui.changed": UiChangedNotification,
+	"notification.show": NotificationShowNotification,
 };

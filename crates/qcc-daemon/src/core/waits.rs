@@ -35,7 +35,7 @@ impl Core {
         Some(ThreadSummary { thread, state })
     }
 
-    fn last_message(&self, id: &ThreadId) -> Option<String> {
+    pub(super) fn last_message(&self, id: &ThreadId) -> Option<String> {
         match self.store.transcript(id, true) {
             Ok(mut entries) => entries.pop().map(|entry| entry.text),
             Err(error) => {

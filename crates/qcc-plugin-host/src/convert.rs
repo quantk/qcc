@@ -14,10 +14,12 @@ use qcc_domain::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 use qcc_domain::{LimitStatus, LimitWindow, RateLimits};
 
 use crate::api::{
-    Contribution, EnvironmentRequest, NewComment, Outcome, PluginRequest, ProviderRequest,
-    SessionStart, SettledThread, SpawnThread, ThreadSummary, UiRequest,
+    Contribution, EnvironmentRequest, NewComment, Notification, Outcome, PluginRequest,
+    ProviderRequest, SessionStart, SettledThread, SpawnThread, ThreadChange, ThreadSummary,
+    UiRequest,
 };
 use crate::bindings::qcc::plugin::comments as wit_comments;
+use crate::bindings::qcc::plugin::notifications as wit_notifications;
 use crate::bindings::qcc::plugin::threads as wit_threads;
 use crate::bindings::wit;
 
@@ -390,14 +392,27 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
         model: thread.model,
         effort: thread.effort,
         environment: thread.environment.map(|environment| environment.id),
-        state: match state {
-            ThreadState::Working => wit::ThreadState::Working,
-            ThreadState::Waiting => wit::ThreadState::Waiting,
-            ThreadState::Idle => wit::ThreadState::Idle,
-            ThreadState::Failed => wit::ThreadState::Failed,
-            ThreadState::Archived => wit::ThreadState::Archived,
-        },
+        state: thread_state(state),
         last_turn: thread.last_turn_status.map(turn_status_to_wit),
+    }
+}
+
+fn thread_state(state: ThreadState) -> wit::ThreadState {
+    match state {
+        ThreadState::Working => wit::ThreadState::Working,
+        ThreadState::Waiting => wit::ThreadState::Waiting,
+        ThreadState::Idle => wit::ThreadState::Idle,
+        ThreadState::Failed => wit::ThreadState::Failed,
+        ThreadState::Archived => wit::ThreadState::Archived,
+    }
+}
+
+pub(crate) fn notification(notification: wit_notifications::Notification) -> Notification {
+    Notification {
+        title: notification.title,
+        body: notification.body,
+        thread: notification.thread.map(ThreadId),
+        quiet_when_shown: notification.quiet_when_shown,
     }
 }
 
@@ -777,6 +792,16 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                 request,
                 thread: thread.0,
                 answer: answer.map(|(diff, truncated)| wit::EnvironmentDiff { diff, truncated }),
+            })
+        }
+        PluginRequest::ThreadChanged(change) => {
+            let ThreadChange { summary, previous, turn_ended, last_message, request } = *change;
+            wit::Event::ThreadChanged(wit::ThreadChange {
+                thread: thread_info(summary),
+                previous: previous.map(thread_state),
+                turn_ended,
+                last_message,
+                request,
             })
         }
         PluginRequest::ThreadSettled(settled) => {

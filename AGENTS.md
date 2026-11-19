@@ -52,6 +52,7 @@ WASM-плагинами.
 | `plugins/provider-*` | мосты к агентам: `claude-code`, `codex`, `acp` (opencode), `echo` (тестовый) |
 | `plugins/env-git-worktree` | окружение треда в отдельном git worktree |
 | `plugins/orchestration` | skill `qcc-orchestration` и команды `handoff`/`review` |
+| `plugins/notify` | уведомления на рабочем столе: агент закончил ход, упал или ждёт ответа |
 | `wit/plugin.wit` | контракт плагинов |
 | `apps/desktop` | фронтенд (`src/`) и Tauri-оболочка (`src-tauri/`) |
 | `scripts/` | проверки; `fixtures/` — запись и редактирование фикстур реальных агентов |

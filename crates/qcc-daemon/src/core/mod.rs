@@ -11,8 +11,8 @@ use qcc_domain::{
     UserInput,
 };
 use qcc_plugin_host::{
-    EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
-    ProgramPaths, ThreadsAnswer, ThreadsCall,
+    EnvironmentRequest, Notification, Outcome, PluginError, PluginHandle, PluginHost,
+    PluginRequest, ProgramPaths, ThreadsAnswer, ThreadsCall,
 };
 use qcc_protocol::Method;
 use qcc_protocol::jsonrpc::{Request, Response, RpcError, codes};
@@ -41,6 +41,7 @@ mod limits;
 mod rpc;
 mod sessions;
 mod skills;
+mod thread_events;
 mod threads;
 mod toggle;
 mod waits;
@@ -242,6 +243,11 @@ pub(crate) enum Command {
         report: archive::TreeReport,
         responder: Responder,
     },
+    /// A plugin asked to show the user a notification.
+    Notify {
+        plugin: String,
+        notification: Notification,
+    },
     /// A `thread.wait` ran out of time.
     WaitTimedOut {
         waiter: u64,
@@ -331,6 +337,7 @@ pub(crate) struct Core {
     watches: Vec<Watch>,
     /// Turns that ended since plugins were last told, oldest first.
     turn_ends: Vec<(ThreadId, TurnStatus)>,
+    thread_events: thread_events::SeenThreads,
     /// Skills plugins offer, written out where agents can read them.
     skills: Vec<plugins::OfferedSkill>,
     /// Oldest first.
@@ -462,6 +469,7 @@ impl Core {
             next_waiter: 0,
             watches: Vec::new(),
             turn_ends: Vec::new(),
+            thread_events: None,
             skills,
             models: HashMap::new(),
             agent_skills: HashMap::new(),
@@ -486,16 +494,24 @@ impl Core {
         self.drain_queues();
         // Runs missed while the daemon was down are found by the first tick.
         self.arm_automations();
+        // Plugins following threads hear of changes from here on.
+        self.report_thread_changes();
         while let Some(command) = queue.recv().await {
             if matches!(command, Command::Shutdown) {
                 break;
             }
+            // Streamed text changes no thread's state: no need to look at them all.
+            let streamed = matches!(&command, Command::Deltas { deltas, .. }
+                if deltas.iter().all(|delta| matches!(delta, Delta::ItemTextDelta { .. })));
             self.handle(command);
             // Before the queue: a message waiting for the turn goes to the new session.
             self.release_idle();
             self.drain_queues();
             self.settle_waits();
             self.announce_turn_ends();
+            if !streamed {
+                self.report_thread_changes();
+            }
             if let Some(error) = self.fatal.take() {
                 return Err(error);
             }
@@ -568,6 +584,7 @@ impl Core {
             Command::TreeArchived { root, members, report, responder } => {
                 self.tree_archived(root, members, report, responder);
             }
+            Command::Notify { plugin, notification } => self.notify_user(&plugin, notification),
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {
                     let waiter = self.waiters.remove(index);

@@ -67,6 +67,19 @@ pub struct ThreadSpawnParams {
     /// What the environment starts from (a git ref). Absent: its default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
+    /// Where the environment makes the thread's directory: an absolute path.
+    /// Absent: a place of the environment's own choosing. Only for an environment
+    /// that declared `custom_placement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_dir: Option<String>,
+    /// What the environment calls the thread's branch. Absent: a name of its own.
+    /// Only for an environment that declared `custom_placement`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// `branch` may exist already, and then the thread continues on it. Without
+    /// this an existing branch is refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reuse_branch: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
     /// Files attached to `prompt`.
@@ -478,6 +491,15 @@ pub struct ThreadIsolateParams {
     pub environment: String,
     #[serde(default)]
     pub carry_changes: bool,
+    /// As in `thread.spawn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment_dir: Option<String>,
+    /// As in `thread.spawn`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// As in `thread.spawn`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reuse_branch: bool,
 }
 
 method!(

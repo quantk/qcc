@@ -414,6 +414,8 @@ export type EnvironmentInfo = {
 	 *  without an environment can show their changes through it.
 	 */
 	inspects_directories?: boolean,
+	/**  It can be told where to make its directory and what to call its branch. */
+	custom_placement?: boolean,
 };
 
 /**  Where a thread's environment is in its life. */
@@ -1239,6 +1241,18 @@ export type ThreadEnvironment = {
 	 *  goes along.
 	 */
 	carry_changes?: boolean,
+	/**
+	 *  Where the user asked the environment to make its directory. Absent: the
+	 *  environment picks the place.
+	 */
+	dir?: string | null,
+	/**
+	 *  What the user asked the environment's branch to be called. Absent: the
+	 *  environment names it.
+	 */
+	branch?: string | null,
+	/**  `branch` may exist already: the environment continues on it. */
+	reuse_branch?: boolean,
 };
 
 export type ThreadEvent = {
@@ -1282,6 +1296,12 @@ export type ThreadIsolateParams = {
 	/**  Id of a contributed environment (`git-worktree`). */
 	environment: string,
 	carry_changes?: boolean,
+	/**  As in `thread.spawn`. */
+	environment_dir?: string | null,
+	/**  As in `thread.spawn`. */
+	branch?: string | null,
+	/**  As in `thread.spawn`. */
+	reuse_branch?: boolean,
 };
 
 export type ThreadListParams = {
@@ -1375,6 +1395,22 @@ export type ThreadSpawnParams = {
 	environment?: string | null,
 	/**  What the environment starts from (a git ref). Absent: its default. */
 	base?: string | null,
+	/**
+	 *  Where the environment makes the thread's directory: an absolute path.
+	 *  Absent: a place of the environment's own choosing. Only for an environment
+	 *  that declared `custom_placement`.
+	 */
+	environment_dir?: string | null,
+	/**
+	 *  What the environment calls the thread's branch. Absent: a name of its own.
+	 *  Only for an environment that declared `custom_placement`.
+	 */
+	branch?: string | null,
+	/**
+	 *  `branch` may exist already, and then the thread continues on it. Without
+	 *  this an existing branch is refused.
+	 */
+	reuse_branch?: boolean,
 	prompt?: string | null,
 	/**  Files attached to `prompt`. */
 	attachments?: NewAttachment[],

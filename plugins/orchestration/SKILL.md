@@ -21,6 +21,20 @@ All of them take `--json` for output meant for programs.
     own, made from the current commit of your directory. Without it the child
     works in your directory, so use it whenever two agents edit files at once.
     Uncommitted changes of yours are not in the worktree.
+  - `--env-dir <dir>` and `--branch <name>` (with `--env git-worktree`) put the
+    worktree in a directory you choose, on a branch you name, instead of qcc's
+    own data directory and `qcc/<thread id>`. Use them when the user asks for
+    the work in a particular place or on a particular branch, for instance one
+    folder per task with a worktree of every repository it touches:
+    `--cwd BGT/bgt-auth --env-dir tasks/BGT-123/bgt-auth --branch feature/BGT-123`.
+    Otherwise leave them out. `<dir>` is the worktree itself, relative to your
+    directory; it must not exist yet or be empty, and inside another git
+    checkout it must be ignored there. A branch that exists already, locally or
+    on a remote, is refused: add `--reuse-branch` only when the task is to go on
+    with that very branch. A refusal fails the child with the reason (`qcc
+    thread wait` shows it); fix the request and spawn again rather than working
+    around it. Archiving the child removes the worktree and keeps a named
+    branch that has commits.
   - `--model <name>`, `--permission-mode ask|accept-edits|auto|full`.
 - `qcc thread wait <id>... [--any] [--timeout <seconds>]` blocks until the
   threads finish and prints each one's state and last message, which is usually

@@ -64,8 +64,21 @@ impl Daemon {
         self.qcc_env(args, &[])
     }
 
+    /// Run `qcc` from `dir`, which is what relative paths in `args` are counted from.
+    fn qcc_in(&self, dir: &Path, args: &[&str]) -> Output {
+        self.run(args, &[], Some(dir))
+    }
+
     fn qcc_env(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
-        let output = Command::new(env!("CARGO_BIN_EXE_qcc"))
+        self.run(args, env, None)
+    }
+
+    fn run(&self, args: &[&str], env: &[(&str, &str)], dir: Option<&Path>) -> Output {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_qcc"));
+        if let Some(dir) = dir {
+            command.current_dir(dir);
+        }
+        let output = command
             .arg("--socket")
             .arg(&self.socket)
             .args(args)
@@ -1253,6 +1266,327 @@ fn spawn_in_worktree(daemon: &Daemon, repo: &Path, extra: &[&str]) -> Output {
     args.push(repo.to_str().unwrap());
     args.extend(extra);
     daemon.qcc(&args)
+}
+
+/// Start a thread in a worktree at `place` (a path as the user types it, counted
+/// from `from`); returns the id of the thread.
+fn spawn_placed(daemon: &Daemon, from: &Path, repo: &Path, place: &str, extra: &[&str]) -> String {
+    let mut args =
+        vec!["thread", "spawn", "--provider", "echo", "--env", "git-worktree", "--json", "--cwd"];
+    args.extend([repo.to_str().unwrap(), "--env-dir", place]);
+    args.extend(extra);
+    let output = daemon.qcc_in(from, &args);
+    assert!(output.ok, "{}", output.stderr);
+    output.json()["thread"]["id"].as_str().unwrap().to_owned()
+}
+
+/// Why the environment of `thread` could not be made.
+fn refusal(daemon: &Daemon, thread: &str) -> String {
+    daemon.wait_for(thread, "environment/failed")["message"].as_str().unwrap().to_owned()
+}
+
+/// The worktrees and the branches of `repo`, to tell that a refusal left it alone.
+fn worktrees_and_branches(repo: &Path) -> (usize, String) {
+    let worktrees = git(repo, &["worktree", "list", "--porcelain"]).matches("worktree ").count();
+    (worktrees, git(repo, &["branch", "--format", "%(refname:short)"]))
+}
+
+#[test]
+fn worktrees_of_one_task_gather_in_a_folder_on_a_branch_of_the_users_naming() {
+    let dir = tempfile::tempdir().unwrap();
+    // Spelled as the commands see the directory they run in.
+    let root = dir.path().canonicalize().unwrap();
+    // The user's root directory is a checkout itself: it holds the clones and
+    // ignores them and the folder of tasks.
+    let dev = root.join("dev");
+    write(dev.join(".gitignore"), "BGT/\ntasks/\n");
+    git(&dev, &["init", "--quiet", "--initial-branch", "main"]);
+    git(&dev, &["add", "--all"]);
+    git(&dev, &["commit", "--quiet", "--message", "root"]);
+    let auth = repo(&dev.join("BGT/auth"), &[("README.md", "hello\n"), ("src/a.txt", "one\n")]);
+    let front = repo(&dev.join("BGT/front"), &[("index.html", "<p>\n")]);
+    for repo in [&auth, &front] {
+        git(repo, &["config", "user.name", "Test"]);
+        git(repo, &["config", "user.email", "test@example.invalid"]);
+    }
+    let daemon = Daemon::start(&root.join("data"));
+    let task = dev.join("tasks/BGT-123");
+    let branch = ["--branch", "feature/BGT-123"];
+
+    // Two repositories, one folder, one branch name. The directory is counted from
+    // where the command runs, and `..` in it is taken out.
+    let first = spawn_placed(&daemon, &dev, &auth, "tasks/BGT-123/auth", &branch);
+    let ready = daemon.wait_for(&first, "environment/ready");
+    let worktree = task.join("auth");
+    assert_eq!(ready["cwd"], worktree.to_str().unwrap());
+    let second = spawn_placed(&daemon, &task, &front, "../BGT-123/./front", &branch);
+    daemon.wait_for(&second, "environment/ready");
+    assert_eq!(daemon.thread(&second)["cwd"], task.join("front").to_str().unwrap());
+    let thread = daemon.thread(&first);
+    assert_eq!(thread["environment"]["dir"], worktree.to_str().unwrap());
+    assert_eq!(thread["environment"]["branch"], "feature/BGT-123");
+    for worktree in [&worktree, &task.join("front")] {
+        assert_eq!(git(worktree, &["branch", "--show-current"]).trim(), "feature/BGT-123");
+    }
+    // The checkout around them sees none of it.
+    assert_eq!(git(&dev, &["status", "--porcelain"]), "");
+
+    // Changes are counted from where the branch started, committed or not.
+    write(worktree.join("src/a.txt"), "one\ntwo\n");
+    git(&worktree, &["commit", "--quiet", "--all", "--message", "two"]);
+    write(worktree.join("README.md"), "hello\nworld\n");
+    let changes = daemon.qcc(&["thread", "changes", &first, "--json"]).json();
+    assert_eq!(changes["changes"]["branch"], "feature/BGT-123");
+    assert_eq!(
+        changes["changes"]["files"],
+        serde_json::json!([
+            { "path": "README.md", "kind": "modified", "additions": 1, "deletions": 0 },
+            { "path": "src/a.txt", "kind": "modified", "additions": 1, "deletions": 0 },
+        ])
+    );
+    let diff = daemon.qcc(&["thread", "diff", &first]);
+    assert!(diff.stdout.contains("+two\n") && diff.stdout.contains("+world\n"), "{}", diff.stdout);
+
+    // Delivered as uncommitted changes, like the work of any worktree.
+    let applied = daemon.qcc(&["thread", "deliver", &first]);
+    assert!(applied.ok, "{}", applied.stderr);
+    assert!(applied.stdout.contains("Applied the changes to 2 files"), "{}", applied.stdout);
+    assert_eq!(std::fs::read_to_string(auth.join("src/a.txt")).unwrap(), "one\ntwo\n");
+    git(&auth, &["checkout", "--quiet", "--", "."]);
+
+    // Archiving takes the worktree and keeps the branch: it has a commit, and may
+    // be pushed yet. The folder of the task stays while the other worktree is in it.
+    let refused = daemon.qcc(&["thread", "archive", &first]);
+    assert!(refused.stderr.contains("uncommitted change"), "{}", refused.stderr);
+    git(&worktree, &["commit", "--quiet", "--all", "--message", "world"]);
+    let tip = git(&worktree, &["rev-parse", "HEAD"]);
+    let archived = daemon.qcc(&["thread", "archive", &first]);
+    assert!(archived.ok, "{}", archived.stderr);
+    assert!(!worktree.exists() && task.is_dir());
+    assert_eq!(git(&auth, &["rev-parse", "feature/BGT-123"]), tip);
+
+    // Merged from the other worktree; then the branch holds a commit and stays too.
+    write(task.join("front/index.html"), "<p>\n<b>\n");
+    let merged = daemon.qcc(&["thread", "deliver", &second, "--merge"]);
+    assert!(merged.ok, "{}", merged.stderr);
+    assert!(merged.stdout.contains("Merged feature/BGT-123 into main"), "{}", merged.stdout);
+    assert_eq!(std::fs::read_to_string(front.join("index.html")).unwrap(), "<p>\n<b>\n");
+    assert!(daemon.qcc(&["thread", "archive", &second]).ok);
+    assert!(git(&front, &["branch", "--list", "feature/*"]).contains("feature/BGT-123"));
+    // The folder of the task was made for these worktrees and goes with the last.
+    assert!(!task.exists(), "the emptied folder of the task was left behind");
+    assert!(dev.join("tasks").is_dir(), "only the folder made for the worktrees goes");
+
+    // The task goes on later. A branch that is there is not taken over unasked...
+    let unasked = spawn_placed(&daemon, &dev, &auth, "tasks/BGT-123/auth", &branch);
+    let why = refusal(&daemon, &unasked);
+    assert!(why.contains("branch feature/BGT-123 exists already"), "{why}");
+    assert!(why.contains("--reuse-branch"), "{why}");
+    assert!(!task.exists(), "a refusal left a directory behind");
+    assert!(daemon.qcc(&["thread", "archive", &unasked]).ok);
+    // ...but continued when asked: the worktree starts where the branch stands, and
+    // the changes of the thread are counted from there.
+    let reuse = ["--branch", "feature/BGT-123", "--reuse-branch"];
+    let again = spawn_placed(&daemon, &dev, &auth, "tasks/BGT-123/auth", &reuse);
+    daemon.wait_for(&again, "environment/ready");
+    assert_eq!(git(&worktree, &["rev-parse", "HEAD"]), tip);
+    let changes = daemon.qcc(&["thread", "changes", &again, "--json"]).json();
+    assert_eq!(changes["changes"]["files"], serde_json::json!([]));
+    assert_eq!(changes["changes"]["base"], tip.trim());
+    // A branch that was there before the worktree is never deleted with it.
+    assert!(daemon.qcc(&["thread", "archive", &again]).ok);
+    assert_eq!(git(&auth, &["rev-parse", "feature/BGT-123"]), tip);
+    assert_eq!(worktrees_and_branches(&auth).0, 1);
+}
+
+#[test]
+fn a_place_that_is_not_free_is_refused_and_nothing_is_touched() {
+    let dir = tempfile::tempdir().unwrap();
+    // Spelled as the commands see the directory they run in.
+    let root = dir.path().canonicalize().unwrap();
+    let repo = repo(&root, &[("a.txt", "one\n")]);
+    git(&repo, &["branch", "taken"]);
+    let daemon = Daemon::start(&root.join("data"));
+    let before = worktrees_and_branches(&repo);
+    let refused = |place: &str, extra: &[&str]| {
+        let id = spawn_placed(&daemon, &root, &repo, place, extra);
+        let why = refusal(&daemon, &id);
+        assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+        why
+    };
+
+    // A directory with something in it, a file, and a checkout nobody told qcc about.
+    write(root.join("full/notes.md"), "mine\n");
+    let why = refused("full", &[]);
+    assert!(why.contains("full exists and is not empty"), "{why}");
+    assert_eq!(std::fs::read_to_string(root.join("full/notes.md")).unwrap(), "mine\n");
+    let why = refused("full/notes.md", &[]);
+    assert!(why.contains("exists and is not a directory"), "{why}");
+    let why = refused("app", &[]);
+    assert!(why.contains("is a git checkout already"), "{why}");
+
+    // Inside a checkout that does not ignore it, the worktree would show up there
+    // as untracked files. Ignored, it is fine.
+    let why = refused("app/nested", &["--branch", "nested"]);
+    assert!(why.contains("which does not ignore it"), "{why}");
+    assert!(!repo.join("nested").exists());
+    write(repo.join(".git/info/exclude"), "nested/\n");
+    let nested = spawn_placed(&daemon, &root, &repo, "app/nested", &["--branch", "nested"]);
+    daemon.wait_for(&nested, "environment/ready");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "");
+    // Nothing was done on the branch, so it goes with its worktree.
+    assert!(daemon.qcc(&["thread", "archive", &nested]).ok);
+    assert!(!repo.join("nested").exists());
+
+    // A branch that exists, a name qcc keeps for itself, a name git would not take.
+    let why = refused("wt", &["--branch", "taken"]);
+    assert!(why.contains("branch taken exists already"), "{why}");
+    let why = refused("wt", &["--branch", "qcc/mine"]);
+    assert!(why.contains("branch names under qcc/"), "{why}");
+    let why = refused("wt", &["--branch", "no..good"]);
+    assert!(why.contains("no..good is not a valid branch name"), "{why}");
+    // The branch checked out in the source cannot be worked on in two places.
+    let why = refused("wt", &["--branch", "main", "--reuse-branch"]);
+    assert!(why.contains("branch main is checked out in"), "{why}");
+    assert!(!root.join("wt").exists());
+    assert_eq!(worktrees_and_branches(&repo), before, "a refusal changed the repository");
+
+    // Two threads cannot have one directory, nor one branch of one repository.
+    let held = spawn_placed(&daemon, &root, &repo, "wt", &["--branch", "topic"]);
+    daemon.wait_for(&held, "environment/ready");
+    let same_dir = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--env",
+        "git-worktree",
+        "--cwd",
+        repo.to_str().unwrap(),
+        "--env-dir",
+        root.join("wt").to_str().unwrap(),
+    ]);
+    assert!(!same_dir.ok);
+    assert!(
+        same_dir.stderr.contains(&format!("thread {held} already has its environment in")),
+        "{}",
+        same_dir.stderr
+    );
+    let why = refused("other", &["--branch", "topic", "--reuse-branch"]);
+    assert!(why.contains("branch topic is checked out in"), "{why}");
+    assert!(root.join("wt/a.txt").is_file(), "the thread that has the place lost it");
+
+    // The flags mean something only to an environment.
+    let bare = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--env-dir", "x"]);
+    assert!(!bare.ok && bare.stderr.contains("--env"), "{}", bare.stderr);
+    let unnamed = spawn_in_worktree(&daemon, &repo, &["--reuse-branch"]);
+    assert!(!unnamed.ok && unnamed.stderr.contains("--branch"), "{}", unnamed.stderr);
+}
+
+#[test]
+fn a_folder_of_the_users_own_and_a_branch_from_a_remote_are_theirs_to_keep() {
+    let dir = tempfile::tempdir().unwrap();
+    // Spelled as the commands see the directory they run in.
+    let root = dir.path().canonicalize().unwrap();
+    let repo = repo(&root, &[("a.txt", "one\n")]);
+    let daemon = Daemon::start(&root.join("data"));
+
+    // An empty directory is taken as it is. Its folder was the user's before, so
+    // it stays when the worktree goes, and the branch nobody committed on goes.
+    let place = root.join("tasks/T-1/app");
+    std::fs::create_dir_all(&place).unwrap();
+    let id = spawn_placed(&daemon, &root, &repo, "tasks/T-1/app", &["--branch", "topic"]);
+    daemon.wait_for(&id, "environment/ready");
+    assert_eq!(git(&place, &["branch", "--show-current"]).trim(), "topic");
+    assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+    assert!(!place.exists());
+    assert!(place.parent().unwrap().is_dir(), "a folder the user made was removed");
+    assert_eq!(git(&repo, &["branch", "--list", "topic"]), "");
+
+    // Without a name the branch is qcc's, wherever the worktree is.
+    let id = spawn_placed(&daemon, &root, &repo, "tasks/T-1/app", &[]);
+    daemon.wait_for(&id, "environment/ready");
+    assert_eq!(git(&place, &["branch", "--show-current"]).trim(), format!("qcc/{id}"));
+    assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+    assert_eq!(git(&repo, &["branch", "--list", "qcc/*"]), "");
+
+    // A colleague's branch, known only as fetched from the remote.
+    let remote = root.join("remote.git");
+    git(&root, &["clone", "--quiet", "--bare", "app", "remote.git"]);
+    git(&repo, &["remote", "add", "origin", remote.to_str().unwrap()]);
+    git(&repo, &["checkout", "--quiet", "-b", "feature/shared"]);
+    write(repo.join("a.txt"), "one\ntheirs\n");
+    git(&repo, &["commit", "--quiet", "--all", "--message", "theirs"]);
+    git(&repo, &["push", "--quiet", "origin", "feature/shared"]);
+    git(&repo, &["checkout", "--quiet", "main"]);
+    git(&repo, &["branch", "--quiet", "-D", "feature/shared"]);
+
+    // A new branch of that name would part ways with it: refused unless asked.
+    let branch = ["--branch", "feature/shared"];
+    let unasked = spawn_placed(&daemon, &root, &repo, "tasks/T-1/app", &branch);
+    let why = refusal(&daemon, &unasked);
+    assert!(why.contains("exists already on the remote origin"), "{why}");
+    assert_eq!(git(&repo, &["branch", "--list", "feature/*"]), "");
+    assert!(daemon.qcc(&["thread", "archive", &unasked]).ok);
+
+    // Asked, the thread goes on from the remote branch and follows it.
+    let reuse = ["--branch", "feature/shared", "--reuse-branch", "--base", "main"];
+    let id = spawn_placed(&daemon, &root, &repo, "tasks/T-1/app", &reuse);
+    daemon.wait_for(&id, "environment/ready");
+    assert_eq!(std::fs::read_to_string(place.join("a.txt")).unwrap(), "one\ntheirs\n");
+    let upstream = git(&place, &["rev-parse", "--abbrev-ref", "feature/shared@{upstream}"]);
+    assert_eq!(upstream.trim(), "origin/feature/shared");
+    // With a base the changes are those of the whole branch since it left the base.
+    let changes = daemon.qcc(&["thread", "changes", &id, "--json"]).json();
+    assert_eq!(changes["changes"]["files"][0]["path"], "a.txt");
+    assert_eq!(changes["changes"]["base"], git(&repo, &["rev-parse", "main"]).trim());
+
+    // A commit that was never pushed outlives the worktree.
+    write(place.join("a.txt"), "one\ntheirs\nmine\n");
+    git(&place, &["commit", "--quiet", "--all", "--message", "mine"]);
+    let tip = git(&place, &["rev-parse", "HEAD"]);
+    assert!(daemon.qcc(&["thread", "archive", &id]).ok);
+    assert!(!place.exists());
+    assert_eq!(git(&repo, &["rev-parse", "feature/shared"]), tip);
+}
+
+#[test]
+fn a_thread_moves_into_a_worktree_where_the_user_says() {
+    let dir = tempfile::tempdir().unwrap();
+    // Spelled as the commands see the directory they run in.
+    let root = dir.path().canonicalize().unwrap();
+    let repo = repo(&root, &[("README.md", "hello\n")]);
+    let daemon = Daemon::start(&root.join("data"));
+    let spawned = daemon.qcc(&[
+        "thread",
+        "spawn",
+        "--provider",
+        "echo",
+        "--json",
+        "--cwd",
+        repo.to_str().unwrap(),
+    ]);
+    let id = spawned.json()["thread"]["id"].as_str().unwrap().to_owned();
+    write(repo.join("README.md"), "hello\nedited\n");
+
+    // A place that is taken leaves the thread, and its work, where they were.
+    write(root.join("full/notes.md"), "mine\n");
+    let full = ["thread", "isolate", &id, "--carry", "--env-dir", "full", "--branch", "fix/typo"];
+    assert!(daemon.qcc_in(&root, &full).ok);
+    let detached = daemon.wait_for(&id, "environment/detached");
+    assert!(detached["message"].as_str().unwrap().contains("exists and is not empty"));
+    assert_eq!(std::fs::read_to_string(repo.join("README.md")).unwrap(), "hello\nedited\n");
+    assert_eq!(git(&repo, &["branch", "--list", "fix/*"]), "");
+
+    let moved =
+        ["thread", "isolate", &id, "--carry", "--env-dir", "tasks/typo", "--branch", "fix/typo"];
+    assert!(daemon.qcc_in(&root, &moved).ok);
+    daemon.wait_for(&id, "environment/ready");
+    let worktree = root.join("tasks/typo");
+    assert_eq!(daemon.thread(&id)["cwd"], worktree.to_str().unwrap());
+    assert_eq!(git(&worktree, &["branch", "--show-current"]).trim(), "fix/typo");
+    assert_eq!(std::fs::read_to_string(worktree.join("README.md")).unwrap(), "hello\nedited\n");
+    assert_eq!(git(&repo, &["status", "--porcelain"]), "", "the work left the source");
 }
 
 #[test]

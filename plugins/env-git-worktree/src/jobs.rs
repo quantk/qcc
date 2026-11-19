@@ -93,6 +93,20 @@ fn script(tag: u32, dir: &str, script: &str, env: Vec<(String, String)>) -> Cmd 
     }
 }
 
+/// Remove `dir` if it is empty.
+fn rmdir(tag: u32, dir: &str) -> Cmd {
+    Cmd {
+        tag,
+        program: "rmdir",
+        args: vec![dir.to_owned()],
+        cwd: None,
+        env: Vec::new(),
+        limit: OUTPUT_LIMIT,
+        timeout_ms: GIT_TIMEOUT_MS,
+        lock: None,
+    }
+}
+
 /// How a command ended.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Exit {
@@ -152,40 +166,71 @@ pub struct Record {
     /// mirrors where in the checkout the thread was started.
     pub cwd: String,
     pub branch: String,
-    /// The commit the branch started at.
+    /// The commit the changes of the thread are counted from: where the branch
+    /// started, or where a branch that was there already stood.
     pub base: String,
+    /// The user said where the worktree goes; it is not under the plugin's root.
+    pub placed: bool,
+    /// The user named the branch.
+    pub named: bool,
+    /// The branch was there before the worktree and was continued, not made.
+    pub reused: bool,
 }
 
 impl Record {
+    /// The folder that holds the worktree's directory.
+    pub fn parent(&self) -> &str {
+        self.worktree.rsplit_once('/').map_or("", |(parent, _)| parent)
+    }
+
     pub fn to_json(&self) -> Vec<u8> {
-        json!({
+        let mut value = json!({
             "toplevel": self.toplevel,
             "worktree": self.worktree,
             "cwd": self.cwd,
             "branch": self.branch,
             "base": self.base,
-        })
-        .to_string()
-        .into_bytes()
+        });
+        // Written only when set: the record of a worktree nobody placed or named
+        // reads as it always did.
+        for (name, set) in [("placed", self.placed), ("named", self.named), ("reused", self.reused)]
+        {
+            if set {
+                value[name] = Value::Bool(true);
+            }
+        }
+        value.to_string().into_bytes()
     }
 
     pub fn from_json(bytes: &[u8]) -> Option<Self> {
         let value: Value = serde_json::from_slice(bytes).ok()?;
         let field = |name: &str| Some(value.get(name)?.as_str()?.to_owned());
+        // Absent from the records of worktrees made before these could be asked for.
+        let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
         Some(Self {
             toplevel: field("toplevel")?,
             worktree: field("worktree")?,
             cwd: field("cwd")?,
             branch: field("branch")?,
             base: field("base")?,
+            placed: flag("placed"),
+            named: flag("named"),
+            reused: flag("reused"),
         })
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Answer {
-    Ready(Record),
-    Removed,
+    Ready {
+        record: Record,
+        /// The folder holding the worktree's directory was made along with it.
+        made_parent: bool,
+    },
+    Removed {
+        /// The folder that held the worktree's directory is gone too.
+        parent_gone: bool,
+    },
     Changes(EnvironmentChanges),
     Diff {
         diff: String,
@@ -256,6 +301,103 @@ mod prepare {
     pub const POP: u32 = 8;
     /// Give it back to the source when the worktree could not be made.
     pub const RESTORE: u32 = 9;
+    /// Look at the directory and the branch the user asked for.
+    pub const PROBE: u32 = 10;
+    /// Remove the folder made for the worktree's directory along with it.
+    pub const UNDO_PARENT: u32 = 11;
+}
+
+/// Looks at the place the user asked the worktree to have before anything is
+/// changed, and refuses whatever could damage or hide work that is not the
+/// thread's. `$1` source checkout, `$2` the directory asked for (or empty), `$3` the
+/// branch asked for (or empty), `$4` 1 when an existing branch may be continued,
+/// `$5` the base commit, `$6` 1 when the user named the base.
+///
+/// Prints `parent=made|kept` (whether the folder holding the directory has to be
+/// made), `branch=new|local|remote`, for a remote branch `upstream=<remote>/<name>`,
+/// and for an existing one `base=<commit>`: where the changes of the thread are
+/// counted from. A refusal exits with 3 and says why.
+const PROBE_SCRIPT: &str = r#"
+set -euo pipefail
+src=$1; dir=$2; branch=$3; reuse=$4; base=$5; based=$6
+fail() { echo "$1" >&2; exit 3; }
+if [ -n "$dir" ]; then
+  if [ -L "$dir" ]; then fail "$dir is a symbolic link; name the directory itself"; fi
+  if [ -e "$dir" ]; then
+    [ -d "$dir" ] || fail "$dir exists and is not a directory"
+    if [ -e "$dir/.git" ]; then
+      fail "$dir is a git checkout already; archive the thread that works there or name another directory"
+    fi
+    [ -z "$(ls -A "$dir")" ] || fail "$dir exists and is not empty"
+  fi
+  parent=$(dirname "$dir")
+  if [ -d "$parent" ]; then echo "parent=kept"; else echo "parent=made"; fi
+  up=$parent
+  while [ ! -d "$up" ]; do up=$(dirname "$up"); done
+  if [ "$(git -C "$up" rev-parse --is-inside-git-dir 2>/dev/null || true)" = true ]; then
+    fail "$dir is inside the git directory of a repository"
+  fi
+  if outer=$(git -C "$up" rev-parse --show-toplevel 2>/dev/null) && [ -n "$outer" ]; then
+    # Spelled the way git spells the checkout, so that a symlink on the way does
+    # not make the directory look like it is outside.
+    phys=$(cd "$up" && pwd -P); rest=${dir#"$up"}
+    code=0
+    # The trailing slash says it is a directory, which git cannot see of one that
+    # is not there yet; a pattern like `tasks/` matches nothing else.
+    git -C "$outer" check-ignore -q -- "${phys%/}/${rest#/}/" || code=$?
+    case $code in
+      0) ;;
+      1) fail "$dir is inside the git checkout $outer, which does not ignore it: the worktree would show up there as untracked files. Ignore it there (.gitignore or .git/info/exclude) or name another directory" ;;
+      *) fail "cannot tell whether the git checkout $outer ignores $dir" ;;
+    esac
+  fi
+fi
+if [ -n "$branch" ]; then
+  case $branch in
+    -*) fail "$branch is not a valid branch name" ;;
+    qcc/*) fail "branch names under qcc/ are for the worktrees qcc names itself; pick another name" ;;
+  esac
+  git check-ref-format "refs/heads/$branch" || fail "$branch is not a valid branch name"
+  tip=$(git -C "$src" rev-parse --verify --quiet "refs/heads/$branch^{commit}" || true)
+  if [ -n "$tip" ]; then
+    [ "$reuse" = 1 ] || fail "branch $branch exists already in $src; ask to reuse it (--reuse-branch) to continue on it, or pick another name"
+    where=$(git -C "$src" worktree list --porcelain |
+      awk -v want="branch refs/heads/$branch" '/^worktree /{dir=substr($0,10)} $0==want{print dir}')
+    [ -z "$where" ] || fail "branch $branch is checked out in $where; two directories cannot work on one branch"
+    echo "branch=local"
+  else
+    found=""; count=0; upstream=""
+    for remote in $(git -C "$src" remote); do
+      if there=$(git -C "$src" rev-parse --verify --quiet "refs/remotes/$remote/$branch^{commit}"); then
+        found="$found $remote"; count=$((count + 1)); tip=$there; upstream="$remote/$branch"
+      fi
+    done
+    case $count in
+      0) echo "branch=new"; exit 0 ;;
+      1) [ "$reuse" = 1 ] || fail "branch $branch exists already on the remote$found of $src (as last fetched); ask to reuse it (--reuse-branch) to continue on it, or pick another name"
+         echo "branch=remote"; echo "upstream=$upstream" ;;
+      *) fail "branch $branch exists on several remotes of $src ($found ); make the local branch yourself, then ask to reuse it" ;;
+    esac
+  fi
+  if [ "$based" = 1 ]; then
+    start=$(git -C "$src" merge-base "$base" "$tip") ||
+      fail "branch $branch and the base asked for have no commit in common"
+  else
+    start=$tip
+  fi
+  echo "base=$start"
+fi
+"#;
+
+/// What the worktree's branch is made from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Start {
+    /// A new branch at the base commit.
+    New,
+    /// A local branch that exists already.
+    Local,
+    /// A new local branch that follows this remote one.
+    Remote(String),
 }
 
 /// `git worktree add` on a new branch, then the files `.worktreeinclude` names, then
@@ -265,11 +407,22 @@ mod prepare {
 /// it is stashed in the source before the worktree is made and popped in the
 /// worktree after setup. If anything fails, the worktree goes and the stash is
 /// popped back where it came from.
+///
+/// The user may say where the worktree goes and what its branch is called
+/// ([`Prepare::placed`]). Then [`PROBE_SCRIPT`] looks at both first, and a branch that
+/// was there before is never deleted when something fails.
 pub struct Prepare {
     thread: String,
     source: String,
     root: String,
     base: Option<String>,
+    /// Where the user asked the worktree to be.
+    dir: Option<String>,
+    /// An existing branch of the name asked for may be continued.
+    reuse: bool,
+    start: Start,
+    /// The folder holding the worktree's directory did not exist before.
+    made_parent: bool,
     /// Where in the checkout the thread was started, with a trailing slash; empty at
     /// the root.
     prefix: String,
@@ -287,6 +440,20 @@ impl Prepare {
         self
     }
 
+    /// Make the worktree in `dir` instead of under the root, and call its branch
+    /// `branch` instead of `qcc/<thread>`; with `reuse`, continue on that branch if
+    /// it exists.
+    pub fn placed(mut self, dir: Option<String>, branch: Option<String>, reuse: bool) -> Self {
+        self.record.placed = dir.is_some();
+        self.dir = dir;
+        if let Some(branch) = branch {
+            self.record.branch = branch;
+            self.record.named = true;
+        }
+        self.reuse = reuse;
+        self
+    }
+
     /// Take the worktree down again, give the stash back, and fail with `reason`.
     fn undo(&mut self, reason: String) -> Step {
         self.failure = Some(reason);
@@ -297,8 +464,31 @@ impl Prepare {
         )])
     }
 
+    /// What is left to undo once the worktree and its branch are gone.
+    fn undo_rest(&mut self) -> Step {
+        if std::mem::take(&mut self.made_parent) {
+            // Only an empty folder goes: another thread may have moved in meanwhile.
+            return Step::Run(vec![rmdir(prepare::UNDO_PARENT, self.record.parent())]);
+        }
+        if self.stashed {
+            return Step::Run(vec![git(
+                prepare::RESTORE,
+                &self.record.toplevel,
+                &["stash", "pop", "--index"],
+            )]);
+        }
+        self.fail()
+    }
+
     fn fail(&mut self) -> Step {
         Step::Finish(Err(self.failure.take().unwrap_or_else(|| "setup failed".into())))
+    }
+
+    fn ready(&self) -> Step {
+        Step::Finish(Ok(Answer::Ready {
+            record: self.record.clone(),
+            made_parent: self.made_parent,
+        }))
     }
 
     pub fn new(thread: String, source: String, root: String, base: Option<String>) -> Self {
@@ -308,12 +498,19 @@ impl Prepare {
             cwd: String::new(),
             branch: format!("qcc/{thread}"),
             base: String::new(),
+            placed: false,
+            named: false,
+            reused: false,
         };
         Self {
             thread,
             source,
             root,
             base,
+            dir: None,
+            reuse: false,
+            start: Start::New,
+            made_parent: false,
             prefix: String::new(),
             record,
             failure: None,
@@ -328,6 +525,20 @@ impl Prepare {
             &self.source,
             &["rev-parse", "--show-toplevel", "--show-prefix"],
         )])
+    }
+
+    /// The place is fine: set the uncommitted work aside if it goes along, then
+    /// make the worktree.
+    fn proceed(&mut self) -> Step {
+        if self.carry {
+            let message = format!("qcc: thread {} moves into a worktree", self.thread);
+            return Step::Run(vec![git(
+                prepare::STASH,
+                &self.record.toplevel,
+                &["stash", "push", "--include-untracked", "-m", &message],
+            )]);
+        }
+        Step::Run(vec![self.add()])
     }
 
     fn on_exit(&mut self, tag: u32, exit: Exit) -> Step {
@@ -347,7 +558,10 @@ impl Prepare {
                 }
                 self.prefix = lines.next().unwrap_or("").to_owned();
                 let name = toplevel.trim_end_matches('/').rsplit('/').next().unwrap_or("repo");
-                record.worktree = join(&join(&self.root, &self.thread), name);
+                record.worktree = match &self.dir {
+                    Some(dir) => dir.clone(),
+                    None => join(&join(&self.root, &self.thread), name),
+                };
                 record.cwd = match self.prefix.trim_end_matches('/') {
                     "" => record.worktree.clone(),
                     prefix => join(&record.worktree, prefix),
@@ -379,15 +593,64 @@ impl Prepare {
                     }));
                 }
                 record.base = commit;
-                if self.carry {
-                    let message = format!("qcc: thread {} moves into a worktree", self.thread);
-                    return Step::Run(vec![git(
-                        STASH,
-                        &record.toplevel,
-                        &["stash", "push", "--include-untracked", "-m", &message],
-                    )]);
+                if !record.placed && !record.named {
+                    return self.proceed();
                 }
-                Step::Run(vec![self.add()])
+                let flag = |on: bool| if on { "1" } else { "0" }.to_owned();
+                Step::Run(vec![Cmd {
+                    tag: PROBE,
+                    program: "bash",
+                    args: vec![
+                        "-c".into(),
+                        PROBE_SCRIPT.into(),
+                        "qcc".into(),
+                        record.toplevel.clone(),
+                        self.dir.clone().unwrap_or_default(),
+                        if record.named { record.branch.clone() } else { String::new() },
+                        flag(self.reuse),
+                        record.base.clone(),
+                        flag(self.base.is_some()),
+                    ],
+                    cwd: None,
+                    env: vec![("LC_ALL".to_owned(), "C".to_owned())],
+                    limit: OUTPUT_LIMIT,
+                    timeout_ms: GIT_TIMEOUT_MS,
+                    lock: None,
+                }])
+            }
+            PROBE => {
+                if !exit.ok() {
+                    // Exit code 3 is the script refusing, in words of its own.
+                    return Step::Finish(Err(if exit.code == Some(3) && !exit.timed_out {
+                        exit.reason()
+                    } else {
+                        format!(
+                            "cannot check where the worktree was asked to be: {}",
+                            exit.reason()
+                        )
+                    }));
+                }
+                let text = exit.text();
+                let said = |key: &str| {
+                    text.lines().find_map(|line| line.strip_prefix(key)?.strip_prefix('='))
+                };
+                self.made_parent = said("parent") == Some("made");
+                self.start = match (said("branch"), said("upstream")) {
+                    (Some("local"), _) => Start::Local,
+                    (Some("remote"), Some(upstream)) => Start::Remote(upstream.to_owned()),
+                    _ => Start::New,
+                };
+                if self.start != Start::New {
+                    let Some(base) = said("base").filter(|base| !base.is_empty()) else {
+                        return Step::Finish(Err(format!(
+                            "cannot tell where branch {} stands",
+                            record.branch
+                        )));
+                    };
+                    record.base = base.to_owned();
+                    record.reused = true;
+                }
+                self.proceed()
             }
             STASH => {
                 if !exit.ok() {
@@ -449,7 +712,7 @@ impl Prepare {
                         &["stash", "pop", "--index"],
                     )]);
                 }
-                Step::Finish(Ok(Answer::Ready(record.clone())))
+                self.ready()
             }
             POP => {
                 if !exit.ok() {
@@ -459,16 +722,16 @@ impl Prepare {
                     ));
                 }
                 self.stashed = false;
-                Step::Finish(Ok(Answer::Ready(record.clone())))
+                self.ready()
             }
+            // A branch that was there before the worktree is not this job's to delete.
+            UNDO_WORKTREE if record.reused => self.undo_rest(),
             UNDO_WORKTREE => Step::Run(vec![git(
                 UNDO_BRANCH,
                 &record.toplevel,
                 &["branch", "-D", &record.branch],
             )]),
-            UNDO_BRANCH if self.stashed => {
-                Step::Run(vec![git(RESTORE, &record.toplevel, &["stash", "pop", "--index"])])
-            }
+            UNDO_BRANCH | UNDO_PARENT => self.undo_rest(),
             RESTORE if !exit.ok() => {
                 let reason = self.failure.take().unwrap_or_default();
                 Step::Finish(Err(format!(
@@ -484,12 +747,10 @@ impl Prepare {
 
     fn add(&self) -> Cmd {
         let record = &self.record;
-        // `--no-track`: the branch is the thread's own, not a follower of its base,
-        // whatever `branch.autoSetupMerge` says.
-        git_worktree(
-            prepare::ADD,
-            &record.toplevel,
-            &[
+        let args: Vec<&str> = match &self.start {
+            // `--no-track`: the branch is the thread's own, not a follower of its base,
+            // whatever `branch.autoSetupMerge` says.
+            Start::New => vec![
                 "worktree",
                 "add",
                 "--no-track",
@@ -498,7 +759,13 @@ impl Prepare {
                 &record.worktree,
                 &record.base,
             ],
-        )
+            Start::Local => vec!["worktree", "add", &record.worktree, &record.branch],
+            // The local branch goes on from the remote one and follows it.
+            Start::Remote(upstream) => {
+                vec!["worktree", "add", "--track", "-b", &record.branch, &record.worktree, upstream]
+            }
+        };
+        git_worktree(prepare::ADD, &record.toplevel, &args)
     }
 }
 
@@ -510,18 +777,36 @@ mod remove {
     pub const WORKTREE: u32 = 2;
     pub const BRANCH: u32 = 3;
     pub const RMDIR: u32 = 4;
+    /// Where a branch the user named stands now.
+    pub const TIP: u32 = 5;
 }
 
 /// The teardown script, `git worktree remove`, and the branch if nothing on it would
 /// be lost. Uncommitted work stops it unless forced.
+///
+/// A branch the user named is theirs: it may be pushed, or about to be. It goes
+/// only when this plugin made it and nothing was committed on it; one that was
+/// there before the worktree always stays.
 pub struct Remove {
     record: Record,
     force: bool,
+    /// Remove the folder that held the worktree's directory, if that leaves it empty.
+    tidy_parent: bool,
 }
 
 impl Remove {
     pub fn new(record: Record, force: bool) -> Self {
-        Self { record, force }
+        // The folder under the plugin's root is the thread's own. One the user
+        // chose is left alone unless [`Self::tidying_parent`] says otherwise.
+        let tidy_parent = !record.placed;
+        Self { record, force, tidy_parent }
+    }
+
+    /// Whether the folder holding the worktree's directory goes too once it is
+    /// empty: for a directory the user chose, only a folder this plugin made.
+    pub fn tidying_parent(mut self, tidy: bool) -> Self {
+        self.tidy_parent = tidy || !self.record.placed;
+        self
     }
 
     fn teardown(&self) -> Step {
@@ -538,6 +823,21 @@ impl Remove {
             return self.teardown();
         }
         Step::Run(vec![git(remove::STATUS, &self.record.worktree, &["status", "--porcelain"])])
+    }
+
+    /// `-d`, not `-D`: git refuses when the branch has commits that are nowhere
+    /// else, and then the branch stays.
+    fn delete_branch(&self) -> Step {
+        let record = &self.record;
+        Step::Run(vec![git(remove::BRANCH, &record.toplevel, &["branch", "-d", &record.branch])])
+    }
+
+    /// The worktree and what goes of its branch are gone; the folder is last.
+    fn tidy(&self) -> Step {
+        if !self.tidy_parent {
+            return Step::Finish(Ok(Answer::Removed { parent_gone: false }));
+        }
+        Step::Run(vec![rmdir(remove::RMDIR, self.record.parent())])
     }
 
     fn on_exit(&mut self, tag: u32, exit: Exit) -> Step {
@@ -579,24 +879,25 @@ impl Remove {
                 if !exit.ok() && !exit.stderr.contains("is not a working tree") {
                     return Step::Finish(Err(format!("git worktree remove: {}", exit.reason())));
                 }
-                // `-d`, not `-D`: git refuses when the branch has commits that are
-                // nowhere else, and then the branch stays.
-                Step::Run(vec![git(BRANCH, &record.toplevel, &["branch", "-d", &record.branch])])
+                if !record.named {
+                    return self.delete_branch();
+                }
+                if record.reused {
+                    return self.tidy();
+                }
+                let commit = format!("refs/heads/{}^{{commit}}", record.branch);
+                Step::Run(vec![git(
+                    TIP,
+                    &record.toplevel,
+                    &["rev-parse", "--verify", "--quiet", &commit],
+                )])
             }
-            BRANCH => {
-                let parent = record.worktree.rsplit_once('/').map_or("", |(parent, _)| parent);
-                Step::Run(vec![Cmd {
-                    tag: RMDIR,
-                    program: "rmdir",
-                    args: vec![parent.to_owned()],
-                    cwd: None,
-                    env: Vec::new(),
-                    limit: OUTPUT_LIMIT,
-                    timeout_ms: GIT_TIMEOUT_MS,
-                    lock: None,
-                }])
-            }
-            _ => Step::Finish(Ok(Answer::Removed)),
+            // Still where it started: the branch holds nothing, and goes.
+            TIP if exit.ok() && exit.text().trim() == record.base => self.delete_branch(),
+            TIP | BRANCH => self.tidy(),
+            _ => Step::Finish(Ok(Answer::Removed {
+                parent_gone: exit.ok() || exit.stderr.contains("No such file or directory"),
+            })),
         }
     }
 }
@@ -644,6 +945,9 @@ impl Inspect {
             cwd: self.cwd.clone(),
             branch: String::new(),
             base: "HEAD".to_owned(),
+            placed: false,
+            named: false,
+            reused: false,
         };
         let paths = std::mem::take(&mut self.paths);
         let mut inner = Box::new(if self.diff {
@@ -1056,6 +1360,9 @@ mod tests {
             cwd: "/data/thr_1/app".into(),
             branch: "qcc/thr_1".into(),
             base: "abc123".into(),
+            placed: false,
+            named: false,
+            reused: false,
         }
     }
 
@@ -1101,7 +1408,9 @@ mod tests {
         assert_eq!(setup[0].timeout_ms, SCRIPT_TIMEOUT_MS);
 
         // The thread works where it was started: in the same subdirectory.
-        let Step::Finish(Ok(Answer::Ready(record))) = job.on_exit(prepare::SETUP, out("")) else {
+        let Step::Finish(Ok(Answer::Ready { record, made_parent: false })) =
+            job.on_exit(prepare::SETUP, out(""))
+        else {
             panic!("not ready");
         };
         assert_eq!(record.cwd, "/data/thr_1/app/web");
@@ -1166,7 +1475,10 @@ mod tests {
         // Popped in the worktree, after its setup.
         let pop = run(job.on_exit(prepare::SETUP, out("")));
         assert_eq!(pop[0].args, ["-C", "/data/thr_1/app", "stash", "pop", "--index"]);
-        assert!(matches!(job.on_exit(prepare::POP, out("")), Step::Finish(Ok(Answer::Ready(_)))));
+        assert!(matches!(
+            job.on_exit(prepare::POP, out("")),
+            Step::Finish(Ok(Answer::Ready { .. }))
+        ));
 
         // Nothing to carry: no pop.
         let mut job = carrying();
@@ -1174,7 +1486,10 @@ mod tests {
         job.on_exit(prepare::STASH, out("No local changes to save\n"));
         job.on_exit(prepare::ADD, out(""));
         job.on_exit(prepare::INCLUDE, out(""));
-        assert!(matches!(job.on_exit(prepare::SETUP, out("")), Step::Finish(Ok(Answer::Ready(_)))));
+        assert!(matches!(
+            job.on_exit(prepare::SETUP, out("")),
+            Step::Finish(Ok(Answer::Ready { .. }))
+        ));
 
         // A failed pop takes the worktree down and gives the work back to the source.
         let mut job = carrying();
@@ -1267,7 +1582,10 @@ mod tests {
             (rmdir[0].program, rmdir[0].args.as_slice()),
             ("rmdir", &["/data/thr_1".to_owned()][..])
         );
-        assert_eq!(job.on_exit(remove::RMDIR, out("")), Step::Finish(Ok(Answer::Removed)));
+        assert_eq!(
+            job.on_exit(remove::RMDIR, out("")),
+            Step::Finish(Ok(Answer::Removed { parent_gone: true }))
+        );
     }
 
     #[test]
@@ -1436,5 +1754,220 @@ mod tests {
             step,
             Step::Finish(Ok(Answer::Diff { diff: "diff --git a/x b/x\n".into(), truncated: true }))
         );
+    }
+
+    /// A worktree at `/tasks/T-1/app`, on `branch` when the user named one, up to
+    /// the answer of the probe.
+    fn placing(branch: Option<&str>, reuse: bool) -> Prepare {
+        let mut job = Prepare::new("thr_1".into(), "/src/app/web".into(), "/data".into(), None)
+            .placed(Some("/tasks/T-1/app".into()), branch.map(str::to_owned), reuse);
+        job.start();
+        job.on_exit(prepare::TOPLEVEL, out("/src/app\nweb/\n"));
+        job
+    }
+
+    #[test]
+    fn a_placed_worktree_is_probed_before_anything_changes() {
+        let mut job = placing(Some("feature/T-1"), false);
+        let probe = run(job.on_exit(prepare::BASE, out("abc123\n")));
+        assert_eq!(probe[0].program, "bash");
+        // Source, directory, branch, reuse, base, whether the base was named.
+        assert_eq!(
+            &probe[0].args[3..],
+            ["/src/app", "/tasks/T-1/app", "feature/T-1", "0", "abc123", "0"]
+        );
+        let add = run(job.on_exit(prepare::PROBE, out("parent=made\nbranch=new\n")));
+        assert_eq!(
+            &add[0].args[2..],
+            ["worktree", "add", "--no-track", "-b", "feature/T-1", "/tasks/T-1/app", "abc123"]
+        );
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        let step = job.on_exit(prepare::SETUP, out(""));
+        let Step::Finish(Ok(Answer::Ready { record, made_parent: true })) = step else {
+            panic!("{step:?}");
+        };
+        // The thread works in the same subdirectory of the directory it was given.
+        assert_eq!(record.cwd, "/tasks/T-1/app/web");
+        assert_eq!(record.parent(), "/tasks/T-1");
+        assert!(record.placed && record.named && !record.reused);
+        assert_eq!(Record::from_json(&record.to_json()), Some(record));
+
+        // Only a directory: the branch is qcc's own, and the probe is told none.
+        let mut job = placing(None, false);
+        let probe = run(job.on_exit(prepare::BASE, out("abc123\n")));
+        assert_eq!(&probe[0].args[4..6], ["/tasks/T-1/app", ""]);
+        let add = run(job.on_exit(prepare::PROBE, out("parent=kept\n")));
+        assert_eq!(&add[0].args[5..7], ["-b", "qcc/thr_1"]);
+
+        // A refusal is passed on in the probe's own words, and nothing was run.
+        let mut job = placing(Some("feature/T-1"), false);
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        let refused = Exit {
+            code: Some(3),
+            stderr: "/tasks/T-1/app exists and is not empty".into(),
+            ..Exit::default()
+        };
+        assert_eq!(
+            job.on_exit(prepare::PROBE, refused),
+            Step::Finish(Err("/tasks/T-1/app exists and is not empty".into()))
+        );
+        let mut job = placing(Some("feature/T-1"), false);
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        let step = job.on_exit(prepare::PROBE, Exit { timed_out: true, ..Exit::default() });
+        let Step::Finish(Err(message)) = step else { panic!("{step:?}") };
+        assert!(
+            message.starts_with("cannot check where the worktree was asked to be"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn a_branch_that_exists_is_continued_and_never_deleted() {
+        // A local one is checked out as it is; changes count from where it stood.
+        let mut job = placing(Some("feature/T-1"), true);
+        let probe = run(job.on_exit(prepare::BASE, out("abc123\n")));
+        assert_eq!(probe[0].args[6], "1");
+        let add = run(job.on_exit(prepare::PROBE, out("parent=kept\nbranch=local\nbase=def456\n")));
+        assert_eq!(&add[0].args[2..], ["worktree", "add", "/tasks/T-1/app", "feature/T-1"]);
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        // A failed setup takes the worktree down and leaves the branch.
+        let undo = run(job.on_exit(prepare::SETUP, failed("no deps")));
+        assert_eq!(&undo[0].args[2..4], ["worktree", "remove"]);
+        assert_eq!(
+            job.on_exit(prepare::UNDO_WORKTREE, out("")),
+            Step::Finish(Err(".qcc-env-setup.sh: no deps".into()))
+        );
+
+        // One known from a remote becomes a local branch that follows it.
+        let mut job = placing(Some("feature/T-1"), true);
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        let said = "parent=kept\nbranch=remote\nupstream=origin/feature/T-1\nbase=def456\n";
+        let add = run(job.on_exit(prepare::PROBE, out(said)));
+        assert_eq!(
+            &add[0].args[2..],
+            [
+                "worktree",
+                "add",
+                "--track",
+                "-b",
+                "feature/T-1",
+                "/tasks/T-1/app",
+                "origin/feature/T-1"
+            ]
+        );
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        let step = job.on_exit(prepare::SETUP, out(""));
+        let Step::Finish(Ok(Answer::Ready { record, made_parent: false })) = step else {
+            panic!("{step:?}");
+        };
+        assert_eq!(record.base, "def456");
+        assert!(record.reused);
+    }
+
+    #[test]
+    fn a_failed_setup_removes_the_branch_and_the_folder_it_made() {
+        let mut job = placing(Some("feature/T-1"), false);
+        job.on_exit(prepare::BASE, out("abc123\n"));
+        job.on_exit(prepare::PROBE, out("parent=made\nbranch=new\n"));
+        job.on_exit(prepare::ADD, out(""));
+        job.on_exit(prepare::INCLUDE, out(""));
+        run(job.on_exit(prepare::SETUP, failed("no deps")));
+        let branch = run(job.on_exit(prepare::UNDO_WORKTREE, out("")));
+        assert_eq!(&branch[0].args[2..], ["branch", "-D", "feature/T-1"]);
+        let folder = run(job.on_exit(prepare::UNDO_BRANCH, out("")));
+        assert_eq!(
+            (folder[0].program, folder[0].args.as_slice()),
+            ("rmdir", &["/tasks/T-1".to_owned()][..])
+        );
+        assert_eq!(
+            job.on_exit(prepare::UNDO_PARENT, out("")),
+            Step::Finish(Err(".qcc-env-setup.sh: no deps".into()))
+        );
+    }
+
+    fn placed_record(reused: bool) -> Record {
+        Record {
+            worktree: "/tasks/T-1/app".into(),
+            cwd: "/tasks/T-1/app".into(),
+            branch: "feature/T-1".into(),
+            placed: true,
+            named: true,
+            reused,
+            ..record()
+        }
+    }
+
+    /// A removal up to the answer of `git worktree remove`.
+    fn removing(record: Record, tidy: bool) -> Remove {
+        let mut job = Remove::new(record, false).tidying_parent(tidy);
+        job.start();
+        job.on_exit(remove::STATUS, out(""));
+        job.on_exit(remove::TEARDOWN, out(""));
+        job
+    }
+
+    #[test]
+    fn a_branch_the_user_named_goes_only_when_nothing_is_on_it() {
+        // Made for the worktree and still where it started: nothing to lose.
+        let mut job = removing(placed_record(false), true);
+        let tip = run(job.on_exit(remove::WORKTREE, out("")));
+        assert_eq!(
+            &tip[0].args[2..],
+            ["rev-parse", "--verify", "--quiet", "refs/heads/feature/T-1^{commit}"]
+        );
+        let branch = run(job.on_exit(remove::TIP, out("abc123\n")));
+        assert_eq!(&branch[0].args[2..], ["branch", "-d", "feature/T-1"]);
+        let folder = run(job.on_exit(remove::BRANCH, out("")));
+        assert_eq!(folder[0].args, ["/tasks/T-1"]);
+        assert_eq!(
+            job.on_exit(remove::RMDIR, out("")),
+            Step::Finish(Ok(Answer::Removed { parent_gone: true }))
+        );
+
+        // It has commits: pushed or not, it stays. So does one git cannot find.
+        for tip in [out("def456\n"), failed("")] {
+            let mut job = removing(placed_record(false), true);
+            job.on_exit(remove::WORKTREE, out(""));
+            let folder = run(job.on_exit(remove::TIP, tip));
+            assert_eq!(folder[0].program, "rmdir");
+        }
+
+        // It was there before the worktree: not even looked at.
+        let mut job = removing(placed_record(true), true);
+        let folder = run(job.on_exit(remove::WORKTREE, out("")));
+        assert_eq!(folder[0].program, "rmdir");
+        // The folder is still in use by another worktree: it stays, and so does the
+        // note that it is ours to remove.
+        let busy = failed("rmdir: /tasks/T-1: Directory not empty");
+        assert_eq!(
+            job.on_exit(remove::RMDIR, busy),
+            Step::Finish(Ok(Answer::Removed { parent_gone: false }))
+        );
+    }
+
+    #[test]
+    fn a_folder_the_user_had_is_left_alone() {
+        let mut job = removing(placed_record(true), false);
+        assert_eq!(
+            job.on_exit(remove::WORKTREE, out("")),
+            Step::Finish(Ok(Answer::Removed { parent_gone: false }))
+        );
+        // The folder under the plugin's own root always goes, whatever is asked.
+        let mut job = removing(record(), false);
+        job.on_exit(remove::WORKTREE, out(""));
+        let folder = run(job.on_exit(remove::BRANCH, out("")));
+        assert_eq!(folder[0].args, ["/data/thr_1"]);
+    }
+
+    #[test]
+    fn records_made_before_placement_read_as_they_were() {
+        let old = br#"{"toplevel":"/src/app","worktree":"/data/thr_1/app","cwd":"/data/thr_1/app","branch":"qcc/thr_1","base":"abc123"}"#;
+        assert_eq!(Record::from_json(old), Some(record()));
+        // And a worktree nobody placed or named is still written the same way.
+        let written: Value = serde_json::from_slice(&record().to_json()).unwrap();
+        assert_eq!(written, serde_json::from_slice::<Value>(old).unwrap());
     }
 }

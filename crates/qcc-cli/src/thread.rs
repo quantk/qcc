@@ -28,6 +28,37 @@ use serde::Serialize;
 use crate::project::find_project;
 use crate::{out, print_json, render};
 
+/// Where an environment works and what it calls its branch, when the user says.
+#[derive(clap::Args)]
+pub(crate) struct Placement {
+    /// Where the environment makes the thread's directory, instead of qcc's data
+    /// directory: for git-worktree the worktree itself, e.g.
+    /// `tasks/BGT-123/bgt-auth`. Relative to the current directory. It must not
+    /// exist yet or be empty, and inside another git checkout it must be ignored
+    /// there. Archiving the thread removes it.
+    #[arg(long, value_name = "DIR")]
+    env_dir: Option<PathBuf>,
+    /// What the environment calls the thread's branch, e.g. `feature/BGT-123`
+    /// [default: qcc/<thread id>]. A branch that exists already, locally or on a
+    /// remote, is refused without --reuse-branch. Archiving the thread keeps a
+    /// branch named here unless nothing was committed on it.
+    #[arg(long, value_name = "NAME")]
+    branch: Option<String>,
+    /// Continue on --branch if it exists already: the local branch, or else the
+    /// one fetched from a remote. Changes are then counted from where the branch
+    /// stood.
+    #[arg(long, requires = "branch")]
+    reuse_branch: bool,
+}
+
+impl Placement {
+    /// The directory, the branch and whether the branch may exist, as the daemon
+    /// takes them.
+    fn into_params(self) -> anyhow::Result<(Option<String>, Option<String>, bool)> {
+        Ok((self.env_dir.map(plain_path).transpose()?, self.branch, self.reuse_branch))
+    }
+}
+
 #[derive(Subcommand)]
 pub(crate) enum ThreadCommand {
     /// Start a new thread with a provider.
@@ -53,6 +84,8 @@ pub(crate) enum ThreadCommand {
         /// commit [default: the current HEAD].
         #[arg(long, value_name = "REF", requires = "env")]
         base: Option<String>,
+        #[command(flatten)]
+        placement: Box<Placement>,
         #[arg(long)]
         model: Option<String>,
         /// How hard the model thinks: a level `qcc provider models` lists for it
@@ -170,6 +203,8 @@ pub(crate) enum ThreadCommand {
         env: String,
         #[arg(long)]
         carry: bool,
+        #[command(flatten)]
+        placement: Box<Placement>,
     },
     /// Put a thread into a project (id or name), or take it out with `none`.
     Project { thread: String, project: String },
@@ -274,6 +309,23 @@ fn attachments(files: Vec<PathBuf>) -> anyhow::Result<Vec<NewAttachment>> {
         .collect()
 }
 
+/// An absolute path without `.` and `..`, counted from the current directory. The
+/// `..` are taken out by name, as a shell's `cd ..` does: the path may not exist yet.
+fn plain_path(path: PathBuf) -> anyhow::Result<String> {
+    use std::path::Component;
+    let mut plain = PathBuf::new();
+    for part in std::path::absolute(&path)?.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                plain.pop();
+            }
+            part => plain.push(part),
+        }
+    }
+    Ok(plain.display().to_string())
+}
+
 /// Exit code of a wait that ran out of time, as `timeout(1)` has it.
 const TIMED_OUT: u8 = 124;
 
@@ -290,6 +342,7 @@ pub(crate) async fn run(
             cwd,
             env,
             base,
+            placement,
             model,
             effort,
             parent,
@@ -309,6 +362,13 @@ pub(crate) async fn run(
                 Some(cwd) => std::path::absolute(cwd)?,
                 None => std::env::current_dir()?,
             };
+            let (environment_dir, branch, reuse_branch) = placement.into_params()?;
+            if env.is_none() && (environment_dir.is_some() || branch.is_some()) {
+                bail!(
+                    "--env-dir and --branch mean something only to an environment; \
+                     add --env git-worktree"
+                );
+            }
             // Without a prompt no turn starts, so there is nothing to follow.
             let follow = follow && prompt.is_some();
             let parent = parent.filter(|parent| !parent.is_empty()).map(ThreadId::new);
@@ -341,6 +401,9 @@ pub(crate) async fn run(
                     cwd: cwd.display().to_string(),
                     environment: env,
                     base,
+                    environment_dir,
+                    branch,
+                    reuse_branch,
                     prompt,
                     attachments: attachments(attach)?,
                     model,
@@ -523,11 +586,15 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Isolate { thread, env, carry } => {
+        ThreadCommand::Isolate { thread, env, carry, placement } => {
+            let (environment_dir, branch, reuse_branch) = placement.into_params()?;
             let params = ThreadIsolateParams {
                 thread_id: ThreadId::new(thread),
                 environment: env,
                 carry_changes: carry,
+                environment_dir,
+                branch,
+                reuse_branch,
             };
             let result = client.call::<ThreadIsolate>(params).await?;
             if json {
@@ -843,4 +910,19 @@ fn parse_state(text: &str) -> anyhow::Result<ThreadState> {
         "archived" => ThreadState::Archived,
         other => bail!("unknown state {other:?}; use working, waiting, idle, failed or archived"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_is_counted_from_the_current_directory_and_made_plain() {
+        let here = std::env::current_dir().unwrap();
+        let plain = |path: &str| plain_path(PathBuf::from(path)).unwrap();
+        assert_eq!(plain("tasks/T-1/app"), here.join("tasks/T-1/app").display().to_string());
+        assert_eq!(plain("./tasks/../other/./app/"), here.join("other/app").display().to_string());
+        assert_eq!(plain("/tasks/T-1/../T-2/app"), "/tasks/T-2/app");
+        assert_eq!(plain("/../tasks"), "/tasks");
+    }
 }

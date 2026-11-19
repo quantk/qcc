@@ -89,6 +89,12 @@ pub enum EnvironmentRequest {
         base: Option<String>,
         /// Take the uncommitted work of `source_dir` along into the new directory.
         carry_changes: bool,
+        /// Where the user asked the directory to be, instead of inside `root`.
+        dir: Option<String>,
+        /// What the user asked the branch to be called.
+        branch: Option<String>,
+        /// `branch` may exist already.
+        reuse_branch: bool,
     },
     Remove {
         thread: ThreadId,

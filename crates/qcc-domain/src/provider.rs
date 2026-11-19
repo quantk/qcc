@@ -106,6 +106,9 @@ pub struct EnvironmentInfo {
     /// without an environment can show their changes through it.
     #[serde(default)]
     pub inspects_directories: bool,
+    /// It can be told where to make its directory and what to call its branch.
+    #[serde(default)]
+    pub custom_placement: bool,
 }
 
 /// Where a plugin's view appears in the app.

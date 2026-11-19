@@ -369,6 +369,10 @@ interface types {
     /// environments are made from (for git: uncommitted work against HEAD). Threads
     /// that work in a directory of their own are asked about through it.
     inspects-directories: bool,
+    /// It honours `dir`, `branch` and `reuse-branch` of `environment-prepare`: the
+    /// user may say where the directory goes and what its branch is called. Those
+    /// are never sent to an environment that did not declare this.
+    custom-placement: bool,
   }
 
   /// Where a view appears in the app.
@@ -689,6 +693,17 @@ interface types {
     /// directory: take the work not yet saved there along (uncommitted changes,
     /// for git), leaving `source-dir` without it.
     carry-changes: bool,
+    /// Where the user asked the new directory to be: an absolute path without `.`
+    /// or `..`. Absent: the plugin picks a place inside `root`. What may already be
+    /// there, and what happens to it on removal, is the environment's to decide; it
+    /// must never destroy what it did not make.
+    dir: option<string>,
+    /// What the user asked the environment's line of work to be called (a git
+    /// branch, for a git one). Absent: the plugin names it.
+    branch: option<string>,
+    /// `branch` may exist already, and then the environment continues on it
+    /// instead of refusing.
+    reuse-branch: bool,
   }
 
   /// How the work of an environment goes back to the directory it was made from.

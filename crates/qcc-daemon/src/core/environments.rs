@@ -13,6 +13,67 @@ use super::{
 };
 
 impl Core {
+    /// Check what a request says about where an environment works. Only an
+    /// environment that declared `custom_placement` is told a directory or a branch;
+    /// the directory is an absolute path, and no other thread has its environment
+    /// there. Returns the directory in its plain form.
+    pub(super) fn check_placement(
+        &self,
+        environment: Option<&str>,
+        dir: Option<&str>,
+        branch: Option<&str>,
+        reuse_branch: bool,
+    ) -> Result<Option<String>, RpcError> {
+        let invalid = |message: String| RpcError::new(codes::INVALID_PARAMS, message);
+        if dir.is_none() && branch.is_none() && !reuse_branch {
+            return Ok(None);
+        }
+        let Some(environment) = environment else {
+            return Err(invalid(
+                "`environment_dir` and `branch` mean something only to an environment".into(),
+            ));
+        };
+        let placeable =
+            self.host.environment(environment).is_some_and(|(_, info)| info.custom_placement);
+        if !placeable {
+            return Err(invalid(format!(
+                "environment {environment:?} chooses its directory and its branch itself"
+            )));
+        }
+        if branch.is_some_and(str::is_empty) {
+            return Err(invalid("`branch` is empty".into()));
+        }
+        if reuse_branch && branch.is_none() {
+            return Err(invalid("`reuse_branch` needs the `branch` to reuse".into()));
+        }
+        let Some(dir) = dir else { return Ok(None) };
+        let path = std::path::Path::new(dir);
+        let plain = path.components().all(|part| {
+            matches!(part, std::path::Component::RootDir | std::path::Component::Normal(_))
+        });
+        if !path.is_absolute() || !plain {
+            return Err(invalid(format!(
+                "environment_dir {dir:?} is not an absolute path free of `.` and `..`"
+            )));
+        }
+        // Rebuilt from its parts: no doubled or trailing slashes.
+        let dir = path.components().collect::<std::path::PathBuf>().display().to_string();
+        let taken = self.supervisor.threads().find(|thread| {
+            !thread.archived
+                && thread.environment.as_ref().is_some_and(|environment| {
+                    environment.state != EnvironmentState::Removed
+                        && environment.dir.as_deref() == Some(dir.as_str())
+                })
+        });
+        if let Some(thread) = taken {
+            return Err(invalid(format!(
+                "thread {} already has its environment in {dir}; archive it or name another directory",
+                thread.id
+            )));
+        }
+        Ok(Some(dir))
+    }
+
     /// Ask the thread's environment for its working directory. The session starts
     /// when the answer comes back as [`Command::EnvironmentPrepared`].
     pub(super) fn prepare_environment(
@@ -49,6 +110,9 @@ impl Core {
             root: root.display().to_string(),
             base: environment.base,
             carry_changes: environment.carry_changes,
+            dir: environment.dir,
+            branch: environment.branch,
+            reuse_branch: environment.reuse_branch,
         };
         // Until the directory exists the thread is as busy as one whose provider is
         // starting: input queues behind it.

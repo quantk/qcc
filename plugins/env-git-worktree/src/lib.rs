@@ -2,7 +2,9 @@
 //!
 //! Every thread gets a `git worktree` of the repository it was started in, on a
 //! branch of its own, so threads work side by side without touching the main
-//! checkout or each other.
+//! checkout or each other. The directory and the branch are the plugin's to choose
+//! unless the user names them; what is theirs is then handled with more care (see
+//! [`jobs::Prepare`] and [`jobs::Remove`]).
 //!
 //! Git is a process, and no host import blocks, so each request is a [`jobs`] state
 //! machine: it names the commands to run, this file runs them and feeds their exits
@@ -54,6 +56,25 @@ fn key(thread: &str) -> String {
 
 fn record(thread: &str) -> Result<Option<Record>, String> {
     Ok(kv::get(&key(thread))?.and_then(|bytes| Record::from_json(&bytes)))
+}
+
+/// The folders this plugin made to hold worktrees the user placed, as a JSON list:
+/// `tasks/BGT-123` of `tasks/BGT-123/<repository>`. Such a folder is removed with
+/// the last worktree in it; one that was there before is the user's and stays.
+const MADE_PARENTS: &str = "made-parents";
+
+fn made_parents() -> Result<Vec<String>, String> {
+    Ok(kv::get(MADE_PARENTS)?
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default())
+}
+
+fn set_made_parents(parents: &[String]) -> Result<(), String> {
+    if parents.is_empty() {
+        return kv::remove(MADE_PARENTS);
+    }
+    let bytes = serde_json::to_vec(parents).map_err(|error| error.to_string())?;
+    kv::put(MADE_PARENTS, &bytes)
 }
 
 fn known(thread: &str) -> Result<Record, String> {
@@ -190,12 +211,25 @@ impl Worktrees {
         }
         let outcome = result.and_then(|answer| {
             Ok(match answer {
-                Answer::Ready(record) => {
+                Answer::Ready { record, made_parent } => {
                     kv::put(&key(&thread), &record.to_json())?;
+                    if made_parent {
+                        let mut parents = made_parents()?;
+                        if !parents.iter().any(|parent| parent == record.parent()) {
+                            parents.push(record.parent().to_owned());
+                            set_made_parents(&parents)?;
+                        }
+                    }
                     Outcome::EnvironmentReady(record.cwd)
                 }
-                Answer::Removed => {
+                Answer::Removed { parent_gone } => {
+                    let removed = record(&thread)?;
                     kv::remove(&key(&thread))?;
+                    if let Some(removed) = removed.filter(|removed| parent_gone && removed.placed) {
+                        let mut parents = made_parents()?;
+                        parents.retain(|parent| parent != removed.parent());
+                        set_made_parents(&parents)?;
+                    }
                     Outcome::Done
                 }
                 Answer::Changes(changes) => Outcome::EnvironmentChanges(changes),
@@ -222,6 +256,8 @@ impl Environment for Worktrees {
             name: "Git worktree".into(),
             // Any git checkout can say what is uncommitted in it.
             inspects_directories: true,
+            // The worktree can go where the user says, on a branch they name.
+            custom_placement: true,
         }
     }
 
@@ -236,14 +272,18 @@ impl Environment for Worktrees {
             request.root,
             request.base,
         )
-        .carrying(request.carry_changes);
+        .carrying(request.carry_changes)
+        .placed(request.dir, request.branch, request.reuse_branch);
         self.begin(request.thread, Job::Prepare(job))
     }
 
     fn remove(&mut self, request: EnvironmentRemove) -> Result<Reply<()>, String> {
         // Nothing of ours to remove.
         let Some(record) = record(&request.thread)? else { return Ok(Reply::Now(())) };
-        self.begin(request.thread, Job::Remove(jobs::Remove::new(record, request.force)))
+        // A folder the user had before the worktree is theirs to keep, even empty.
+        let tidy = record.placed && made_parents()?.iter().any(|parent| parent == record.parent());
+        let job = jobs::Remove::new(record, request.force).tidying_parent(tidy);
+        self.begin(request.thread, Job::Remove(job))
     }
 
     fn changes(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentChanges>, String> {

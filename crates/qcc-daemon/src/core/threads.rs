@@ -109,12 +109,21 @@ impl Core {
                 if self.host.environment(&id).is_none() {
                     return Err(self.environment_missing(&id, codes::INVALID_PARAMS));
                 }
+                let dir = self.check_placement(
+                    Some(&id),
+                    p.environment_dir.as_deref(),
+                    p.branch.as_deref(),
+                    p.reuse_branch,
+                )?;
                 Some(ThreadEnvironment {
                     id,
                     source_dir: p.cwd.clone(),
                     base: p.base,
                     state: EnvironmentState::Pending,
                     carry_changes: false,
+                    dir,
+                    branch: p.branch,
+                    reuse_branch: p.reuse_branch,
                 })
             }
             None if p.base.is_some() => {
@@ -123,7 +132,15 @@ impl Core {
                     "`base` means something only to an environment",
                 ));
             }
-            None => None,
+            None => {
+                self.check_placement(
+                    None,
+                    p.environment_dir.as_deref(),
+                    p.branch.as_deref(),
+                    p.reuse_branch,
+                )?;
+                None
+            }
         };
 
         let project = match p.project {
@@ -311,7 +328,14 @@ impl Core {
         &mut self,
         p: ThreadIsolateParams,
     ) -> Result<ThreadResult, RpcError> {
-        let ThreadIsolateParams { thread_id, environment, carry_changes } = p;
+        let ThreadIsolateParams {
+            thread_id,
+            environment,
+            carry_changes,
+            environment_dir,
+            branch,
+            reuse_branch,
+        } = p;
         let thread =
             self.supervisor.thread(&thread_id).ok_or_else(|| thread_not_found(&thread_id))?;
         if thread.environment.is_some() {
@@ -322,12 +346,21 @@ impl Core {
         if self.host.environment(&environment).is_none() {
             return Err(self.environment_missing(&environment, codes::INVALID_PARAMS));
         }
+        let dir = self.check_placement(
+            Some(&environment),
+            environment_dir.as_deref(),
+            branch.as_deref(),
+            reuse_branch,
+        )?;
         let attached = ThreadEnvironment {
             id: environment,
             source_dir: thread.cwd.clone(),
             base: None,
             state: EnvironmentState::Pending,
             carry_changes,
+            dir,
+            branch,
+            reuse_branch,
         };
         let payload = EventPayload::EnvironmentAttached { environment: attached.clone() };
         let result = self.reconfigure(&thread_id, "where the thread works", |engine, now| {

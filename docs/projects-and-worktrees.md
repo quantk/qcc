@@ -47,7 +47,9 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
 ```
 
 - Directory: `<data>/environments/git-worktree/<thread-id>/<repository-name>`. A thread started
-  from a subdirectory works in the same subdirectory of its copy.
+  from a subdirectory works in the same subdirectory of its copy. `--env-dir` and `--branch` put
+  the worktree where you say, on a branch you name: see
+  [below](#a-worktree-where-you-say-on-a-branch-you-name).
 - `thread changes` and `thread diff` also work for a thread without a worktree that was started
   directly in its own git checkout. Then they show what is uncommitted there relative to `HEAD`
   (edits, deletions, new files), with paths from the repository root. This is done by an
@@ -65,7 +67,8 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
   original checkout; on a conflict the merge is aborted. In the app: the **Apply to …** and
   **Merge** buttons on the Changes tab.
 - **Moving into a worktree mid-thread**: `qcc thread isolate <id> [--carry]` (in the app: **Move
-  into a worktree…** in the thread menu). The worktree is created from the current `HEAD`. With
+  into a worktree…** in the thread menu). The worktree is created from the current `HEAD`; from
+  the CLI it takes `--env-dir`, `--branch` and `--reuse-branch` like `thread spawn`. With
   `--carry` the directory's uncommitted changes (all of them, yours too, new files included) move
   into it through `git stash` and leave the directory. The agent session restarts in the new
   directory and receives the conversation. If the worktree could not be made (the directory is not
@@ -79,8 +82,64 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
   commits that exist nowhere else. The timeline of an archived thread stays readable
   (`qcc thread list --archived`).
 
+### A worktree where you say, on a branch you name
+
+By default qcc chooses both the directory and the branch. Three flags of `thread spawn --env
+git-worktree` (and of `thread isolate`) let you choose them, for instance to gather the worktrees of
+one task that spans several repositories in one folder, on the branch name your team uses:
+
+```sh
+cd ~/Developer
+qcc thread spawn --env git-worktree --cwd BGT/bgt-auth \
+    --env-dir tasks/BGT-123/bgt-auth --branch feature/BGT-123 --prompt '…'
+qcc thread spawn --env git-worktree --cwd BGT/bgt-frontend \
+    --env-dir tasks/BGT-123/bgt-frontend --branch feature/BGT-123 --prompt '…'
+```
+
+Everything else works as for any worktree: `thread changes`, `thread diff`, `thread deliver`,
+`thread archive`, `.worktreeinclude` and the setup and teardown scripts. Without these flags nothing
+changes.
+
+- **`--env-dir <dir>`** is the worktree itself, not a folder to put it in. A relative path is
+  counted from the directory the command runs in, like `--cwd`, and `..` is resolved by name. The
+  thread then works under that path, so an agent picks up the `AGENTS.md` files above it.
+  - The directory must not exist yet, or be an empty directory. A directory with anything in it, a
+    file, a symbolic link and an existing git checkout are refused; nothing is ever overwritten or
+    adopted.
+  - Inside the working tree of another git repository (a root checkout that holds your clones) the
+    directory must be ignored there (`.gitignore` or `.git/info/exclude`). Otherwise it is refused:
+    the worktree would show up in that repository as untracked files and could be added to it by
+    accident.
+  - Two threads cannot have one directory: the second request is refused while the first thread is
+    not archived.
+- **`--branch <name>`** names the branch instead of `qcc/<thread-id>`. Names under `qcc/` are
+  reserved for the branches qcc names itself.
+  - A branch of that name that exists already, in the repository or on one of its remotes as last
+    fetched (qcc does not fetch), is refused: a branch somebody else works on is never taken over
+    silently, and a new local branch would part ways with the remote one.
+  - **`--reuse-branch`** says you mean that branch, to go on with a task. The worktree checks out
+    the local branch, or else makes one that follows the remote branch (a branch found on several
+    remotes is refused; make the local branch yourself). `thread changes`, `thread diff` and
+    `thread deliver` then count from where the branch stood when the worktree was made, that is,
+    the work of this thread; with `--base <ref>`, from where the branch left that ref, that is, the
+    whole task.
+  - One branch cannot be checked out in two worktrees of a repository, so a second thread asking
+    for it is refused. The same name in different repositories is fine.
+- **`thread archive`** removes the worktree, and refuses while it has uncommitted changes, as always.
+  What it does with the rest is more careful than for a worktree of qcc's own:
+  - A branch you named is kept as soon as it has a commit, pushed or not, and a branch that was
+    reused is always kept. Only a branch that was made for the worktree and still stands where it
+    started is deleted: nothing was done on it. (A `qcc/<thread-id>` branch is deleted as before,
+    if it has no commits that exist nowhere else.)
+  - The folder that holds the worktree (`tasks/BGT-123`) is removed once it is empty, and only if
+    qcc made it for a worktree. A folder that was there before stays, even empty, and so does
+    everything above it.
+- If preparation fails after the worktree was made (the setup script), the worktree goes again,
+  and so do the branch and the folder if they were made for it. A reused branch stays.
+
 All of this is done by an ordinary plugin, `plugins/env-git-worktree`, with permissions for `git`,
-`bash` and `rmdir`. The core knows nothing about git.
+`bash` and `rmdir`. The core knows nothing about git: an environment declares `custom-placement`,
+and only then is it told a directory and a branch.
 
 ## Comments on changes
 

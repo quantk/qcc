@@ -271,6 +271,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             id: e.id,
             name: e.name,
             inspects_directories: e.inspects_directories,
+            custom_placement: e.custom_placement,
         }),
         wit::Contribution::UiView(view) => Contribution::UiView(UiViewInfo {
             id: view.id,
@@ -632,12 +633,18 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                         root,
                         base,
                         carry_changes,
+                        dir,
+                        branch,
+                        reuse_branch,
                     } => wit::EnvironmentRequest::Prepare(wit::EnvironmentPrepare {
                         thread: thread.0,
                         source_dir,
                         root,
                         base,
                         carry_changes,
+                        dir,
+                        branch,
+                        reuse_branch,
                     }),
                     EnvironmentRequest::Remove { thread, cwd, force } => {
                         wit::EnvironmentRequest::Remove(wit::EnvironmentRemove {

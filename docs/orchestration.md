@@ -6,6 +6,7 @@ automatically becomes its child.
 
 ```sh
 qcc thread spawn --prompt '…' [--provider codex] [--env git-worktree]   # the default provider is the parent's
+qcc thread spawn --prompt '…' --env git-worktree --env-dir tasks/T-1/app --branch feature/T-1   # a worktree where you say
 qcc thread wait <id>… [--any] [--timeout 100]   # wait until the threads finish; prints their last answers
 qcc thread list --parent <id>                  # children; without --parent, everything as a tree
 qcc thread parent <id> <parent-id>             # move a thread under another one; none makes it standalone

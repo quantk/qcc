@@ -57,6 +57,17 @@ pub struct ThreadEnvironment {
     /// goes along.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub carry_changes: bool,
+    /// Where the user asked the environment to make its directory. Absent: the
+    /// environment picks the place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+    /// What the user asked the environment's branch to be called. Absent: the
+    /// environment names it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// `branch` may exist already: the environment continues on it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reuse_branch: bool,
 }
 
 /// Where a thread is, as far as someone waiting on it cares. Derived by the core
@@ -402,6 +413,17 @@ mod tests {
     use super::*;
     use crate::ids::{ItemId, TurnId};
     use crate::interaction::InteractionResolution;
+
+    #[test]
+    fn an_environment_journaled_before_placement_reads_and_writes_as_it_was() {
+        let old = r#"{"id":"git-worktree","source_dir":"/src/app","base":"main","state":"ready"}"#;
+        let environment: ThreadEnvironment = serde_json::from_str(old).unwrap();
+        assert_eq!(
+            (&environment.dir, &environment.branch, environment.reuse_branch),
+            (&None, &None, false)
+        );
+        assert_eq!(serde_json::to_string(&environment).unwrap(), old);
+    }
 
     fn thread() -> Thread {
         Thread {

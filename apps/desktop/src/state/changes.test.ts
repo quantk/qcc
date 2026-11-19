@@ -8,6 +8,7 @@ import {
   EMPTY,
   FOLD_ABOVE,
   ThreadChangesReader,
+  isFullBatch,
   isGenerated,
   nextBatch,
   reading,
@@ -17,6 +18,7 @@ import {
   withChanges,
   withDiff,
   withDiffError,
+  withFull,
 } from "./changes";
 import { parseDiff } from "./diff";
 
@@ -139,6 +141,71 @@ describe("a new list of changes", () => {
   });
 });
 
+describe("a file shown whole", () => {
+  // `a.ts` in full: its unchanged lines around the change.
+  const whole = "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,3 @@\n one\n-x\n+y\n three\n";
+  const read = withDiff(reading(withChanges(EMPTY, list(A, B)), ["a.ts", "b.ts"]), ["a.ts", "b.ts"], {
+    diff: patch("a.ts", "x", "y") + patch("b.ts", "p", "q"),
+  });
+
+  it("is read again on its own, whole, keeping what is shown until then", () => {
+    const wanted = withFull(read, "a.ts", true);
+    expect(withFull(wanted, "a.ts", true)).toBe(wanted);
+    // Whole files never share a request, so a long one crowds out no other diff.
+    expect(nextBatch(wanted, ["b.ts", "a.ts"])).toEqual(["a.ts"]);
+    expect(isFullBatch(wanted, ["a.ts"])).toBe(true);
+    expect(isFullBatch(wanted, ["b.ts"])).toBe(false);
+    const asked = reading(wanted, ["a.ts"]);
+    const before = asked.diffs.get("a.ts");
+    const shown = read.diffs.get("a.ts");
+    expect(before?.state === "reading" && before.file).toBe(shown?.state === "read" && shown.file);
+    expect(nextBatch(asked, ["a.ts"])).toEqual([]);
+    const done = withDiff(asked, ["a.ts"], { diff: whole }, true);
+    const a = done.diffs.get("a.ts");
+    expect(a?.state === "read" && a.full).toBe(true);
+    expect(a?.state === "read" && a.file.lines.map((line) => line.text)).toEqual(["@@ -1,3 +1,3 @@", "one", "x", "y", "three"]);
+    expect(nextBatch(done, ["a.ts", "b.ts"])).toEqual([]);
+
+    // Back to the changes alone: read again in a shared batch.
+    const back = withFull(done, "a.ts", false);
+    expect(nextBatch(back, ["a.ts", "b.ts"])).toEqual(["a.ts"]);
+    expect(isFullBatch(back, ["a.ts"])).toBe(false);
+  });
+
+  it("waits for the others' batch, then goes alone", () => {
+    const fresh = withFull(withChanges(EMPTY, list(A, B)), "b.ts", true);
+    expect(nextBatch(fresh, ["a.ts", "b.ts"])).toEqual(["a.ts"]);
+    const aRead = withDiff(reading(fresh, ["a.ts"]), ["a.ts"], { diff: patch("a.ts", "x", "y") });
+    expect(nextBatch(aRead, ["a.ts", "b.ts"])).toEqual(["b.ts"]);
+  });
+
+  it("is read again whole when the agent changes the work", () => {
+    const done = withDiff(reading(withFull(read, "a.ts", true), ["a.ts"]), ["a.ts"], { diff: whole }, true);
+    const next = withChanges(done, list(A, B));
+    const a = next.diffs.get("a.ts");
+    expect(a?.state === "read" && a.stale && a.full).toBe(true);
+    // In the order shown: the others' batch once `a.ts` is out of the way.
+    expect(nextBatch(next, ["b.ts", "a.ts"])).toEqual(["b.ts"]);
+    expect(nextBatch(next, ["a.ts", "b.ts"])).toEqual(["a.ts"]);
+    const bRead = withDiff(reading(next, ["b.ts"]), ["b.ts"], { diff: patch("b.ts", "p", "q") });
+    expect(nextBatch(bRead, ["b.ts", "a.ts"])).toEqual(["a.ts"]);
+    expect(isFullBatch(bRead, ["a.ts"])).toBe(true);
+    // The very file shown stays when it reads the same.
+    const same = withDiff(reading(bRead, ["a.ts"]), ["a.ts"], { diff: whole }, true);
+    expect((same.diffs.get("a.ts") as { file: unknown }).file).toBe((done.diffs.get("a.ts") as { file: unknown }).file);
+    // A file no longer changed is no longer wanted whole.
+    expect(withChanges(done, list(B)).full.has("a.ts")).toBe(false);
+  });
+
+  it("an answer in the mode no longer wanted is shown, then read again", () => {
+    const asked = reading(withFull(read, "a.ts", true), ["a.ts"]);
+    const changedMind = withFull(asked, "a.ts", false);
+    const done = withDiff(changedMind, ["a.ts"], { diff: whole }, true);
+    expect(done.diffs.get("a.ts")?.state).toBe("read");
+    expect(nextBatch(done, ["a.ts"])).toEqual(["a.ts"]);
+  });
+});
+
 describe("sameFile and totals", () => {
   it("compares the lines a file shows", () => {
     const [a] = parseDiff(patch("a.ts", "x", "y"));
@@ -256,6 +323,39 @@ describe("ThreadChangesReader", () => {
     reader.want(["a.ts"]);
     await vi.advanceTimersByTimeAsync(0);
     expect(calls.diffs.at(-1)).toEqual({ thread_id: "t", paths: ["a.ts"] });
+  });
+
+  it("asks for a file whole on its own, in the scope shown", async () => {
+    const { calls, api } = fake();
+    const reader = new ThreadChangesReader("t", api);
+    reader.reload();
+    await vi.advanceTimersByTimeAsync(0);
+    reader.want(["a.ts", "b.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    reader.setFull("a.ts", true);
+    expect(reader.getState().full.has("a.ts")).toBe(true);
+    reader.want(["a.ts", "b.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.diffs.at(-1)).toEqual({ thread_id: "t", paths: ["a.ts"], full: true });
+    const a = reader.getState().diffs.get("a.ts");
+    expect(a?.state === "read" && a.full).toBe(true);
+
+    // The agent changes the work: the file is read whole again.
+    reader.reload();
+    await vi.advanceTimersByTimeAsync(0);
+    reader.want(["a.ts", "b.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.diffs.at(-1)).toEqual({ thread_id: "t", paths: ["a.ts"], full: true });
+    reader.want(["a.ts", "b.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.diffs.at(-1)).toEqual({ thread_id: "t", paths: ["b.ts"] });
+
+    // Another scope keeps the choice.
+    reader.setScope({ kind: "unsaved" });
+    await vi.advanceTimersByTimeAsync(0);
+    reader.want(["a.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.diffs.at(-1)).toEqual({ thread_id: "t", paths: ["a.ts"], scope: { kind: "unsaved" }, full: true });
   });
 
   it("keeps readers that views hold, and the last few others", () => {

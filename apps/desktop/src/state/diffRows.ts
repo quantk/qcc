@@ -113,6 +113,12 @@ export function wantedPaths(rows: readonly DiffRow[], start: number, end: number
   return paths;
 }
 
+/** The index of the first added or removed line of `file`, null when it has none. */
+export function firstChange(file: DiffFile): number | null {
+  const index = file.lines.findIndex((line) => line.kind === "add" || line.kind === "del");
+  return index < 0 ? null : index;
+}
+
 /** Columns a line takes, tabs at `tabSize`. */
 export function lineColumns(text: string, tabSize = 4): number {
   if (!text.includes("\t")) return text.length;

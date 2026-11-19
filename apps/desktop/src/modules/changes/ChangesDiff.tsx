@@ -3,7 +3,7 @@
 // and the whole diff scrolls sideways as one.
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ChevronRightIcon, MessageSquarePlusIcon } from "lucide-react";
+import { ChevronRightIcon, FoldVerticalIcon, MessageSquarePlusIcon, UnfoldVerticalIcon } from "lucide-react";
 import {
   type CSSProperties,
   type ReactNode,
@@ -28,6 +28,7 @@ import {
   diffExtent,
   diffRows,
   estimateRowHeight,
+  firstChange,
   shownFile,
   wantedPaths,
 } from "../../state/diffRows";
@@ -43,6 +44,9 @@ const READ_AHEAD = 80;
 const NO_FILES: ChangedFile[] = [];
 
 const statusTag: Record<ChangedFile["kind"], string> = { added: "new", untracked: "new", deleted: "deleted", modified: "" };
+
+/** Lines of context left in sight above the first change when a file opens whole. */
+const LEAD_LINES = 4;
 
 /** Where the first row in sight was, to keep it in place when rows above it change. */
 type Anchor = { key: string; offset: number; header: string; headerOffset: number };
@@ -169,6 +173,43 @@ export function ChangesDiff({
     setOpened((current) => new Map(current).set(path, open));
   }, []);
 
+  // A file asked for whole is brought to its first change once it is read so: the
+  // lines before it would otherwise push the change out of sight.
+  const seek = useRef<string | null>(null);
+  const showWhole = useCallback(
+    (path: string, on: boolean) => {
+      seek.current = on ? path : null;
+      if (on) toggle(path, true);
+      reader.setFull(path, on);
+    },
+    [reader, toggle],
+  );
+  useLayoutEffect(() => {
+    const path = seek.current;
+    const element = scrollRef.current;
+    if (!path || !element) return;
+    const diff = state.diffs.get(path);
+    if (!state.full.has(path)) {
+      seek.current = null;
+      return;
+    }
+    if (diff?.state !== "read" || !diff.full) {
+      // Not read whole yet: wait, unless reading it failed.
+      if (diff?.state === "failed") seek.current = null;
+      return;
+    }
+    seek.current = null;
+    const index = firstChange(diff.file);
+    if (index === null) return;
+    const key = `l:${path}:${Math.max(0, index - LEAD_LINES)}`;
+    const at = rows.findIndex((row) => row.key === key);
+    const start = virtualizer.measurementsCache[at + 1]?.start;
+    if (at < 0 || start === undefined) return;
+    // Held there from now on, as rows above it come and go.
+    anchor.current = { key, offset: 0, header: `f:${path}`, headerOffset: 0 };
+    element.scrollTop = start;
+  }, [rows, state, virtualizer]);
+
   const gutter = `calc(${extent.digits}ch + 12px)`;
   const width = `max(100%, calc(${2 * inset + 2}px + 2 * ${gutter} + ${extent.columns + 3}ch + 12px))`;
   const pinned: CSSProperties = { width: viewWidth || "100%", paddingLeft: inset, paddingRight: inset };
@@ -218,7 +259,15 @@ export function ChangesDiff({
               style={place}
             >
               <div className="sticky left-0" style={pinned}>
-                <PinnedRow row={row} changed={changed.get(row.path)} file={fileOf(row.path)} state={state} review={review} toggle={toggle} />
+                <PinnedRow
+                  row={row}
+                  changed={changed.get(row.path)}
+                  file={fileOf(row.path)}
+                  state={state}
+                  review={review}
+                  toggle={toggle}
+                  showWhole={showWhole}
+                />
               </div>
             </div>
           );
@@ -327,6 +376,7 @@ function PinnedRow({
   state,
   review,
   toggle,
+  showWhole,
 }: {
   row: Exclude<DiffRow, { kind: "line" }>;
   changed: ChangedFile | undefined;
@@ -334,17 +384,22 @@ function PinnedRow({
   state: ChangesState;
   review: Review;
   toggle: (path: string, open: boolean) => void;
+  showWhole: (path: string, on: boolean) => void;
 }) {
   switch (row.kind) {
     case "file": {
       const additions = changed?.additions ?? file?.additions;
       const deletions = changed?.deletions ?? file?.deletions ?? 0;
       const tag = changed && isBinary(changed) ? "binary" : changed ? statusTag[changed.kind] : "";
+      // A new or deleted file is shown whole anyway; a binary one not at all.
+      const canShowWhole = changed?.kind === "modified" && !isBinary(changed) && !file?.binary;
+      const whole = state.full.has(row.path);
+      const wholeLabel = whole ? "Show only the changes" : "Show the whole file";
       return (
-        <div className="overflow-hidden rounded-t-[7px] border border-b-0">
+        <div className="flex overflow-hidden rounded-t-[7px] border border-b-0 bg-[var(--panel)]">
           <Button
             variant="ghost"
-            className="h-auto w-full justify-start gap-2 rounded-none bg-[var(--panel)] px-2.5 py-[5px] text-left font-normal group"
+            className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-none bg-[var(--panel)] px-2.5 py-[5px] text-left font-normal group"
             data-panel-open={row.open ? "" : undefined}
             aria-expanded={row.open}
             title={row.path}
@@ -355,6 +410,19 @@ function PinnedRow({
             {tag && <span className="tag">{tag}</span>}
             {additions !== undefined && additions !== null && <DiffStat additions={additions} deletions={deletions} />}
           </Button>
+          {canShowWhole && (
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              className="my-auto mr-1.5 flex-none text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
+              aria-pressed={whole}
+              title={wholeLabel}
+              aria-label={wholeLabel}
+              onClick={() => showWhole(row.path, !whole)}
+            >
+              {whole ? <FoldVerticalIcon /> : <UnfoldVerticalIcon />}
+            </Button>
+          )}
         </div>
       );
     }

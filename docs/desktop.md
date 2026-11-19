@@ -119,7 +119,10 @@ commits, a picker at the start of the header (on the tab and in the right panel)
 to the uncommitted work, to one commit, or to a run of them: shift-click a second row. The
 uncommitted work is a row too, so "this commit and everything after it" is one shift-click. When
 the agent amends or rebases away a commit you were looking at, the view goes back to all the
-changes. Code in diffs — here and in
+changes. The button at the end of a changed file's header shows the whole file, with the changes
+marked in place, and scrolls to the first of them; pressed again, it goes back to the changes
+alone. It is per file, kept while you switch between parts of the work, and the whole file is
+read again when the agent changes it. Code in diffs — here and in
 edits in the timeline — is highlighted by the file's language (by extension or name). Collapsed and
 very large files stay unhighlighted.
 

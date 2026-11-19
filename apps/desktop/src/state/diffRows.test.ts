@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { ChangedFile } from "../api/protocol.gen";
 import { type ChangesState, EMPTY, reading, withChanges, withDiff } from "./changes";
-import { diffExtent, diffRows, lineColumns, wantedPaths } from "./diffRows";
+import { parseDiff } from "./diff";
+import { diffExtent, diffRows, firstChange, lineColumns, wantedPaths } from "./diffRows";
 
 function changed(path: string, fields: Partial<ChangedFile> = {}): ChangedFile {
   return { path, kind: "modified", additions: 1, deletions: 1, ...fields };
@@ -101,5 +102,14 @@ describe("how wide a diff is", () => {
       return diff?.state === "read" ? diff.file : undefined;
     };
     expect(diffExtent(rows, fileOf)).toEqual({ columns: 5, digits: 3 });
+  });
+});
+
+describe("firstChange", () => {
+  it("finds the first added or removed line, past the context before it", () => {
+    const [whole] = parseDiff("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,4 +1,4 @@\n one\n two\n-three\n+3\n four\n");
+    expect(firstChange(whole!)).toBe(3);
+    const [same] = parseDiff("diff --git a/a b/a\nold mode 100644\nnew mode 100755\n");
+    expect(firstChange(same ?? { path: "a", status: "modified", binary: false, additions: 0, deletions: 0, lines: [] })).toBeNull();
   });
 });

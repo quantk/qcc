@@ -54,14 +54,17 @@ export function startsFolded(file: ChangedFile, diff?: DiffFile): boolean {
   return lines > FOLD_ABOVE;
 }
 
-/** The diff of one file, as far as it is read. */
+/**
+ * The diff of one file, as far as it is read. `full`: read whole, every line of the
+ * file around the changes, not a few lines around each change.
+ */
 export type FileDiff =
   /** Not read, or to be read again on its own (it went missing from a shared answer). */
   | { state: "unread"; alone?: boolean }
   /** Being read; `file` is what was shown before, kept until the new one comes. */
-  | { state: "reading"; file?: DiffFile; truncated?: boolean }
+  | { state: "reading"; file?: DiffFile; truncated?: boolean; full?: boolean }
   /** `stale`: the agent may have changed it since; shown, and read again when in view. */
-  | { state: "read"; file: DiffFile; truncated: boolean; stale: boolean }
+  | { state: "read"; file: DiffFile; truncated: boolean; stale: boolean; full?: boolean }
   | { state: "failed"; error: string };
 
 export type ChangesState = {
@@ -76,6 +79,8 @@ export type ChangesState = {
   /** The list is being read. */
   loading: boolean;
   diffs: ReadonlyMap<string, FileDiff>;
+  /** Files to show whole, not just around their changes. */
+  full: ReadonlySet<string>;
 };
 
 const NO_REVISIONS: readonly Revision[] = [];
@@ -87,6 +92,7 @@ export const EMPTY: ChangesState = {
   error: null,
   loading: false,
   diffs: new Map(),
+  full: new Set(),
 };
 
 /**
@@ -106,7 +112,10 @@ export function withChanges(state: ChangesState, changes: EnvironmentChanges): C
   const revisions = sameRevisions(state.revisions, changes.revisions ?? NO_REVISIONS)
     ? state.revisions
     : (changes.revisions ?? NO_REVISIONS);
-  return { ...state, changes, revisions, error: null, loading: false, diffs };
+  const full = [...state.full].every((path) => paths.has(path))
+    ? state.full
+    : new Set([...state.full].filter((path) => paths.has(path)));
+  return { ...state, changes, revisions, error: null, loading: false, diffs, full };
 }
 
 function sameRevisions(a: readonly Revision[], b: readonly Revision[]): boolean {
@@ -116,19 +125,35 @@ function sameRevisions(a: readonly Revision[], b: readonly Revision[]): boolean 
 /** Another part of the work to show: nothing read for the last one applies to it. */
 export function withScope(state: ChangesState, scope: ChangeScope): ChangesState {
   if (sameScope(state.scope, scope)) return state;
-  return { ...EMPTY, scope, revisions: state.revisions, loading: true };
+  // Which files the user wants whole is theirs, whatever part of the work is shown.
+  return { ...EMPTY, scope, revisions: state.revisions, loading: true, full: state.full };
 }
 
-/** Whether `path`'s diff has to be read before it can be shown as it is now. */
-function needsReading(diff: FileDiff | undefined): boolean {
+/**
+ * Show `path` whole (`on`) or only around its changes. What is shown stays until the
+ * other is read, which happens when the file is next wanted.
+ */
+export function withFull(state: ChangesState, path: string, on: boolean): ChangesState {
+  if (state.full.has(path) === on) return state;
+  const full = new Set(state.full);
+  if (on) full.add(path);
+  else full.delete(path);
+  return { ...state, full };
+}
+
+/** Whether `path`'s diff has to be read before it can be shown as it is now, `full` or not. */
+function needsReading(diff: FileDiff | undefined, full: boolean): boolean {
   if (!diff) return true;
-  return diff.state === "unread" || (diff.state === "read" && diff.stale);
+  if (diff.state === "unread") return true;
+  return diff.state === "read" && (diff.stale || Boolean(diff.full) !== full);
 }
 
 /**
  * Which of `wanted` (files in view, open, in the order shown) to read next, as one
- * request: those not read or stale, up to `BATCH`. A file that went missing from a
- * shared answer is asked for on its own. Binary files have nothing to read.
+ * request: those not read, stale or read in the other mode, up to `BATCH`. A file
+ * that went missing from a shared answer, or that is shown whole, is asked for on
+ * its own: a whole file can be long, and must not crowd out the others' diffs.
+ * Binary files have nothing to read.
  */
 export function nextBatch(state: ChangesState, wanted: readonly string[]): string[] {
   const byPath = new Map(state.changes?.files.map((file) => [file.path, file]));
@@ -137,8 +162,9 @@ export function nextBatch(state: ChangesState, wanted: readonly string[]): strin
     const file = byPath.get(path);
     if (!file || isBinary(file)) continue;
     const diff = state.diffs.get(path);
-    if (!needsReading(diff)) continue;
-    if (diff?.state === "unread" && diff.alone) {
+    const full = state.full.has(path);
+    if (!needsReading(diff, full)) continue;
+    if (full || (diff?.state === "unread" && diff.alone)) {
       if (batch.length === 0) return [path];
       continue;
     }
@@ -148,6 +174,11 @@ export function nextBatch(state: ChangesState, wanted: readonly string[]): strin
   return batch;
 }
 
+/** Whether a batch from `nextBatch` is to be read with whole files. */
+export function isFullBatch(state: ChangesState, paths: readonly string[]): boolean {
+  return paths.length === 1 && state.full.has(paths[0]!);
+}
+
 /** Mark `paths` as being read, keeping what each showed. */
 export function reading(state: ChangesState, paths: readonly string[]): ChangesState {
   const diffs = new Map(state.diffs);
@@ -155,7 +186,9 @@ export function reading(state: ChangesState, paths: readonly string[]): ChangesS
     const diff = diffs.get(path);
     diffs.set(
       path,
-      diff?.state === "read" ? { state: "reading", file: diff.file, truncated: diff.truncated } : { state: "reading" },
+      diff?.state === "read"
+        ? { state: "reading", file: diff.file, truncated: diff.truncated, full: diff.full }
+        : { state: "reading" },
     );
   }
   return { ...state, diffs };
@@ -191,9 +224,15 @@ const statusOf: Record<ChangedFile["kind"], DiffFile["status"]> = {
  * shown before when nothing in it changed, so a view does not draw or highlight it
  * again. A file the answer has nothing for has no textual change (a mode, say);
  * one missing from an answer that was cut short, or that git named differently
- * (quoted, escaped), is read again on its own.
+ * (quoted, escaped), is read again on its own. `full`: the answer has whole files;
+ * a file wanted the other way by now is read again.
  */
-export function withDiff(state: ChangesState, paths: readonly string[], result: ThreadDiffResult): ChangesState {
+export function withDiff(
+  state: ChangesState,
+  paths: readonly string[],
+  result: ThreadDiffResult,
+  full = false,
+): ChangesState {
   const parsed = parseDiff(result.diff);
   const found = new Map(parsed.map((file) => [file.path, file]));
   const last = parsed.at(-1);
@@ -220,6 +259,7 @@ export function withDiff(state: ChangesState, paths: readonly string[], result: 
       file: shown && sameFile(shown, file) ? shown : file,
       truncated,
       stale: false,
+      ...(full ? { full } : {}),
     });
   }
   return { ...state, diffs };
@@ -315,6 +355,11 @@ export class ThreadChangesReader {
     if (Date.now() - this.askedAt >= ms) this.reload(0);
   }
 
+  /** Show `path` whole, or only around its changes; the view's next `want` reads it. */
+  setFull(path: string, on: boolean) {
+    this.set(withFull(this.state, path, on));
+  }
+
   /** Show another part of the work, read afresh. */
   setScope(scope: ChangeScope) {
     const next = withScope(this.state, scope);
@@ -369,15 +414,17 @@ export class ThreadChangesReader {
     const batch = nextBatch(this.state, paths);
     if (batch.length === 0) return;
     this.inFlight++;
+    const full = isFullBatch(this.state, batch);
     this.set(reading(this.state, batch));
     const generation = this.generation;
     const current = () => generation === this.generation;
     const params: ThreadDiffParams = { thread_id: this.threadId, paths: batch };
     if (this.state.scope.kind !== "all") params.scope = this.state.scope;
+    if (full) params.full = true;
     this.api
       .diff(params)
       .then(
-        (result) => current() && this.set(withDiff(this.state, batch, result)),
+        (result) => current() && this.set(withDiff(this.state, batch, result, full)),
         (error: unknown) => current() && this.set(withDiffError(this.state, batch, this.errorText(error))),
       )
       .finally(() => {

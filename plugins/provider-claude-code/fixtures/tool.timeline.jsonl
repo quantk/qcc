@@ -4,8 +4,10 @@
 {"type":"turn/started","turn_id":"turn_1"}
 {"type":"thread/status","status":"active"}
 {"type":"session/identified","provider_session":"215116c1-3350-419b-a791-40d98db530e6"}
+{"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":17,"cached_input_tokens":24225},"context_used":24227}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"command","command":"cat note.txt"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"command","command":"cat note.txt","output":"hello fixture"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":3,"cached_input_tokens":26350},"context_used":26352}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_2","text":"The"}
 {"type":"item/text/delta","item_id":"item_2","text":" command printed:"}

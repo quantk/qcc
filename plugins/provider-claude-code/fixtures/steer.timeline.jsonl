@@ -4,11 +4,13 @@
 {"type":"turn/started","turn_id":"turn_1"}
 {"type":"thread/status","status":"active"}
 {"type":"session/identified","provider_session":"13d7dba5-0056-4363-a181-4a993e164a6f"}
+{"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":6,"cached_input_tokens":24233},"context_used":24235}}
 {"type":"input/submitted","text":"Also end your answer with the word BANANA.","steered":true}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"command","command":"cat note.txt"}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_2","status":"pending","type":"command","command":"cat other.txt"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"command","command":"cat other.txt","output":"second file"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"command","command":"cat note.txt","output":"hello fixture"}}
+{"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":3,"cached_input_tokens":26769},"context_used":26771}}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_3","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_3","text":"Cont"}
 {"type":"item/text/delta","item_id":"item_3","text":"ents of `note.txt`"}

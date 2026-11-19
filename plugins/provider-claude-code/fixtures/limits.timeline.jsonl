@@ -6,6 +6,7 @@
 {"type":"session/identified","provider_session":"13dc11b3-c3bd-4f19-acb7-ee7e8eaf9c1b"}
 {"type":"item/started","turn_id":"turn_1","item":{"id":"item_1","status":"pending","type":"agentMessage","text":""}}
 {"type":"item/text/delta","item_id":"item_1","text":"ok"}
+{"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"context_used":23207}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"ok"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"model_context_window":1000000,"context_used":23207}}
 {"type":"turn/completed","turn_id":"turn_1","status":"completed"}

@@ -143,6 +143,11 @@ pub struct Bridge {
     /// The main agent's latest request of the running turn. Its input is what the
     /// context holds; the turn's `result` sums every request and says nothing of that.
     last_request: Option<TokenUsage>,
+    /// The model's context window as the last `result` said; only a result tells it.
+    context_window: Option<u64>,
+    /// The context size last reported, so that the several messages Claude sends for
+    /// one request report it once.
+    reported_context: Option<u64>,
     interrupts: u32,
     /// MCP status requests sent, which names them.
     mcp_queries: u32,
@@ -172,6 +177,11 @@ fn usage_of(usage: &Value) -> TokenUsage {
             tokens("cache_read_input_tokens") + tokens("cache_creation_input_tokens"),
         ),
     }
+}
+
+/// Tokens the context holds after a request: everything it sent, from the cache or not.
+fn context_of(request: &TokenUsage) -> u64 {
+    request.input_tokens + request.cached_input_tokens.unwrap_or(0)
 }
 
 fn text_of(value: &Value) -> String {
@@ -276,6 +286,8 @@ impl Bridge {
             denied: HashSet::new(),
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             last_request: None,
+            context_window: None,
+            reported_context: None,
             interrupts: 0,
             mcp_queries: 0,
             mcp_polls: 0,
@@ -417,7 +429,7 @@ impl Bridge {
     fn stream_event(&mut self, event: &Value, parent: Option<&str>, deltas: &mut Vec<Delta>) {
         // The closing count of a request, with all of its output.
         if str_field(event, "type") == "message_delta" {
-            self.note_request(&event["usage"], parent);
+            self.note_request(&event["usage"], parent, deltas);
             return;
         }
         if str_field(event, "type") != "content_block_delta" {
@@ -659,12 +671,27 @@ impl Bridge {
         );
     }
 
-    /// Remember the usage of one of the main agent's requests. A sub-agent's requests
+    /// Remember the usage of one of the main agent's requests and report how full the
+    /// context is now, without waiting for the turn to end. A sub-agent's requests
     /// carry a context of their own, so they say nothing of how full this one is.
-    fn note_request(&mut self, usage: &Value, parent: Option<&str>) {
-        if parent.is_none() && usage.is_object() {
-            self.last_request = Some(usage_of(usage));
+    fn note_request(&mut self, usage: &Value, parent: Option<&str>, deltas: &mut Vec<Delta>) {
+        if parent.is_some() || !usage.is_object() {
+            return;
         }
+        let last = usage_of(usage);
+        self.last_request = Some(last);
+        let context_used = Some(context_of(&last));
+        if context_used == self.reported_context {
+            return;
+        }
+        self.reported_context = context_used;
+        // The total stays as it was: what the turn spent is added once, by its result.
+        deltas.push(Delta::Usage(UsageSnapshot {
+            total: self.total,
+            last,
+            model_context_window: self.context_window,
+            context_used,
+        }));
     }
 
     /// The end of a turn.
@@ -682,8 +709,11 @@ impl Bridge {
             .flat_map(|models| models.values())
             .filter_map(|model| model.get("contextWindow").and_then(Value::as_u64))
             .max();
-        // Everything the last request sent, from the cache or not, is in the context.
-        let context_used = Some(last.input_tokens + last.cached_input_tokens.unwrap_or(0));
+        if model_context_window.is_some() {
+            self.context_window = model_context_window;
+        }
+        let context_used = Some(context_of(&last));
+        self.reported_context = context_used;
         deltas.push(Delta::Usage(UsageSnapshot {
             total: self.total,
             last,
@@ -838,7 +868,7 @@ impl LineBridge for Bridge {
         match kind {
             "stream_event" => self.stream_event(&message["event"], parent, &mut output.deltas),
             "assistant" => {
-                self.note_request(&message["message"]["usage"], parent);
+                self.note_request(&message["message"]["usage"], parent, &mut output.deltas);
                 for block in message["message"]["content"].as_array().into_iter().flatten() {
                     self.assistant_block(block, parent, &mut output.deltas);
                 }
@@ -1129,6 +1159,67 @@ mod tests {
             panic!("expected usage");
         };
         assert_eq!(usage.last.cached_input_tokens, Some(15));
+    }
+
+    #[test]
+    fn the_context_is_reported_after_every_request_of_the_turn() {
+        let mut bridge = Bridge::new(None);
+        let nothing = TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None };
+        let usage = |cached: u64| {
+            json!({"input_tokens": 1, "output_tokens": 7,
+                   "cache_read_input_tokens": cached, "cache_creation_input_tokens": 3})
+        };
+        let assistant = |cached: u64, parent: Value| {
+            json!({"type": "assistant", "parent_tool_use_id": parent,
+                   "message": {"content": [], "usage": usage(cached)}})
+            .to_string()
+        };
+        let closing = |cached: u64| {
+            json!({"type": "stream_event", "parent_tool_use_id": null,
+                   "event": {"type": "message_delta", "usage": usage(cached)}})
+            .to_string()
+        };
+        let snapshots = |bridge: &mut Bridge, line: &str| -> Vec<UsageSnapshot> {
+            let deltas = bridge.on_line(line).deltas;
+            deltas
+                .into_iter()
+                .filter_map(|delta| match delta {
+                    Delta::Usage(usage) => Some(usage),
+                    _ => None,
+                })
+                .collect()
+        };
+
+        bridge.prompt("go");
+        let first = snapshots(&mut bridge, &assistant(100, Value::Null));
+        assert_eq!(first.len(), 1, "{first:?}");
+        assert_eq!(first[0].context_used, Some(104));
+        assert_eq!(first[0].total, nothing, "nothing is spent before a result");
+        assert_eq!(first[0].model_context_window, None, "no result has told it yet");
+        // More messages of the same request, and its closing count, say nothing new.
+        assert!(snapshots(&mut bridge, &assistant(100, Value::Null)).is_empty());
+        assert!(snapshots(&mut bridge, &closing(100)).is_empty());
+        // A sub-agent's request has a context of its own.
+        assert!(snapshots(&mut bridge, &assistant(9, json!("toolu_1"))).is_empty());
+        let second = snapshots(&mut bridge, &closing(200));
+        assert_eq!(second.len(), 1, "{second:?}");
+        assert_eq!(second[0].context_used, Some(204));
+        assert_eq!(second[0].total, nothing);
+
+        let end = snapshots(&mut bridge, &result(json!({})));
+        assert_eq!(end.len(), 1, "{end:?}");
+        assert_eq!(end[0].context_used, Some(204));
+        assert_eq!(end[0].total.input_tokens, 2);
+        assert_eq!(end[0].total.cached_input_tokens, Some(15));
+        assert_eq!(end[0].model_context_window, Some(1000));
+
+        // The next turn's requests carry the session total and the window learned so far.
+        bridge.prompt("again");
+        let next = snapshots(&mut bridge, &assistant(300, Value::Null));
+        assert_eq!(next.len(), 1, "{next:?}");
+        assert_eq!(next[0].total, end[0].total);
+        assert_eq!(next[0].model_context_window, Some(1000));
+        assert_eq!(next[0].context_used, Some(304));
     }
 
     #[test]

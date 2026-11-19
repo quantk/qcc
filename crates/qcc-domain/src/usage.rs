@@ -198,6 +198,15 @@ mod tests {
     }
 
     #[test]
+    fn a_report_with_the_same_total_spends_nothing_more() {
+        let mut usage = ThreadUsage::default();
+        usage.report(&snapshot(tokens(10, 2), Some(10)));
+        // A mid-turn report: the context grew, the total has not moved yet.
+        assert_eq!(usage.report(&snapshot(tokens(10, 2), Some(40))), tokens(0, 0));
+        assert_eq!((usage.spent, usage.context_used), (tokens(10, 2), Some(40)));
+    }
+
+    #[test]
     fn a_fresh_conversation_counts_anew_and_keeps_what_was_spent() {
         let mut usage = ThreadUsage::default();
         usage.report(&snapshot(tokens(10, 2), Some(10)));

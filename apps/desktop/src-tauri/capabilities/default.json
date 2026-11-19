@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "What the main window may ask of the app",
   "windows": ["main"],
-  "permissions": ["core:default", "core:webview:allow-set-webview-zoom", "dialog:allow-open", "opener:allow-open-url"]
+  "permissions": ["core:default", "core:webview:allow-set-webview-zoom", "dialog:allow-open", "opener:allow-open-url", "opener:allow-default-urls"]
 }

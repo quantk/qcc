@@ -16,7 +16,8 @@ const components: Components = {
         title={href}
         onClick={(event) => {
           event.preventDefault();
-          if (external) void openUrl(href);
+          // A refusal (a scope the capability does not grant, no browser) must not pass silently.
+          if (external) openUrl(href).catch((error) => console.error(`cannot open ${href}:`, error));
         }}
       >
         {children}

@@ -40,7 +40,7 @@ pub use ids::{
 pub use interaction::{InteractionOption, InteractionRequest, InteractionResolution, OptionKind};
 pub use item::{Item, ItemShape, ItemStatus};
 pub use limits::{LimitStatus, LimitWindow, ProviderLimits, RateLimits};
-pub use project::{Project, project_of};
+pub use project::{ICON_EMOJI_MAX, ICON_NAME_MAX, IconColor, Project, ProjectIcon, project_of};
 pub use provider::{
     AgentSkill, ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode,
     EnvironmentChanges, EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport,

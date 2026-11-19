@@ -290,6 +290,36 @@ fn question_is_answered_from_the_cli() {
 }
 
 #[test]
+fn a_project_icon_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let folder = dir.path().to_str().unwrap();
+    let daemon = Daemon::start(&data);
+    let made = daemon.qcc(&[
+        "project",
+        "create",
+        "Games",
+        "--folder",
+        folder,
+        "--icon",
+        "gamepad-2",
+        "--color",
+        "violet",
+        "--json",
+    ]);
+    assert!(made.ok, "{}", made.stderr);
+    let icon = serde_json::json!({"kind": "lucide", "name": "gamepad-2", "color": "violet"});
+    assert_eq!(made.json()["project"]["icon"], icon);
+    daemon.stop();
+
+    let daemon = Daemon::start(&data);
+    let listed = daemon.qcc(&["project", "list", "--json"]).json();
+    assert_eq!(listed["projects"][0]["icon"], icon);
+    let text = daemon.qcc(&["project", "list"]).stdout;
+    assert!(text.contains("Games  (gamepad-2, violet)"), "{text}");
+}
+
+#[test]
 fn projects_group_threads_by_their_folders() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(&dir.path().join("data"));
@@ -342,6 +372,34 @@ fn projects_group_threads_by_their_folders() {
     let missing = daemon.qcc(&["project", "add-folder", "Store", "/no/such/dir"]);
     assert!(!missing.ok);
     assert!(missing.stderr.contains("not an absolute path to a directory"), "{}", missing.stderr);
+
+    // An icon: set, kept by other changes, replaced, refused when malformed, cleared.
+    assert!(listed["projects"][0].get("icon").is_none());
+    let icon = |name: &str| {
+        let listed = daemon.qcc(&["project", "list", "--json"]).json();
+        let project = listed["projects"].as_array().unwrap().iter().find(|p| p["name"] == name);
+        project.unwrap().get("icon").cloned()
+    };
+    assert!(daemon.qcc(&["project", "icon", "Store", "rocket", "--color", "teal"]).ok);
+    assert_eq!(
+        icon("Store"),
+        Some(serde_json::json!({"kind": "lucide", "name": "rocket", "color": "teal"}))
+    );
+    assert!(daemon.qcc(&["project", "rename", "Store", "Shop"]).ok);
+    assert_eq!(icon("Shop").unwrap()["name"], "rocket");
+    assert!(daemon.qcc(&["project", "rename", "Shop", "Store"]).ok);
+    assert!(daemon.qcc(&["project", "icon", "Store", "🛒"]).ok);
+    assert_eq!(icon("Store"), Some(serde_json::json!({"kind": "emoji", "emoji": "🛒"})));
+    let bad = daemon.qcc(&["project", "icon", "Store", "two words"]);
+    assert!(!bad.ok);
+    assert!(bad.stderr.contains("spaces"), "{}", bad.stderr);
+    let bad = daemon.qcc(&["project", "icon", "Store", "🛒", "--color", "red"]);
+    assert!(!bad.ok);
+    let bad = daemon.qcc(&["project", "icon", "Store", "rocket", "--color", "plaid"]);
+    assert!(!bad.ok);
+    assert_eq!(icon("Store").unwrap()["emoji"], "🛒");
+    assert!(daemon.qcc(&["project", "icon", "Store", "none"]).ok);
+    assert_eq!(icon("Store"), None);
 
     // A thread sees the project's other folders, not the one it works in.
     assert!(daemon.qcc(&["project", "add-folder", "Store", api]).ok);

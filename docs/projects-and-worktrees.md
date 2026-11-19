@@ -8,6 +8,7 @@ app's sidebar, in the overview, and in `qcc thread list --json` (the `project` f
 ```sh
 qcc project create Shop --folder ~/src/shop-api --folder ~/src/shop-web
 qcc project add-folder Shop ~/src/shop-infra      # remove-folder, rename, delete
+qcc project icon Shop shopping-cart --color teal    # an icon of the app's set, an emoji, or none
 qcc project list
 qcc thread spawn --project Shop --cwd ~/src/shop-web --provider codex --prompt '…'
 qcc thread project <thread-id> Shop               # or none to remove it from the project
@@ -26,6 +27,18 @@ qcc thread project <thread-id> Shop               # or none to remove it from th
   is not forbidden: the [permission mode](agents.md#permission-mode) decides what is allowed
   without asking. Folders are read when a session starts, so project changes reach the agent with
   the next session.
+
+A project can have an icon, drawn next to its name in the app: an icon of the app's set by its
+[lucide](https://lucide.dev/icons/) name (`rocket`, `gamepad-2`), optionally in a color of the
+app's palette (`brand`, `red`, `orange`, `yellow`, `green`, `teal`, `blue`, `violet`, `pink`,
+`gray`; the app picks the shade for its light or dark theme), or an emoji (`qcc project icon Shop
+🛒`). `qcc project create … --icon NAME [--color C]` sets one from the start; `none` takes it away.
+The daemon checks only the form: a name is lowercase kebab-case of up to 48 characters, an emoji
+up to 16 characters without spaces. An app that does not know a name draws its default icon.
+
+In the protocol the project's `icon` is `{"kind": "lucide", "name": "rocket", "color": "teal"}`
+or `{"kind": "emoji", "emoji": "🛒"}`, absent when there is none. In `project.update` an absent
+`icon` leaves it as it is and `null` removes it.
 
 The app groups threads outside projects by directory. Such a group can be turned into a project
 with one button.

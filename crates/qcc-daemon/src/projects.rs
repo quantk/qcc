@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use qcc_domain::ProjectIcon;
+
 /// A project needs a name and at least one folder; every folder must be an
 /// existing directory given by an absolute path. Folders are kept in the order
 /// given, without trailing slashes and without repeats.
@@ -26,6 +28,11 @@ pub(crate) fn check(name: &str, folders: &[String]) -> Result<(String, Vec<Strin
         }
     }
     Ok((name.to_owned(), kept))
+}
+
+/// An icon is optional; one that is given must be well formed.
+pub(crate) fn check_icon(icon: Option<ProjectIcon>) -> Result<Option<ProjectIcon>, String> {
+    icon.map(ProjectIcon::checked).transpose()
 }
 
 #[cfg(test)]

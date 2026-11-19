@@ -7,17 +7,8 @@ import type { PermissionMode, Thread } from "../../api/protocol.gen";
 import { allowedModes, modeLabel } from "../../state/selectors";
 import { store } from "../../state/store";
 import { Choice } from "../../ui/kit";
-import type { ThreadContext, UiModule } from "../../ui/registry";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import type { ThreadContext, UiModule, UiRegistry } from "../../ui/registry";
+import { archiveThread } from "../thread-menu/ArchiveDialog";
 import { Button } from "@/components/ui/button";
 import { AgentSwitch } from "./AgentSwitch";
 
@@ -47,45 +38,27 @@ function ModeSelect({ thread, provider, parent }: ThreadContext) {
   );
 }
 
-function ArchiveButton({ thread }: { thread: Thread }) {
-  const [refused, setRefused] = useState<string | null>(null);
+function ArchiveButton({ thread, ui }: { thread: Thread; ui: UiRegistry }) {
   const [working, setWorking] = useState(false);
-
-  const archive = async (force: boolean) => {
+  const archive = async () => {
     setWorking(true);
-    const result = await store().archive(thread.id, force);
+    await archiveThread(ui, thread);
     setWorking(false);
-    setRefused(result?.refused ?? null);
   };
-
   return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={working || thread.status === "active"}
-        title={thread.status === "active" ? "Stop the running turn first" : "Release the session and put the thread away"}
-        onClick={() => void archive(false)}
-      >
-        {working ? "Archiving…" : "Archive"}
-      </Button>
-      <AlertDialog open={refused !== null} onOpenChange={(open) => !open && setRefused(null)}>
-        <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Archive and discard the changes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {refused}. Archiving removes the thread's working directory. Work that is not committed there is lost.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep the thread</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={working} onClick={() => void archive(true)}>
-              Archive anyway
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={working || thread.status === "active"}
+      title={
+        thread.status === "active"
+          ? "Stop the running turn first"
+          : "Release the session and put the thread away, with the threads it started"
+      }
+      onClick={() => void archive()}
+    >
+      {working ? "Archiving…" : "Archive"}
+    </Button>
   );
 }
 
@@ -107,7 +80,7 @@ export const threadControlsModule: UiModule = {
       id: "archive",
       order: 100,
       when: ({ thread }) => !thread.archived,
-      render: ({ thread }) => <ArchiveButton thread={thread} />,
+      render: ({ thread }) => <ArchiveButton thread={thread} ui={ui} />,
     });
   },
 };

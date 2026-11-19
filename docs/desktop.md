@@ -99,7 +99,10 @@ like (Block layout below), for example among the screens.
 A timeline with streaming output, commands, diffs of edits and permission requests; a composer
 with the queue, steer and attachments (files and images: the paperclip, `Ctrl+V`, drag and drop);
 switching agent, model, effort and permission mode; archiving with a confirmation if the worktree
-has uncommitted work.
+has uncommitted work. Archiving a thread with threads under it asks first: the dialog lists every
+descendant that will be archived with it, marks the working ones (they are stopped) and the ones
+whose worktree has uncommitted work (it is discarded). If a thread still refuses, the app says
+which ones stayed and offers to archive them anyway.
 
 A command's or tool's output unfolds to its first 12 lines with "Show all N lines" under them;
 it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close

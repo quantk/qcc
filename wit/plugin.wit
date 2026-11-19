@@ -545,6 +545,14 @@ interface types {
     answer: result<environment-diff, string>,
   }
 
+  /// The answer to `threads.changes`.
+  record thread-changes {
+    /// The id `threads.changes` returned.
+    request: u64,
+    thread: thread-id,
+    answer: result<environment-changes, string>,
+  }
+
   /// The answer to `threads.models`.
   record provider-models {
     /// The id `threads.models` returned.
@@ -919,6 +927,8 @@ interface types {
     thread-diff(thread-diff),
     /// The models asked for with `threads.models`.
     provider-models(provider-models),
+    /// The changed files asked for with `threads.changes`.
+    thread-changes(thread-changes),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -1078,6 +1088,10 @@ interface threads {
   /// shows it. The environment that knows may take a while, so the answer comes
   /// later as a `thread-diff` event with the returned id.
   diff: func(thread: thread-id) -> result<u64, string>;
+  /// Ask which files the thread changed, with their line counts, its branch and
+  /// base, as `qcc thread changes` shows them. Answered like `diff`, by a
+  /// `thread-changes` event with the returned id.
+  changes: func(thread: thread-id) -> result<u64, string>;
   /// Turn one of the plugin's own skills on or off in a thread, as the user can.
   set-skill: func(thread: thread-id, skill: string, enabled: bool) -> result<_, string>;
   /// The agents the daemon can run now.

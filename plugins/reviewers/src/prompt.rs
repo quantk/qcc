@@ -1,12 +1,11 @@
 //! What reviewers are told, and what the reviewed agent is told back.
 
-use crate::diff;
 use crate::findings::Finding;
 use crate::profile::{Profile, covers};
 
-/// How much of the diff goes into a prompt; past it the reviewer reads the rest.
-pub const MAX_DIFF_CHARS: usize = 60_000;
 const MAX_TASK_CHARS: usize = 2_000;
+/// How many files a prompt lists by name; the reviewer lists the rest itself.
+const MAX_FILES: usize = 200;
 
 /// A remark from an earlier round, as the reviewer sees it again.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +17,17 @@ pub struct Earlier {
     pub resolved: bool,
 }
 
+/// A file the thread changed, as `qcc thread changes` lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Changed {
+    /// From the top of the checkout.
+    pub path: String,
+    /// `added`, `modified`, `deleted` or `untracked`.
+    pub kind: &'static str,
+    pub additions: Option<u32>,
+    pub deletions: Option<u32>,
+}
+
 /// Everything a reviewer's prompt is made of.
 pub struct Review<'a> {
     pub thread: &'a str,
@@ -25,69 +35,99 @@ pub struct Review<'a> {
     pub task: Option<&'a str>,
     pub profile: &'a Profile,
     pub round: u32,
-    /// The whole diff of the thread.
-    pub diff: &'a str,
-    /// The environment cut the diff short.
-    pub truncated: bool,
+    /// What the changes are measured against (`HEAD`, a branch, a commit).
+    pub base: Option<&'a str>,
+    pub branch: Option<&'a str>,
+    /// Every file the thread changed.
+    pub files: &'a [Changed],
     /// Files changed since the last round; `None` in the first.
     pub changed: Option<&'a [String]>,
     pub earlier: &'a [Earlier],
 }
 
-fn clip(text: &str, max: usize) -> (String, bool) {
+fn clip(text: &str, max: usize) -> String {
     if text.chars().count() <= max {
-        return (text.to_owned(), false);
+        return text.to_owned();
     }
-    (text.chars().take(max).collect(), true)
+    text.chars().take(max).collect::<String>() + " […]"
 }
 
-/// The part of the diff a reviewer is given: the files its profile covers and, after
-/// the first round, only those changed since. `None` when nothing is left.
-pub fn scoped_diff(diff: &str, profile: &Profile, changed: Option<&[String]>) -> Option<String> {
-    let mut scoped = String::new();
-    for file in diff::files(diff) {
-        let fresh = changed.is_none_or(|changed| changed.contains(&file.path));
-        if fresh && covers(profile, &file.path) {
-            scoped.push_str(file.text);
-        }
-    }
-    (!scoped.trim().is_empty()).then_some(scoped)
+/// The files a reviewer looks at: those its profile covers and, after the first
+/// round, only those changed since. Empty when nothing is left.
+pub fn scoped_files<'a>(
+    files: &'a [Changed],
+    profile: &Profile,
+    changed: Option<&[String]>,
+) -> Vec<&'a Changed> {
+    files
+        .iter()
+        .filter(|file| changed.is_none_or(|changed| changed.contains(&file.path)))
+        .filter(|file| covers(profile, &file.path))
+        .collect()
 }
 
-pub fn critic(review: &Review<'_>, scoped: &str) -> String {
-    let Review { thread, cwd, task, profile, round, truncated, changed, earlier, .. } = review;
+fn file_line(file: &Changed) -> String {
+    let counts = match (file.additions, file.deletions) {
+        (Some(added), Some(deleted)) => format!(" +{added} -{deleted}"),
+        _ => String::new(),
+    };
+    format!("- `{}` ({}{counts})\n", file.path, file.kind)
+}
+
+/// The prompt: where to look and how, not the diff itself; the reviewer reads
+/// what it needs, so a large change does not fill its context up front.
+pub fn critic(review: &Review<'_>, files: &[&Changed]) -> String {
+    let Review { thread, cwd, task, profile, round, base, branch, changed, earlier, .. } = review;
     // The first line names the thread in lists.
     let mut prompt = format!(
         "Review round {round} by {name} of qcc thread {thread}\n\n\
          You are a code reviewer, \"{name}\", working for the user of qcc. Review the changes \
-         another agent made in qcc thread {thread}, in {cwd}. You may read any file there and \
-         run commands that only look (git log, git show, grep). Do not change any file, do not \
-         commit, and do not start other agents.\n\n",
+         another agent made in qcc thread {thread}, which works in `{cwd}`. You run read-only: \
+         read files and run commands that only look; nothing that changes a file will run, and \
+         nobody is there to approve anything. Do not try to fix what you find: report it.\n\n",
         name = profile.name,
     );
     if let Some(task) = task {
-        let (task, _) = clip(task.trim(), MAX_TASK_CHARS);
-        prompt.push_str(&format!("The task the agent was given:\n\n<task>\n{task}\n</task>\n\n"));
-    }
-    match changed {
-        None => prompt.push_str("Its changes so far, as a diff:\n\n"),
-        Some(changed) => {
-            prompt.push_str(&format!(
-                "This is review round {round}. Since the last review the agent changed: {}. \
-                 Review only those changes, and say again only what is still wrong. The diff \
-                 of those files as they are now:\n\n",
-                changed.join(", ")
-            ));
-        }
-    }
-    let (body, cut) = clip(scoped, MAX_DIFF_CHARS);
-    prompt.push_str(&format!("```diff\n{}\n```\n\n", body.trim_end()));
-    if cut || *truncated {
         prompt.push_str(&format!(
-            "The diff above is cut short. Read the rest with `qcc thread diff {thread}` (if `qcc` \
-             is not found, use \"$QCC_BIN\") or with git in {cwd}.\n\n"
+            "The task the agent was given:\n\n<task>\n{}\n</task>\n\n",
+            clip(task.trim(), MAX_TASK_CHARS)
         ));
     }
+    let measured = match (base, branch) {
+        (Some(base), Some(branch)) => format!(" on branch `{branch}`, against `{base}`"),
+        (Some(base), None) => format!(" against `{base}`"),
+        (None, Some(branch)) => format!(" on branch `{branch}`"),
+        (None, None) => String::new(),
+    };
+    match changed {
+        None => prompt.push_str(&format!(
+            "The files it changed{measured} (paths from the top of the repository), with lines \
+             added and removed:\n\n"
+        )),
+        Some(changed) => prompt.push_str(&format!(
+            "This is review round {round}. Since the last review the agent changed {}. Review \
+             only these files{measured}, and report again only what is still wrong:\n\n",
+            changed.len()
+        )),
+    }
+    for file in files.iter().take(MAX_FILES) {
+        prompt.push_str(&file_line(file));
+    }
+    if files.len() > MAX_FILES {
+        prompt.push_str(&format!("- … and {} more\n", files.len() - MAX_FILES));
+    }
+    let base_ref = base.unwrap_or("HEAD");
+    prompt.push_str(&format!(
+        "\nLook at them yourself, a few files at a time, as much as you need:\n\n\
+         - `git diff {base_ref} -- ':/<path>'` in `{cwd}`: the changes of a file (an untracked \
+           file is not in it: read the file);\n\
+         - read any file, and search with your tools, to see the code around a change;\n\
+         - `git log`, `git show`, `git blame` for history;\n\
+         - `qcc thread diff {thread} <path>…` (`--full` shows each file whole, its changes \
+           marked) and `qcc thread changes {thread}`: the same as qcc sees it. If `qcc` is not \
+           found, write \"$QCC_BIN\" in its place; a sandbox may keep it from reaching qcc, \
+           and then git is the way.\n\n"
+    ));
     if !profile.paths.is_empty() {
         prompt.push_str(&format!(
             "Look only at files matching {}.\n\n",
@@ -112,7 +152,7 @@ pub fn critic(review: &Review<'_>, scoped: &str) -> String {
     prompt.push_str(&format!(
         "Report only findings of severity {} or above. End your reply with one JSON object \
          and nothing after it:\n\n\
-         {{\"findings\": [{{\"file\": \"path/from/the/diff\", \"line\": 12, \"severity\": \
+         {{\"findings\": [{{\"file\": \"path/as/listed/above\", \"line\": 12, \"severity\": \
          \"high\", \"text\": \"what is wrong and how to fix it\"}}]}}\n\n\
          `line` is the line number in the file as it is now; leave out `file` and `line` for a \
          remark about the change as a whole. `severity` is one of info, low, medium, high, \
@@ -169,27 +209,42 @@ mod tests {
     use crate::findings::Severity;
     use crate::profile::{Source, parse};
 
-    const DIFF: &str = "diff --git a/src/a.rs b/src/a.rs\n--- a/src/a.rs\n+++ b/src/a.rs\n\
-                        @@ -1 +1 @@\n-a\n+b\ndiff --git a/README.md b/README.md\n--- a/README.md\n\
-                        +++ b/README.md\n@@ -1 +1 @@\n-x\n+y\n";
+    fn file(path: &str, kind: &'static str, counts: Option<(u32, u32)>) -> Changed {
+        Changed {
+            path: path.into(),
+            kind,
+            additions: counts.map(|c| c.0),
+            deletions: counts.map(|c| c.1),
+        }
+    }
+
+    fn files() -> Vec<Changed> {
+        vec![file("src/a.rs", "modified", Some((3, 1))), file("README.md", "untracked", None)]
+    }
 
     fn profile(front: &str) -> Profile {
         parse("p.md", &format!("---\n{front}\n---\nCheck errors."), Source::Project).unwrap()
     }
 
-    #[test]
-    fn the_diff_is_scoped_to_the_profile_and_the_round() {
-        let rust = profile("paths: [\"*.rs\"]");
-        let scoped = scoped_diff(DIFF, &rust, None).unwrap();
-        assert!(scoped.contains("src/a.rs") && !scoped.contains("README"));
-        assert_eq!(scoped_diff(DIFF, &rust, Some(&["README.md".to_owned()])), None);
-        let all = profile("name: all");
-        let later = scoped_diff(DIFF, &all, Some(&["README.md".to_owned()])).unwrap();
-        assert!(later.contains("README") && !later.contains("src/a.rs"));
+    fn paths(files: Vec<&Changed>) -> Vec<&str> {
+        files.into_iter().map(|file| file.path.as_str()).collect()
     }
 
     #[test]
-    fn a_prompt_says_what_and_how_to_answer() {
+    fn the_files_are_scoped_to_the_profile_and_the_round() {
+        let files = files();
+        let rust = profile("paths: [\"*.rs\"]");
+        assert_eq!(paths(scoped_files(&files, &rust, None)), ["src/a.rs"]);
+        assert!(scoped_files(&files, &rust, Some(&["README.md".to_owned()])).is_empty());
+        let all = profile("name: all");
+        assert_eq!(
+            paths(scoped_files(&files, &all, Some(&["README.md".to_owned()]))),
+            ["README.md"]
+        );
+    }
+
+    #[test]
+    fn a_prompt_says_where_to_look_and_how_to_answer() {
         let profile = profile("severity: medium\npaths: [\"*.rs\"]");
         let earlier = [Earlier {
             location: "src/a.rs:1".into(),
@@ -197,6 +252,7 @@ mod tests {
             resolution: Some("renamed".into()),
             resolved: true,
         }];
+        let files = files();
         let changed = ["src/a.rs".to_owned()];
         let review = Review {
             thread: "thr_1",
@@ -204,21 +260,34 @@ mod tests {
             task: Some("fix it"),
             profile: &profile,
             round: 2,
-            diff: DIFF,
-            truncated: true,
+            base: Some("main"),
+            branch: Some("task/x"),
+            files: &files,
             changed: Some(&changed),
             earlier: &earlier,
         };
-        let prompt = critic(&review, "+b\n");
+        let prompt = critic(&review, &scoped_files(&files, &profile, Some(&changed)));
         assert!(prompt.starts_with("Review round 2 by p of qcc thread thr_1\n\n"), "{prompt}");
-        assert!(prompt.contains("qcc thread thr_1, in /w"));
+        assert!(prompt.contains("qcc thread thr_1, which works in `/w`"));
         assert!(prompt.contains("<task>\nfix it\n</task>"));
-        assert!(prompt.contains("review round 2") && prompt.contains("changed: src/a.rs"));
-        assert!(prompt.contains("cut short"));
+        assert!(prompt.contains("review round 2") && prompt.contains("changed 1"));
+        assert!(prompt.contains("on branch `task/x`, against `main`"), "{prompt}");
+        assert!(prompt.contains("- `src/a.rs` (modified +3 -1)\n"), "{prompt}");
+        assert!(!prompt.contains("README.md"), "outside the profile's paths: {prompt}");
+        assert!(prompt.contains("`qcc thread diff thr_1 <path>…`"));
+        assert!(prompt.contains("`qcc thread changes thr_1`"));
+        assert!(prompt.contains("`git diff main -- ':/<path>'`"));
+        assert!(!prompt.contains("```diff"), "no diff in the prompt");
         assert!(prompt.contains("- src/a.rs:1: bad name (resolved: renamed)"));
         assert!(prompt.contains("severity medium or above"));
-        assert!(prompt.contains("Do not change any file"));
+        assert!(prompt.contains("You run read-only"));
         assert!(prompt.ends_with("Check errors.\n"), "the profile's words come last");
+
+        let first = Review { changed: None, base: None, branch: None, ..review };
+        let refs: Vec<&Changed> = files.iter().collect();
+        let prompt = critic(&first, &refs);
+        assert!(prompt.contains("- `README.md` (untracked)\n"), "{prompt}");
+        assert!(prompt.contains("`git diff HEAD -- "), "{prompt}");
     }
 
     #[test]

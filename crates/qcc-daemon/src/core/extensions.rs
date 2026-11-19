@@ -9,9 +9,9 @@ use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, CommentAddParams,
     Empty, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
-    SendMode, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams, ThreadSpawnParams,
-    UI_CHANGED, UiChangedNotification, UiContributionsResult, UiItemContribution, UiTreeResult,
-    UiViewContribution,
+    SendMode, ThreadChangesResult, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams,
+    ThreadSpawnParams, UI_CHANGED, UiChangedNotification, UiContributionsResult,
+    UiItemContribution, UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
@@ -195,6 +195,9 @@ impl Core {
             ThreadsCall::Diff { thread, request } => {
                 self.plugin_diff(plugin, thread, request).map(|()| ThreadsAnswer::Done)
             }
+            ThreadsCall::Changes { thread, request } => {
+                self.plugin_changes(plugin, thread, request).map(|()| ThreadsAnswer::Done)
+            }
             ThreadsCall::SetSkill { thread, skill, enabled } => {
                 // Only a skill of its own: a plugin does not switch other plugins' skills.
                 if !self.skills.iter().any(|s| s.reference.name == skill && s.plugin == plugin) {
@@ -250,6 +253,30 @@ impl Core {
                 Err(_) => Err("the daemon dropped the request".to_owned()),
             };
             let _ = asker.post(PluginRequest::ThreadDiff { request, thread, answer });
+        });
+        Ok(())
+    }
+
+    /// The files a thread changed, for a plugin, posted to it when the environment
+    /// answers.
+    fn plugin_changes(
+        &mut self,
+        plugin: &str,
+        thread: ThreadId,
+        request: u64,
+    ) -> Result<(), String> {
+        let asker = self.host.plugin(plugin).cloned().ok_or("the plugin is not loaded")?;
+        let (responder, answer) = Responder::internal();
+        self.environment_query(&thread, ChangeScope::All, None, responder);
+        tokio::spawn(async move {
+            let answer = match answer.await {
+                Ok(Ok(value)) => serde_json::from_value::<ThreadChangesResult>(value)
+                    .map(|result| result.changes)
+                    .map_err(|error| error.to_string()),
+                Ok(Err(error)) => Err(error.message),
+                Err(_) => Err("the daemon dropped the request".to_owned()),
+            };
+            let _ = asker.post(PluginRequest::ThreadChanges { request, thread, answer });
         });
         Ok(())
     }

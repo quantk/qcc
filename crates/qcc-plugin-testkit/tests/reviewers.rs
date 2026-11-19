@@ -6,10 +6,12 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use qcc_domain::{
+    ChangeKind, ChangedFile, EnvironmentChanges, ModelInfo, ProviderCapabilities, ProviderInfo,
+};
+use qcc_domain::{
     CommentAuthor, CommentId, LineComment, PermissionMode, Role, ThreadId, ThreadState,
     TranscriptEntry, TurnStatus,
 };
-use qcc_domain::{ModelInfo, ProviderCapabilities, ProviderInfo};
 use qcc_plugin_host::{Grant, Outcome, PluginError, PluginRequest, SettledThread, UiRequest};
 use qcc_plugin_testkit::{Bench, ThreadSummary, ThreadsAnswer, ThreadsCall};
 use qcc_runtime::NewThread;
@@ -114,6 +116,7 @@ impl Fixture {
                     }
                     ThreadsCall::Watch(_)
                     | ThreadsCall::Diff { .. }
+                    | ThreadsCall::Changes { .. }
                     | ThreadsCall::Models { .. }
                     | ThreadsCall::RefreshView { .. }
                     | ThreadsCall::SetSkill { .. }
@@ -149,6 +152,47 @@ impl Fixture {
     }
 
     /// Wait for the next diff the plugin asks for and give it `diff`.
+    /// Start a round: give the plugin `diff`, then the files it touches.
+    fn start_round(&self, diff: &str) {
+        self.answer_diff(diff);
+        let calls = self.bench.wait_for_call("asked for the changed files", |call| {
+            matches!(call, ThreadsCall::Changes { .. })
+        });
+        self.bench.take_calls();
+        let request = calls
+            .iter()
+            .find_map(|call| match call {
+                ThreadsCall::Changes { request, .. } => Some(*request),
+                _ => None,
+            })
+            .unwrap();
+        let files = vec![
+            ChangedFile {
+                path: "src/a.rs".into(),
+                kind: ChangeKind::Modified,
+                additions: Some(1),
+                deletions: Some(1),
+            },
+            ChangedFile {
+                path: "notes.md".into(),
+                kind: ChangeKind::Untracked,
+                additions: None,
+                deletions: None,
+            },
+        ];
+        let changes = EnvironmentChanges {
+            branch: Some("task/x".into()),
+            base: Some("main".into()),
+            files,
+            revisions: Vec::new(),
+        };
+        self.bench.post(PluginRequest::ThreadChanges {
+            request,
+            thread: ThreadId::new(SOURCE),
+            answer: Ok(changes),
+        });
+    }
+
     fn answer_diff(&self, diff: &str) {
         let calls = self
             .bench
@@ -221,7 +265,7 @@ fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
         !fixture.bench.calls().iter().any(|c| matches!(c, ThreadsCall::Diff { .. })),
         "not before the delay"
     );
-    fixture.answer_diff(DIFF);
+    fixture.start_round(DIFF);
     let calls =
         fixture.bench.wait_for_call("started a reviewer", |c| matches!(c, ThreadsCall::Spawn(_)));
     let spawn = calls
@@ -235,8 +279,12 @@ fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
     assert_eq!(spawn.permission_mode, Some(PermissionMode::ReadOnly), "echo runs read-only");
     assert_eq!(spawn.cwd.as_deref(), Some("/work"));
     let prompt = spawn.prompt.unwrap();
-    assert!(prompt.contains("+    new();") && prompt.contains("make a() better"), "{prompt}");
-    assert!(prompt.contains("Do not change any file"), "{prompt}");
+    // No diff in the prompt: the files, the base, and how to look.
+    assert!(!prompt.contains("new();"), "{prompt}");
+    assert!(prompt.contains("make a() better"), "{prompt}");
+    assert!(prompt.contains("- `src/a.rs` (modified +1 -1)"), "{prompt}");
+    assert!(prompt.contains("- `notes.md` (untracked)"), "{prompt}");
+    assert!(prompt.contains("against `main`") && prompt.contains("qcc thread diff thr_src"));
 
     // The reviewer answers; the diff is read again, the same: the comments are not stale.
     fixture.critic_answers("thr_critic1", FINDING);
@@ -295,7 +343,7 @@ fn a_request_by_hand_reports_dedup_and_the_round_limit() {
     let bench = &fixture.bench;
     std::thread::scope(|scope| {
         let asked = scope.spawn(|| fixture.command("request", &[]));
-        fixture.answer_diff(DIFF);
+        fixture.start_round(DIFF);
         let message = asked.join().unwrap().unwrap();
         assert!(
             message.contains("review round 1 started: general in thread thr_critic1"),
@@ -338,7 +386,7 @@ fn auto_delivery_sends_one_message_and_its_answer_is_not_reviewed_again() {
         )
         .unwrap();
     fixture.turn_ended(TurnStatus::Completed);
-    fixture.answer_diff(DIFF);
+    fixture.start_round(DIFF);
     fixture.bench.wait_for_call("started two reviewers", |_| fixture.spawns() == 2);
 
     // The first one answers; the round waits for the second.
@@ -381,7 +429,7 @@ fn auto_delivery_sends_one_message_and_its_answer_is_not_reviewed_again() {
     assert!(!fixture.bench.calls().iter().any(|c| matches!(c, ThreadsCall::Diff { .. })));
     // The turn after it does.
     fixture.turn_ended(TurnStatus::Completed);
-    fixture.answer_diff(&DIFF.replace("new();", "newer();"));
+    fixture.start_round(&DIFF.replace("new();", "newer();"));
     fixture.bench.wait_for_call("started round 2", |_| fixture.spawns() == 4);
 }
 
@@ -401,7 +449,7 @@ fn without_the_comments_permission_findings_still_reach_the_agent() {
         .command("configure", &[("enabled", "on"), ("trigger", "every-turn"), ("delivery", "auto")])
         .unwrap();
     fixture.turn_ended(TurnStatus::Completed);
-    fixture.answer_diff(DIFF);
+    fixture.start_round(DIFF);
     fixture.bench.wait_for_call("started a reviewer", |_| fixture.spawns() == 1);
     fixture.critic_answers("thr_critic1", FINDING);
     fixture.answer_diff(DIFF);
@@ -584,7 +632,7 @@ fn an_agent_that_cannot_run_read_only_reviews_in_ask_mode_and_says_so() {
     );
     std::thread::scope(|scope| {
         let asked = scope.spawn(|| fixture.command("request", &[]));
-        fixture.answer_diff(DIFF);
+        fixture.start_round(DIFF);
         let message = asked.join().unwrap().unwrap();
         assert!(message.contains("note: plain cannot run read-only"), "{message}");
     });

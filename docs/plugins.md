@@ -78,7 +78,9 @@ is `plugins/reviewers`, see [Reviewers](reviewers.md)):
   nothing needs to be subscribed again, and a thread that is already idle does not fire.
 - **Diffs** (`threads`): `threads::diff` asks for one patch of what a thread changed, as `qcc thread
   diff` shows it; the environment that knows may take a while, so the answer comes later to
-  `Plugin::on_thread_diff` with the id `diff` returned.
+  `Plugin::on_thread_diff` with the id `diff` returned. `threads::changes` does the same for the
+  list of changed files with their line counts, branch and base (`qcc thread changes`), answered
+  to `Plugin::on_thread_changes`.
 - **Skills of a thread** (`threads`): `threads::set_skill` turns one of the plugin's own skills on or
   off in a thread, the way the user can. **Agents** (`threads`): `threads::providers` lists them,
   and `threads::models(provider, refresh)` asks which models one offers, as `qcc provider models`

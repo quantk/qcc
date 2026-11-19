@@ -183,6 +183,13 @@ pub enum PluginRequest {
         thread: ThreadId,
         answer: Result<(String, bool), String>,
     },
+    /// The answer to a [`ThreadsCall::Changes`]. Posted like
+    /// [`PluginRequest::ThreadSettled`].
+    ThreadChanges {
+        request: u64,
+        thread: ThreadId,
+        answer: Result<EnvironmentChanges, String>,
+    },
     /// The answer to a [`ThreadsCall::Models`]. Posted like
     /// [`PluginRequest::ThreadSettled`].
     ProviderModels {
@@ -219,6 +226,12 @@ pub enum ThreadsCall {
     /// Ask for the thread's diff; the answer is posted as
     /// [`PluginRequest::ThreadDiff`] with `request`, which the host picks.
     Diff {
+        thread: ThreadId,
+        request: u64,
+    },
+    /// Ask for the files the thread changed; answered like [`ThreadsCall::Diff`],
+    /// with [`PluginRequest::ThreadChanges`].
+    Changes {
         thread: ThreadId,
         request: u64,
     },

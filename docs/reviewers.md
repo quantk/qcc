@@ -105,16 +105,22 @@ Each profile of a round is a child thread of the reviewed one, in its directory,
 looks around, nothing that changes a file runs, and it never stops to ask you. Claude Code, Codex
 and opencode can run that way. An agent that cannot runs its reviewer in `ask` mode instead, and
 then it may ask you for approval; the panel says so before a round, and `qcc reviewers request`
-says so when it starts one. You can open it like any other thread. Its prompt has the diff (the files its
-profile covers), the task the agent was given and how to answer: a JSON object at the end of the
-reply,
+says so when it starts one.
+
+The prompt does not carry the diff, which can be large. It says which thread and directory to
+review and against which base (and branch), lists the changed files the profile covers with their
+lines added and removed, gives the task the agent was given, and the commands to look with:
+`git diff <base> -- ':/<path>'`, reading and searching files, `git log`/`git show`/`git blame`, and
+`qcc thread diff <id> [--full] <path>…` / `qcc thread changes <id>` (which a Codex sandbox keeps
+from reaching qcc, so git comes first). The reviewer reads what it needs. It answers with a JSON
+object at the end of its reply,
 
 ```json
 {"findings": [{"file": "src/lib.rs", "line": 12, "severity": "high", "text": "…"}]}
 ```
 
-From the second round on, a reviewer gets only the files changed since the last round, and what it
-found before with what became of it (resolved, with the agent's note, or still open), so it checks
+From the second round on, a reviewer is pointed only at the files changed since the last round,
+and told what it found before with what became of it (resolved, with the agent's note, or still open), so it checks
 the fixes instead of starting over.
 
 ## Findings
@@ -143,7 +149,9 @@ permissions `kv`, `timers`, `threads`, `turn-events`, `comments`, `files` and `s
 
 - `turn-events` tells it of every turn that ends; it keeps a timer per thread for the delay and
   checks with `threads.get` that the agent is still idle;
-- `threads.diff` reads the diff (answered later, as an event), `threads.spawn` and
+- `threads.diff` reads the diff, whose fingerprint tells a new round from one already reviewed
+  and marks findings stale; `threads.changes` lists the files with their line counts and the
+  base for the prompt (both answered later, as events); `threads.spawn` and
   `threads.watch` run the reviewers, `threads.send` delivers the message;
 - `comments.add` leaves the comments; the daemon records the plugin as their author;
 - `files` reads the profiles; the panel is a `thread-panel` view built from UI nodes.

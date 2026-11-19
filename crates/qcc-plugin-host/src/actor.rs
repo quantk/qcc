@@ -735,6 +735,13 @@ impl imports::threads::Host for State {
         self.threads(ThreadsCall::SetSkill { thread: ThreadId(thread), skill, enabled }).map(|_| ())
     }
 
+    fn changes(&mut self, thread: String) -> Result<u64, String> {
+        let request = self.next_request + 1;
+        self.threads(ThreadsCall::Changes { thread: ThreadId(thread), request })?;
+        self.next_request = request;
+        Ok(request)
+    }
+
     fn models(&mut self, provider: String, refresh: bool) -> Result<u64, String> {
         let request = self.next_request + 1;
         self.threads(ThreadsCall::Models { provider: provider.into(), refresh, request })?;

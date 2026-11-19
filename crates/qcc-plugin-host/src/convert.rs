@@ -400,6 +400,33 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
     }
 }
 
+fn changes_to_wit(changes: EnvironmentChanges) -> wit::EnvironmentChanges {
+    wit::EnvironmentChanges {
+        branch: changes.branch,
+        base: changes.base,
+        files: changes
+            .files
+            .into_iter()
+            .map(|file| wit::ChangedFile {
+                path: file.path,
+                kind: match file.kind {
+                    ChangeKind::Added => wit::ChangeKind::Added,
+                    ChangeKind::Modified => wit::ChangeKind::Modified,
+                    ChangeKind::Deleted => wit::ChangeKind::Deleted,
+                    ChangeKind::Untracked => wit::ChangeKind::Untracked,
+                },
+                additions: file.additions,
+                deletions: file.deletions,
+            })
+            .collect(),
+        revisions: changes
+            .revisions
+            .into_iter()
+            .map(|r| wit::Revision { id: r.id, title: r.title, time: r.time })
+            .collect(),
+    }
+}
+
 fn model_info(model: ModelInfo) -> wit::ModelInfo {
     wit::ModelInfo {
         id: model.id,
@@ -726,6 +753,13 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
             thread: thread_info(*summary),
             status: turn_status_to_wit(status),
         }),
+        PluginRequest::ThreadChanges { request, thread, answer } => {
+            wit::Event::ThreadChanges(wit::ThreadChanges {
+                request,
+                thread: thread.0,
+                answer: answer.map(changes_to_wit),
+            })
+        }
         PluginRequest::ProviderModels { request, provider, answer } => {
             wit::Event::ProviderModels(wit::ProviderModels {
                 request,

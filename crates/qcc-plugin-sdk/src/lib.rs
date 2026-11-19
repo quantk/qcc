@@ -94,8 +94,8 @@ use types::{
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
     InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
     ProviderModels, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
-    SkillInfo, SkillRef, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary, TurnEnded, TurnStatus,
-    UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    SkillInfo, SkillRef, ThreadChanges, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary,
+    TurnEnded, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -503,6 +503,11 @@ pub trait Plugin: Default + 'static {
         let _ = diff;
     }
 
+    /// The changed files asked for with [`threads::changes`].
+    fn on_thread_changes(&mut self, changes: ThreadChanges) {
+        let _ = changes;
+    }
+
     /// The models asked for with [`threads::models`].
     fn on_provider_models(&mut self, models: ProviderModels) {
         let _ = models;
@@ -665,6 +670,10 @@ pub mod __private {
             }
             Event::ThreadDiff(diff) => {
                 plugin.on_thread_diff(diff);
+                Ok(Outcome::Done)
+            }
+            Event::ThreadChanges(changes) => {
+                plugin.on_thread_changes(changes);
                 Ok(Outcome::Done)
             }
             Event::ProviderModels(models) => {

@@ -46,6 +46,14 @@ const PROJECT_DIR: &str = ".qcc/reviewers";
 const MAX_LOOSE_REPLY: usize = 4_000;
 
 /// Why a diff was asked for.
+/// A round waiting for the list of changed files.
+struct Pending {
+    thread: String,
+    /// The command that asked for the round, to be answered.
+    token: Option<u64>,
+    diff: String,
+}
+
 /// Why a reviewer may ask for approval: its agent cannot run read-only.
 pub(crate) fn asks_note(profile: &str, provider: &str) -> String {
     format!(
@@ -81,6 +89,8 @@ pub struct Reviewers {
     /// The pending timer of each thread.
     waiting: HashMap<String, u64>,
     diffs: HashMap<u64, DiffFor>,
+    /// Rounds waiting for `threads.changes`, by request.
+    changes: HashMap<u64, Pending>,
     next_token: u64,
     /// Agents' models, for the panel.
     models: HashMap<String, panel::Models>,
@@ -265,6 +275,20 @@ impl Reviewers {
         self.waiting.contains_key(thread)
     }
 
+    /// How an attempt to start a round ended: noted for the panel, and told to the
+    /// command that asked, if one did.
+    fn answer(thread: &str, token: Option<u64>, result: Result<String, String>) {
+        if let Err(error) = &result {
+            Self::note(thread, error.clone());
+        }
+        let Some(token) = token else { return };
+        let outcome =
+            result.map(|message| Outcome::CommandResult(CommandResult { message, thread: None }));
+        if let Err(error) = completions::complete(token, outcome.as_ref().map_err(String::as_str)) {
+            log::warn(format!("cannot answer the review request: {error}"));
+        }
+    }
+
     fn note(thread: &str, note: String) {
         log::info(format!("{thread}: {note}"));
         let mut state = state_of(thread);
@@ -294,18 +318,29 @@ impl Reviewers {
     }
 
     /// The diff is in: start the reviewers, unless there is nothing new to review.
-    fn begin(
+    /// The diff is in: unless there is nothing new to review, ask which files it
+    /// touches, which the reviewers' prompts list.
+    fn diff_came(
         &mut self,
         thread: &str,
+        token: Option<u64>,
         answer: Result<EnvironmentDiff, String>,
-    ) -> Result<String, String> {
-        let EnvironmentDiff { diff, truncated } =
+    ) -> Result<(), String> {
+        let EnvironmentDiff { diff, .. } =
             answer.map_err(|error| format!("cannot read the changes: {error}"))?;
+        self.check_new(thread, &diff)?;
+        let request = threads::changes(thread)?;
+        self.changes.insert(request, Pending { thread: thread.to_owned(), token, diff });
+        Ok(())
+    }
+
+    /// Whether `diff` is worth a new round now.
+    fn check_new(&self, thread: &str, diff: &str) -> Result<(), String> {
         if diff.trim().is_empty() {
             return Err("there are no changes to review".into());
         }
         let config = self.config_of(thread);
-        let mut state = state_of(thread);
+        let state = state_of(thread);
         // Checked again: something may have started meanwhile.
         if let Some(round) = &state.round {
             return Err(format!("review round {} is still running", round.number));
@@ -313,13 +348,44 @@ impl Reviewers {
         if config.max_rounds > 0 && state.rounds >= config.max_rounds {
             return Err(format!("the limit of {} review rounds is reached", config.max_rounds));
         }
-        let fingerprint = diff::fingerprint(&diff);
-        if state.fingerprint.as_deref() == Some(fingerprint.as_str()) {
+        if state.fingerprint.as_deref() == Some(diff::fingerprint(diff).as_str()) {
             return Err(format!(
                 "nothing changed since review round {}; no new round",
                 state.rounds
             ));
         }
+        Ok(())
+    }
+
+    /// The changed files are in: start the reviewers.
+    fn begin(
+        &mut self,
+        pending: Pending,
+        answer: Result<EnvironmentChanges, String>,
+    ) -> Result<String, String> {
+        let Pending { thread, diff, .. } = pending;
+        let thread = thread.as_str();
+        let changes = answer.map_err(|error| format!("cannot list the changes: {error}"))?;
+        // Checked again: something may have started meanwhile.
+        self.check_new(thread, &diff)?;
+        let config = self.config_of(thread);
+        let mut state = state_of(thread);
+        let fingerprint = diff::fingerprint(&diff);
+        let files: Vec<prompt::Changed> = changes
+            .files
+            .iter()
+            .map(|file| prompt::Changed {
+                path: file.path.clone(),
+                kind: match file.kind {
+                    ChangeKind::Added => "added",
+                    ChangeKind::Modified => "modified",
+                    ChangeKind::Deleted => "deleted",
+                    ChangeKind::Untracked => "untracked",
+                },
+                additions: file.additions,
+                deletions: file.deletions,
+            })
+            .collect();
         let read_only = read_only_providers();
         let source = threads::get(thread)?;
         let task = threads::transcript(thread).ok().and_then(|messages| {
@@ -337,9 +403,10 @@ impl Reviewers {
                 problems.push(format!("there is no reviewer profile {name:?}"));
                 continue;
             };
-            let Some(scoped) = prompt::scoped_diff(&diff, profile, changed.as_deref()) else {
+            let scoped = prompt::scoped_files(&files, profile, changed.as_deref());
+            if scoped.is_empty() {
                 continue;
-            };
+            }
             let earlier = earlier_findings(thread, name);
             let review = prompt::Review {
                 thread,
@@ -347,8 +414,9 @@ impl Reviewers {
                 task: task.as_deref(),
                 profile,
                 round: number,
-                diff: &diff,
-                truncated,
+                base: changes.base.as_deref(),
+                branch: changes.branch.as_deref(),
+                files: &files,
                 changed: changed.as_deref(),
                 earlier: &earlier,
             };
@@ -896,22 +964,18 @@ impl Plugin for Reviewers {
         self.models_came(answer);
     }
 
+    fn on_thread_changes(&mut self, answer: ThreadChanges) {
+        let Some(pending) = self.changes.remove(&answer.request) else { return };
+        let (thread, token) = (pending.thread.clone(), pending.token);
+        let result = self.begin(pending, answer.answer);
+        Self::answer(&thread, token, result);
+    }
+
     fn on_thread_diff(&mut self, answer: ThreadDiff) {
         match self.diffs.remove(&answer.request) {
             Some(DiffFor::Start { thread, token }) => {
-                let result = self.begin(&thread, answer.answer);
-                if let Err(error) = &result {
-                    Self::note(&thread, error.clone());
-                }
-                if let Some(token) = token {
-                    let outcome = result.map(|message| {
-                        Outcome::CommandResult(CommandResult { message, thread: None })
-                    });
-                    if let Err(error) =
-                        completions::complete(token, outcome.as_ref().map_err(String::as_str))
-                    {
-                        log::warn(format!("cannot answer the review request: {error}"));
-                    }
+                if let Err(error) = self.diff_came(&thread, token, answer.answer) {
+                    Self::answer(&thread, token, Err(error));
                 }
             }
             Some(DiffFor::Finish { thread }) => self.finish(&thread, answer.answer.ok()),

@@ -177,14 +177,6 @@ export function agentOwnMcpServers(threads: readonly Thread[], settings: Setting
     .map(([name, seen]) => ({ name, providers: [...seen].sort(), usage: mcpUsage(threads, name) }));
 }
 
-/** The servers of a thread that need the user: failed, or waiting for a sign-in. One it keeps off does not. */
-export function mcpTrouble(thread: Thread): McpServerStatus[] {
-  const off = thread.mcp_disabled ?? [];
-  return (thread.mcp_servers ?? []).filter(
-    (server) => (server.state === "failed" || server.state === "needs-auth") && !off.includes(server.name),
-  );
-}
-
 /** One server on a thread's MCP tab. */
 export type ThreadMcpRow = {
   name: string;

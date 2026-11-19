@@ -7,7 +7,6 @@ import {
   draftOf,
   joinArgs,
   mcpNameProblem,
-  mcpTrouble,
   mcpUsage,
   renamedMcpServer,
   serverOf,
@@ -103,12 +102,6 @@ describe("statuses", () => {
         usage: { counts: { failed: 1, ready: 1 }, errors: ["no browser"] },
       },
     ]);
-  });
-
-  it("pick out the servers that need the user", () => {
-    expect(mcpTrouble(threads[0] as Thread).map((server) => server.name)).toEqual(["playwright"]);
-    expect(mcpTrouble({ ...(threads[0] as Thread), mcp_disabled: ["playwright"] })).toEqual([]);
-    expect(mcpTrouble(thread("d", "codex", [{ name: "x", state: "needs-auth" }]))).toHaveLength(1);
   });
 });
 

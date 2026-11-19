@@ -1,0 +1,19 @@
+[package]
+name = "reviewers"
+description = "Reviewers that look at a thread's changes on their own and leave their findings as comments"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+qcc-plugin-sdk = { workspace = true, features = ["ui"] }
+serde.workspace = true
+serde_json.workspace = true
+
+# Generated component glue needs `unsafe`, which the workspace lints forbid.
+[lints]

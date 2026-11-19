@@ -1,0 +1,24 @@
+id = "reviewers"
+name = "Reviewers"
+description = "Reviewers that look at a thread's changes when its agent is done, and leave their findings as line comments or send them to the agent."
+version = "0.1.0"
+api = "0.1"
+wasm = "plugin.wasm"
+
+[permissions]
+# Each thread's reviewer settings and the rounds in flight survive a restart.
+kv = true
+# The pause after a turn before a review starts.
+timers = true
+# Start reviewers as child threads, follow them, read the thread's diff, send it
+# the findings.
+threads = true
+# Hear when a thread's turn ends, to start a review.
+turn-events = true
+# Findings become comments on the lines they are about.
+comments = true
+# Read reviewer profiles: .qcc/reviewers/*.md where a thread works, and
+# profiles/*.md in the plugin's own folder.
+files = true
+# Tell the agent of a reviewed thread how to ask for a review.
+skills = true

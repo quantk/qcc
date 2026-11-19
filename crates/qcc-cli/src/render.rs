@@ -265,6 +265,14 @@ pub fn changes(changes: &EnvironmentChanges) -> String {
         };
         lines.push(format!("{kind}  {}{stat}", file.path));
     }
+    if !changes.revisions.is_empty() {
+        lines.push(String::new());
+        lines.push("commits since the base, newest first:".into());
+        for revision in &changes.revisions {
+            let id = revision.id.get(..10).unwrap_or(&revision.id);
+            lines.push(format!("{id}  {}", revision.title));
+        }
+    }
     lines.join("\n")
 }
 

@@ -114,7 +114,12 @@ library loads only when a diagram appears; HTML in labels and scripts are forbid
 ### Changes
 
 The list of changed files and the combined diff: for a thread in a worktree, everything it did; for
-a thread in its own checkout, what is uncommitted relative to `HEAD`. Code in diffs — here and in
+a thread in its own checkout, what is uncommitted relative to `HEAD`. Once a worktree thread has
+commits, a picker at the start of the header (on the tab and in the right panel) narrows the diff
+to the uncommitted work, to one commit, or to a run of them: shift-click a second row. The
+uncommitted work is a row too, so "this commit and everything after it" is one shift-click. When
+the agent amends or rebases away a commit you were looking at, the view goes back to all the
+changes. Code in diffs — here and in
 edits in the timeline — is highlighted by the file's language (by extension or name). Collapsed and
 very large files stay unhighlighted.
 

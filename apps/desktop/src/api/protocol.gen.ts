@@ -200,6 +200,19 @@ export type ChangeKind = "added" | "modified" | "deleted" |
 /**  New and not yet known to version control. */
 "untracked";
 
+/**  Which part of a thread's work its changes tell. */
+export type ChangeScope = 
+/**  Everything since the base, saved or not. */
+{ kind: "all" } | 
+/**  Only what is not saved yet (uncommitted, for git). */
+{ kind: "unsaved" } | 
+/**  Between revisions listed in [`EnvironmentChanges::revisions`]. */
+{ kind: "revisions"; 
+/**  The changes after this revision; absent: after the base. */
+from?: string | null; 
+/**  Up to this revision, included; absent: up to the directory as it is now. */
+to?: string | null };
+
 export type ChangedFile = {
 	/**  Relative to the root of the environment. */
 	path: string,
@@ -404,6 +417,11 @@ export type EnvironmentChanges = {
 	/**  What the changes are measured against. */
 	base?: string | null,
 	files: ChangedFile[],
+	/**
+	 *  The revisions saved since the base (commits, for git), newest first. Their ids
+	 *  name the ends of a [`ChangeScope::Revisions`] range.
+	 */
+	revisions?: Revision[],
 };
 
 export type EnvironmentInfo = {
@@ -944,6 +962,15 @@ export type ProviderSkillsResult = {
 	skills: AgentSkill[],
 };
 
+/**  A saved state of an environment's work: a commit, for git. */
+export type Revision = {
+	id: string,
+	/**  One line about it (a commit's subject). */
+	title: string,
+	/**  When it was made, in milliseconds since the Unix epoch. */
+	time?: number | null,
+};
+
 export type RpcError = {
 	code: number,
 	message: string,
@@ -1190,6 +1217,12 @@ export type ThreadAttachmentResult = {
 	mime: string,
 };
 
+export type ThreadChangesParams = {
+	thread_id: ThreadId,
+	/**  Which part of the work; all of it when absent. */
+	scope?: ChangeScope,
+};
+
 export type ThreadChangesResult = {
 	changes: EnvironmentChanges,
 };
@@ -1216,6 +1249,8 @@ export type ThreadDiffParams = {
 	 *  crowded out of a diff cut short by the others.
 	 */
 	paths?: string[],
+	/**  Which part of the work; all of it when absent. */
+	scope?: ChangeScope,
 };
 
 export type ThreadDiffResult = {
@@ -1748,7 +1783,7 @@ export type Methods = {
 	"thread.watch": { params: ThreadWatchParams; result: ThreadListResult },
 	"thread.get": { params: ThreadGetParams; result: ThreadResult },
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadResult },
-	"thread.changes": { params: ThreadGetParams; result: ThreadChangesResult },
+	"thread.changes": { params: ThreadChangesParams; result: ThreadChangesResult },
 	"thread.diff": { params: ThreadDiffParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
 	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },

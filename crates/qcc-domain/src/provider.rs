@@ -216,6 +216,47 @@ pub struct EnvironmentChanges {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
     pub files: Vec<ChangedFile>,
+    /// The revisions saved since the base (commits, for git), newest first. Their ids
+    /// name the ends of a [`ChangeScope::Revisions`] range.
+    #[serde(default)]
+    pub revisions: Vec<Revision>,
+}
+
+/// A saved state of an environment's work: a commit, for git.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Revision {
+    pub id: String,
+    /// One line about it (a commit's subject).
+    pub title: String,
+    /// When it was made, in milliseconds since the Unix epoch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<u64>,
+}
+
+/// Which part of a thread's work its changes tell.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ChangeScope {
+    /// Everything since the base, saved or not.
+    #[default]
+    All,
+    /// Only what is not saved yet (uncommitted, for git).
+    Unsaved,
+    /// Between revisions listed in [`EnvironmentChanges::revisions`].
+    Revisions {
+        /// The changes after this revision; absent: after the base.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<String>,
+        /// Up to this revision, included; absent: up to the directory as it is now.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+    },
+}
+
+impl ChangeScope {
+    pub fn is_all(&self) -> bool {
+        *self == Self::All
+    }
 }
 
 /// A named value a plugin command takes. Every value is text.

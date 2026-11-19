@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import type { Thread } from "../../api/protocol.gen";
+import type { ChangeScope, Thread } from "../../api/protocol.gen";
 import { ChangesReaders, ThreadChangesReader, totals } from "../../state/changes";
 import { settledEdits } from "../../state/stats";
 import { store, useApp } from "../../state/store";
@@ -17,7 +17,10 @@ const readers = new ChangesReaders(
     new ThreadChangesReader(
       threadId,
       {
-        changes: (id) => store().api.call("thread.changes", { thread_id: id }).then(({ changes }) => changes),
+        changes: (id, scope) =>
+          store()
+            .api.call("thread.changes", scope.kind === "all" ? { thread_id: id } : { thread_id: id, scope })
+            .then(({ changes }) => changes),
         diff: (params) => store().api.call("thread.diff", params),
       },
       errorMessage,
@@ -58,5 +61,6 @@ export function useChanges(thread: Thread) {
     active,
     totals: sum,
     reload: () => reader.reload(),
+    setScope: (scope: ChangeScope) => reader.setScope(scope),
   };
 }

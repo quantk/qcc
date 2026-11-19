@@ -2,12 +2,12 @@
 
 use qcc_domain::{AgentSkill, Attachment, Compaction, SettingField, SettingKind};
 use qcc_domain::{
-    ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta, EnvironmentChanges,
-    EnvironmentInfo, InteractionOption, InteractionRequest, InteractionResolution, ItemKey,
-    ItemShape, ItemStatus, McpServer, McpServerStatus, McpState, McpTransport, ModelInfo,
-    OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo, Role, SkillInfo, TextChannel,
-    ThreadId, ThreadState, TokenUsage, TranscriptEntry, TurnStatus, UiPlacement, UiScope,
-    UiViewInfo, UsageSnapshot, UserInput,
+    ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta,
+    EnvironmentChanges, EnvironmentInfo, InteractionOption, InteractionRequest,
+    InteractionResolution, ItemKey, ItemShape, ItemStatus, McpServer, McpServerStatus, McpState,
+    McpTransport, ModelInfo, OptionKind, PermissionMode, ProviderCapabilities, ProviderInfo,
+    Revision, Role, SkillInfo, TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry,
+    TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot, UserInput,
 };
 use qcc_domain::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 use qcc_domain::{LimitStatus, LimitWindow, RateLimits};
@@ -456,6 +456,15 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                         deletions: file.deletions,
                     })
                     .collect(),
+                revisions: changes
+                    .revisions
+                    .into_iter()
+                    .map(|revision| Revision {
+                        id: revision.id,
+                        title: revision.title,
+                        time: revision.time,
+                    })
+                    .collect(),
             })
         }
         wit::Outcome::EnvironmentDelivered(summary) => Outcome::EnvironmentDelivered(summary),
@@ -653,20 +662,22 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                             force,
                         })
                     }
-                    EnvironmentRequest::Changes { thread, cwd, inspect } => {
+                    EnvironmentRequest::Changes { thread, cwd, inspect, scope } => {
                         wit::EnvironmentRequest::Changes(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
                             inspect,
                             paths: Vec::new(),
+                            scope: change_scope(scope),
                         })
                     }
-                    EnvironmentRequest::Diff { thread, cwd, inspect, paths } => {
+                    EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope } => {
                         wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
                             inspect,
                             paths,
+                            scope: change_scope(scope),
                         })
                     }
                     EnvironmentRequest::Deliver { thread, cwd, mode } => {
@@ -681,6 +692,16 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                     }
                 },
             })
+        }
+    }
+}
+
+fn change_scope(scope: ChangeScope) -> wit::ChangeScope {
+    match scope {
+        ChangeScope::All => wit::ChangeScope::All,
+        ChangeScope::Unsaved => wit::ChangeScope::Unsaved,
+        ChangeScope::Revisions { from, to } => {
+            wit::ChangeScope::Revisions(wit::RevisionRange { from, to })
         }
     }
 }

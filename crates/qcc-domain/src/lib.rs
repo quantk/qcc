@@ -42,10 +42,10 @@ pub use item::{Item, ItemShape, ItemStatus};
 pub use limits::{LimitStatus, LimitWindow, ProviderLimits, RateLimits};
 pub use project::{Project, project_of};
 pub use provider::{
-    AgentSkill, ChangeKind, ChangedFile, CommandInfo, CommandParam, DeliverMode,
+    AgentSkill, ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode,
     EnvironmentChanges, EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport,
-    ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, SettingField, SettingKind,
-    SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
+    ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, Revision, SettingField,
+    SettingKind, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
 };
 pub use stats::{ToolBucket, ToolKind, ToolUse};
 pub use thread::{

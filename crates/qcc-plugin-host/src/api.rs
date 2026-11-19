@@ -2,7 +2,7 @@
 //! crate.
 
 use qcc_domain::{
-    AgentSkill, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo,
+    AgentSkill, ChangeScope, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo,
     InteractionResolution, McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
     RateLimits, SettingField, SkillInfo, SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry,
     UiViewInfo, UserInput,
@@ -106,6 +106,7 @@ pub enum EnvironmentRequest {
         cwd: String,
         /// `cwd` is the thread's own directory, not one of the plugin's environments.
         inspect: bool,
+        scope: ChangeScope,
     },
     Diff {
         thread: ThreadId,
@@ -114,6 +115,7 @@ pub enum EnvironmentRequest {
         inspect: bool,
         /// Only these files; every file when empty.
         paths: Vec<String>,
+        scope: ChangeScope,
     },
     /// Answered with [`Outcome::EnvironmentDelivered`].
     Deliver {

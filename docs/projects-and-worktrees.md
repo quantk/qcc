@@ -43,6 +43,8 @@ qcc thread spawn --provider claude-code --env git-worktree --prompt '…' --foll
 qcc thread changes <thread-id>     # which files changed relative to the base
 qcc thread diff <thread-id>        # everything as one patch: commits, uncommitted work and new files
 qcc thread diff <thread-id> src/a.rs src/b.rs   # only these files (paths as in thread changes)
+qcc thread diff <thread-id> --uncommitted        # only what is not committed yet
+qcc thread diff <thread-id> --from <commit> --to <commit>   # a run of the thread's commits
 qcc thread archive <thread-id>     # release the session, delete the worktree, remove the thread from the list
 ```
 
@@ -50,6 +52,13 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
   from a subdirectory works in the same subdirectory of its copy. `--env-dir` and `--branch` put
   the worktree where you say, on a branch you name: see
   [below](#a-worktree-where-you-say-on-a-branch-you-name).
+- `thread changes` also lists the commits the thread made since the base (along the branch's
+  first parents, newest first). With them both commands can show a part of the work:
+  `--uncommitted` is what is not committed yet (against `HEAD`, new files included);
+  `--from <commit>` is what came after that commit, and `--to <commit>` what came up to and
+  including it. `--from` alone runs up to the working tree, uncommitted work too; `--to` alone
+  starts at the base. A commit is named by its hash as `thread changes` lists it. Without these
+  flags it is all the work since the base.
 - `thread changes` and `thread diff` also work for a thread without a worktree that was started
   directly in its own git checkout. Then they show what is uncommitted there relative to `HEAD`
   (edits, deletions, new files), with paths from the repository root. This is done by an

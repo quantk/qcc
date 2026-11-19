@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ChangedFile, EnvironmentChanges, ThreadDiffParams, ThreadDiffResult } from "../api/protocol.gen";
+import type { ChangeScope, ChangedFile, EnvironmentChanges, ThreadDiffParams, ThreadDiffResult } from "../api/protocol.gen";
 import {
   BATCH,
   type ChangesState,
@@ -193,6 +193,45 @@ describe("ThreadChangesReader", () => {
     reader.follow("2", 800);
     await vi.advanceTimersByTimeAsync(800);
     expect(calls.changes).toBe(2);
+  });
+
+  it("reads another scope afresh and drops what was read for the last one", async () => {
+    const { calls, api } = fake();
+    const scopes: unknown[] = [];
+    const commits = { ...list(A, B), revisions: [{ id: "ccc3333", title: "Fix" }, { id: "bbb2222", title: "Add" }] };
+    const reader = new ThreadChangesReader("t", {
+      ...api,
+      changes: async (_id: string, scope: ChangeScope) => {
+        scopes.push(scope);
+        return api.changes().then(() => commits);
+      },
+    });
+    reader.reload();
+    await vi.advanceTimersByTimeAsync(0);
+    reader.want(["a.ts"]);
+    // The scope changes while the diff is read: its answer belongs to the old one.
+    reader.setScope({ kind: "revisions", from: "bbb2222", to: "ccc3333" });
+    expect(reader.getState().changes).toBeNull();
+    expect(reader.getState().revisions).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scopes.at(-1)).toEqual({ kind: "revisions", from: "bbb2222", to: "ccc3333" });
+    expect(reader.getState().diffs.size).toBe(0);
+    reader.want(["a.ts"]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.diffs.at(-1)).toEqual({
+      thread_id: "t",
+      paths: ["a.ts"],
+      scope: { kind: "revisions", from: "bbb2222", to: "ccc3333" },
+    });
+
+    // The commit it showed was amended away: back to all the work.
+    commits.revisions = [{ id: "ddd4444", title: "Fix" }, { id: "bbb2222", title: "Add" }];
+    reader.reload();
+    // The read that finds the commit gone, then the read of all the work.
+    await vi.runAllTimersAsync();
+    expect(reader.getState().scope).toEqual({ kind: "all" });
+    expect(scopes.at(-1)).toEqual({ kind: "all" });
+    expect(reader.getState().changes?.files).toHaveLength(2);
   });
 
   it("reads one batch of diffs at a time, and reads stale ones again", async () => {

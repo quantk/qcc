@@ -737,6 +737,26 @@ interface types {
     /// Only these files, by their paths as `changes` reports them; every file when
     /// empty. Lets a viewer read the diff of a large change a few files at a time.
     paths: list<string>,
+    /// Which part of the work to tell.
+    scope: change-scope,
+  }
+
+  /// Which part of a thread's work `changes` and `diff` tell.
+  variant change-scope {
+    /// Everything since the base, saved or not.
+    all,
+    /// Only what is not saved yet (uncommitted, for git).
+    unsaved,
+    /// Between saved revisions, by the ids `environment-changes` lists.
+    revisions(revision-range),
+  }
+
+  record revision-range {
+    /// The changes after this revision; absent: after the base.
+    %from: option<string>,
+    /// Up to this revision, included; absent: up to the directory as it is now,
+    /// unsaved work too.
+    to: option<string>,
   }
 
   variant environment-request {
@@ -775,6 +795,17 @@ interface types {
     /// What the changes are measured against.
     base: option<string>,
     files: list<changed-file>,
+    /// The revisions saved since the base (commits, for git), newest first; empty
+    /// for an environment without such a notion. Their ids name a `revision-range`.
+    revisions: list<revision>,
+  }
+
+  record revision {
+    id: string,
+    /// One line about it (a commit's subject).
+    title: string,
+    /// When it was made, in milliseconds since the Unix epoch.
+    time: option<u64>,
   }
 
   record environment-diff {

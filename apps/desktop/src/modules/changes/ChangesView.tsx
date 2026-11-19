@@ -9,10 +9,11 @@ import { ChangedFiles } from "./ChangedFiles";
 import { ChangesDiff } from "./ChangesDiff";
 import { DeliverButtons } from "./DeliverButtons";
 import { ReviewBar, useReview } from "./review";
+import { ScopePicker, nothingChanged, picking } from "./ScopePicker";
 import { useChanges } from "./useChanges";
 
 export function ChangesView({ thread }: { thread: Thread }) {
-  const { reader, state, changes, error, loading, active, totals, reload } = useChanges(thread);
+  const { reader, state, changes, error, loading, active, totals, reload, setScope } = useChanges(thread);
   const files = useMemo(() => readFiles(state), [state]);
   const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
   const review = useReview(thread, files, paths);
@@ -20,6 +21,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
   return (
     <div className="changes">
       <div className="changes-head flex-wrap gap-y-2">
+        {picking(state) && <ScopePicker scope={state.scope} revisions={state.revisions} pick={setScope} />}
         {changes ? (
           <span>
             {plural(changes.files.length, "file")} changed
@@ -35,7 +37,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
                 on <code>{changes.branch}</code>
               </>
             )}
-            {changes.base && (
+            {changes.base && state.scope.kind === "all" && (
               <>
                 {" "}
                 since <code title={changes.base}>{changes.base.slice(0, 10)}</code>
@@ -66,7 +68,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
           lead={(jump) => (
             <div className="flex flex-col gap-3">
               {changes.files.length === 0 ? (
-                <p className="hint">The agent has not changed any files.</p>
+                <p className="hint">{nothingChanged(state)}</p>
               ) : (
                 <ChangedFiles changes={changes} open={jump} />
               )}

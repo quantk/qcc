@@ -226,11 +226,11 @@ impl Core {
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadChanges::NAME => match params::<ThreadChanges>(raw) {
-                Ok(p) => self.environment_query(&p.thread_id, None, responder),
+                Ok(p) => self.environment_query(&p.thread_id, p.scope, None, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadDiff::NAME => match params::<ThreadDiff>(raw) {
-                Ok(p) => self.environment_query(&p.thread_id, Some(p.paths), responder),
+                Ok(p) => self.environment_query(&p.thread_id, p.scope, Some(p.paths), responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadGet::NAME => {

@@ -8,10 +8,10 @@ use anyhow::{Context as _, bail};
 use clap::Subcommand;
 use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
-    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadCompact, ThreadCompactParams,
-    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams, ThreadGet, ThreadGetParams,
-    ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams, ThreadRename,
-    ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
+    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact,
+    ThreadCompactParams, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams,
+    ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
+    ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
     ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode,
     ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
     ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams,
@@ -20,13 +20,39 @@ use qcc_client::protocol::methods::{
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
-    CommentId, DeliverMode, EventPayload, PermissionMode, ProviderId, ThreadEvent, ThreadId,
-    ThreadState, ThreadStatus, TurnStatus,
+    ChangeScope, CommentId, DeliverMode, EventPayload, PermissionMode, ProviderId, ThreadEvent,
+    ThreadId, ThreadState, ThreadStatus, TurnStatus,
 };
 use serde::Serialize;
 
 use crate::project::find_project;
 use crate::{out, print_json, render};
+
+/// Which part of a thread's work `changes` and `diff` show; all of it by default.
+#[derive(clap::Args)]
+pub(crate) struct Scope {
+    /// Only what is not committed yet.
+    #[arg(long, conflicts_with_all = ["from", "to"])]
+    uncommitted: bool,
+    /// Only the changes after this commit, as `qcc thread changes` lists them;
+    /// after the base when only `--to` is given.
+    #[arg(long, value_name = "COMMIT")]
+    from: Option<String>,
+    /// Only the changes up to this commit, included; up to the directory as it is
+    /// now, uncommitted work too, when only `--from` is given.
+    #[arg(long, value_name = "COMMIT")]
+    to: Option<String>,
+}
+
+impl Scope {
+    fn scope(self) -> ChangeScope {
+        match self {
+            Self { uncommitted: true, .. } => ChangeScope::Unsaved,
+            Self { from: None, to: None, .. } => ChangeScope::All,
+            Self { from, to, .. } => ChangeScope::Revisions { from, to },
+        }
+    }
+}
 
 /// Where an environment works and what it calls its branch, when the user says.
 #[derive(clap::Args)]
@@ -262,13 +288,20 @@ pub(crate) enum ThreadCommand {
         #[arg(long)]
         hidden: bool,
     },
-    /// List the files a thread changed in its environment.
-    Changes { thread: String },
+    /// List the files a thread changed in its environment, and the commits it made
+    /// there.
+    Changes {
+        thread: String,
+        #[command(flatten)]
+        scope: Scope,
+    },
     /// Print everything a thread changed in its environment as a unified diff.
     Diff {
         thread: String,
         /// Only these files, by their paths in `qcc thread changes`.
         paths: Vec<String>,
+        #[command(flatten)]
+        scope: Scope,
     },
     /// Put a thread away: release its session and remove its environment. The
     /// timeline stays readable.
@@ -704,10 +737,10 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Changes { thread } => {
-            let result = client
-                .call::<ThreadChanges>(ThreadGetParams { thread_id: ThreadId::new(thread) })
-                .await?;
+        ThreadCommand::Changes { thread, scope } => {
+            let params =
+                ThreadChangesParams { thread_id: ThreadId::new(thread), scope: scope.scope() };
+            let result = client.call::<ThreadChanges>(params).await?;
             if json {
                 print_json(&result)?;
             } else {
@@ -715,10 +748,10 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Diff { thread, paths } => {
-            let result = client
-                .call::<ThreadDiff>(ThreadDiffParams { thread_id: ThreadId::new(thread), paths })
-                .await?;
+        ThreadCommand::Diff { thread, paths, scope } => {
+            let params =
+                ThreadDiffParams { thread_id: ThreadId::new(thread), paths, scope: scope.scope() };
+            let result = client.call::<ThreadDiff>(params).await?;
             if json {
                 print_json(&result)?;
             } else {

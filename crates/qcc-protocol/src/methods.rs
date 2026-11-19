@@ -3,11 +3,11 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, CommandInfo,
-    CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo, InteractionId,
-    InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode, Project,
-    ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField, Thread, ThreadEvent,
-    ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
+    AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, ChangeScope,
+    CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
+    InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
+    Project, ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField, Thread,
+    ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -423,9 +423,17 @@ pub struct ThreadArchiveParams {
 }
 
 method!(
-    /// The files a thread changed in its environment.
-    ThreadChanges, "thread.changes", ThreadGetParams => ThreadChangesResult
+    /// The files a thread changed in its environment, and the revisions it saved there.
+    ThreadChanges, "thread.changes", ThreadChangesParams => ThreadChangesResult
 );
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadChangesParams {
+    pub thread_id: ThreadId,
+    /// Which part of the work; all of it when absent.
+    #[serde(default, skip_serializing_if = "ChangeScope::is_all")]
+    pub scope: ChangeScope,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadChangesResult {
@@ -446,6 +454,9 @@ pub struct ThreadDiffParams {
     /// crowded out of a diff cut short by the others.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub paths: Vec<String>,
+    /// Which part of the work; all of it when absent.
+    #[serde(default, skip_serializing_if = "ChangeScope::is_all")]
+    pub scope: ChangeScope,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

@@ -288,20 +288,20 @@ impl Environment for Worktrees {
 
     fn changes(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentChanges>, String> {
         if query.inspect {
-            let job = jobs::Inspect::new(query.cwd, false, query.paths);
+            let job = jobs::Inspect::new(query.cwd, false, query.paths, query.scope);
             return self.begin(query.thread, Job::Inspect(job));
         }
         let record = known(&query.thread)?;
-        self.begin(query.thread, Job::Changes(jobs::Changes::new(record, query.paths)))
+        self.begin(query.thread, Job::Changes(jobs::Changes::new(record, query.paths, query.scope)))
     }
 
     fn diff(&mut self, query: EnvironmentQuery) -> Result<Reply<EnvironmentDiff>, String> {
         if query.inspect {
-            let job = jobs::Inspect::new(query.cwd, true, query.paths);
+            let job = jobs::Inspect::new(query.cwd, true, query.paths, query.scope);
             return self.begin(query.thread, Job::Inspect(job));
         }
         let record = known(&query.thread)?;
-        self.begin(query.thread, Job::Diff(jobs::Diff::new(record, query.paths)))
+        self.begin(query.thread, Job::Diff(jobs::Diff::new(record, query.paths, query.scope)))
     }
 
     fn deliver(&mut self, request: EnvironmentDeliver) -> Result<Reply<String>, String> {

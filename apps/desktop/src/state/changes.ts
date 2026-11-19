@@ -3,7 +3,15 @@
 // a lockfile of tens of thousands of lines) costs what the screen shows, not what
 // the agent did.
 
-import type { ChangedFile, EnvironmentChanges, ThreadDiffParams, ThreadDiffResult } from "../api/protocol.gen";
+import type {
+  ChangeScope,
+  ChangedFile,
+  EnvironmentChanges,
+  Revision,
+  ThreadDiffParams,
+  ThreadDiffResult,
+} from "../api/protocol.gen";
+import { ALL, sameScope, scopeHolds } from "./changeScope";
 import { type DiffFile, parseDiff } from "./diff";
 
 /** Files with more changed lines than this start folded; their diff is read when opened. */
@@ -57,7 +65,12 @@ export type FileDiff =
   | { state: "failed"; error: string };
 
 export type ChangesState = {
+  /** Which part of the work is shown. */
+  scope: ChangeScope;
+  /** The list of changed files in `scope`; null until it is read. */
   changes: EnvironmentChanges | null;
+  /** The commits since the base, as last read in any scope: what can be picked. */
+  revisions: readonly Revision[];
   /** The list could not be read. */
   error: string | null;
   /** The list is being read. */
@@ -65,7 +78,16 @@ export type ChangesState = {
   diffs: ReadonlyMap<string, FileDiff>;
 };
 
-export const EMPTY: ChangesState = { changes: null, error: null, loading: false, diffs: new Map() };
+const NO_REVISIONS: readonly Revision[] = [];
+
+export const EMPTY: ChangesState = {
+  scope: ALL,
+  changes: null,
+  revisions: NO_REVISIONS,
+  error: null,
+  loading: false,
+  diffs: new Map(),
+};
 
 /**
  * A new list of changed files: diffs of files no longer changed are dropped, and
@@ -81,7 +103,20 @@ export function withChanges(state: ChangesState, changes: EnvironmentChanges): C
     else if (diff.state === "failed") diffs.set(path, { state: "unread" });
     else diffs.set(path, diff);
   }
-  return { ...state, changes, error: null, loading: false, diffs };
+  const revisions = sameRevisions(state.revisions, changes.revisions ?? NO_REVISIONS)
+    ? state.revisions
+    : (changes.revisions ?? NO_REVISIONS);
+  return { ...state, changes, revisions, error: null, loading: false, diffs };
+}
+
+function sameRevisions(a: readonly Revision[], b: readonly Revision[]): boolean {
+  return a.length === b.length && a.every((revision, index) => revision.id === b[index]!.id && revision.title === b[index]!.title);
+}
+
+/** Another part of the work to show: nothing read for the last one applies to it. */
+export function withScope(state: ChangesState, scope: ChangeScope): ChangesState {
+  if (sameScope(state.scope, scope)) return state;
+  return { ...EMPTY, scope, revisions: state.revisions, loading: true };
 }
 
 /** Whether `path`'s diff has to be read before it can be shown as it is now. */
@@ -212,7 +247,7 @@ export function totals(changes: EnvironmentChanges | null): { additions: number;
 
 /** What a reader needs of the daemon. */
 export type ChangesApi = {
-  changes(threadId: string): Promise<EnvironmentChanges>;
+  changes(threadId: string, scope: ChangeScope): Promise<EnvironmentChanges>;
   diff(params: ThreadDiffParams): Promise<ThreadDiffResult>;
 };
 
@@ -232,6 +267,8 @@ export class ThreadChangesReader {
   private timer: ReturnType<typeof setTimeout> | null = null;
   /** Diffs being read, so a view asking again in the meantime does not double them. */
   private inFlight = 0;
+  /** Counts the scopes shown; an answer read for an earlier one is dropped. */
+  private generation = 0;
 
   constructor(
     readonly threadId: string,
@@ -278,17 +315,40 @@ export class ThreadChangesReader {
     if (Date.now() - this.askedAt >= ms) this.reload(0);
   }
 
+  /** Show another part of the work, read afresh. */
+  setScope(scope: ChangeScope) {
+    const next = withScope(this.state, scope);
+    if (next === this.state) return;
+    this.generation++;
+    this.set(next);
+    this.reload(0);
+  }
+
   private list() {
     if (this.listing) {
       this.again = true;
       return;
     }
+    const generation = this.generation;
+    const current = () => generation === this.generation;
     this.set({ ...this.state, loading: true });
     this.listing = this.api
-      .changes(this.threadId)
+      .changes(this.threadId, this.state.scope)
       .then(
-        (changes) => this.set(withChanges(this.state, changes)),
-        (error: unknown) => this.set({ ...this.state, loading: false, error: this.errorText(error) }),
+        (changes) => {
+          if (!current()) return;
+          // The commits it named are gone (amended, rebased): show all the work.
+          const revisions = changes.revisions ?? NO_REVISIONS;
+          if (!scopeHolds(this.state.scope, revisions)) {
+            this.set({ ...this.state, revisions });
+            this.setScope(ALL);
+            return;
+          }
+          this.set(withChanges(this.state, changes));
+        },
+        (error: unknown) => {
+          if (current()) this.set({ ...this.state, loading: false, error: this.errorText(error) });
+        },
       )
       .finally(() => {
         this.listing = null;
@@ -310,11 +370,15 @@ export class ThreadChangesReader {
     if (batch.length === 0) return;
     this.inFlight++;
     this.set(reading(this.state, batch));
+    const generation = this.generation;
+    const current = () => generation === this.generation;
+    const params: ThreadDiffParams = { thread_id: this.threadId, paths: batch };
+    if (this.state.scope.kind !== "all") params.scope = this.state.scope;
     this.api
-      .diff({ thread_id: this.threadId, paths: batch })
+      .diff(params)
       .then(
-        (result) => this.set(withDiff(this.state, batch, result)),
-        (error: unknown) => this.set(withDiffError(this.state, batch, this.errorText(error))),
+        (result) => current() && this.set(withDiff(this.state, batch, result)),
+        (error: unknown) => current() && this.set(withDiffError(this.state, batch, this.errorText(error))),
       )
       .finally(() => {
         this.inFlight--;

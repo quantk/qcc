@@ -1753,6 +1753,32 @@ fn a_thread_gets_a_worktree_of_its_own_and_reports_what_it_changed() {
     write(dir.path().join("thread.patch"), &diff.stdout);
     git(&repo, &["apply", "--check", dir.path().join("thread.patch").to_str().unwrap()]);
 
+    // The commit is listed, and the work can be looked at a part at a time.
+    let commit = git(&worktree, &["rev-parse", "HEAD"]).trim().to_owned();
+    let revisions = &changes["changes"]["revisions"];
+    assert_eq!(revisions.as_array().map(Vec::len), Some(1), "{revisions}");
+    assert_eq!(
+        (revisions[0]["id"].as_str(), revisions[0]["title"].as_str()),
+        (Some(&*commit), Some("three"))
+    );
+    assert!(revisions[0]["time"].as_u64().is_some_and(|ms| ms > 1_000_000_000_000), "{revisions}");
+    let paths = |args: &[&str]| -> Vec<String> {
+        let mut all = vec!["thread", "changes", &id, "--json"];
+        all.extend(args);
+        let listed = daemon.qcc(&all);
+        assert!(listed.ok, "{}", listed.stderr);
+        let files = listed.json()["changes"]["files"].as_array().unwrap().clone();
+        files.iter().map(|file| file["path"].as_str().unwrap().to_owned()).collect()
+    };
+    let uncommitted = [".worktreeinclude", "README.md", "docs/new.md"];
+    assert_eq!(paths(&["--uncommitted"]), uncommitted);
+    assert_eq!(paths(&["--from", &commit]), uncommitted);
+    assert_eq!(paths(&["--to", &commit]), ["src/a.txt"]);
+    let one = daemon.qcc(&["thread", "diff", &id, "--to", &commit]);
+    assert!(one.stdout.contains("+three\n") && !one.stdout.contains("brand new"), "{}", one.stdout);
+    let bad = daemon.qcc(&["thread", "diff", &id, "--to=--output=/tmp/x"]);
+    assert!(!bad.ok && bad.stderr.contains("does not name a commit"), "{}", bad.stderr);
+
     // None of this touched the main checkout.
     assert_eq!(std::fs::read_to_string(repo.join("src/a.txt")).unwrap(), "one\ntwo\n");
     assert_eq!(git(&repo, &["status", "--porcelain"]), "");

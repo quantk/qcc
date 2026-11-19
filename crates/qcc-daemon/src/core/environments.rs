@@ -1,6 +1,8 @@
 //! Thread environments: preparing, querying and removing them, and archiving threads.
 
-use qcc_domain::{EnvironmentState, EventPayload, ThreadEnvironment, ThreadId, UserInput};
+use qcc_domain::{
+    ChangeScope, EnvironmentState, EventPayload, ThreadEnvironment, ThreadId, UserInput,
+};
 use qcc_plugin_host::{EnvironmentRequest, Outcome, PluginError, PluginHandle, ProviderRequest};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
@@ -215,10 +217,11 @@ impl Core {
     }
 
     /// `thread.changes`, or with `diff` (the paths to diff, all when empty)
-    /// `thread.diff`: answered by an environment plugin, off the core task.
+    /// `thread.diff`, of the part of the work `scope` names: answered by an environment plugin, off the core task.
     pub(super) fn environment_query(
         &mut self,
         id: &ThreadId,
+        scope: ChangeScope,
         diff: Option<Vec<String>>,
         responder: Responder,
     ) {
@@ -228,8 +231,8 @@ impl Core {
         };
         let thread = id.clone();
         let request = match diff {
-            Some(paths) => EnvironmentRequest::Diff { thread, cwd, inspect, paths },
-            None => EnvironmentRequest::Changes { thread, cwd, inspect },
+            Some(paths) => EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope },
+            None => EnvironmentRequest::Changes { thread, cwd, inspect, scope },
         };
         tokio::spawn(async move {
             match call_environment(plugin, environment, request, QUERY_TIMEOUT).await {

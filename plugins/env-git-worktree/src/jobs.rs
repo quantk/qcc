@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 
-use qcc_plugin_sdk::types::{ChangeKind, ChangedFile, EnvironmentChanges};
+use qcc_plugin_sdk::types::{
+    ChangeKind, ChangeScope, ChangedFile, EnvironmentChanges, Revision, RevisionRange,
+};
 use serde_json::{Value, json};
 
 /// A setup or teardown script may install dependencies; give it time.
@@ -911,6 +913,7 @@ pub struct Inspect {
     cwd: String,
     diff: bool,
     paths: Vec<String>,
+    scope: ChangeScope,
     /// The job that does the work, once the top of the checkout is known.
     inner: Option<Box<Job>>,
 }
@@ -919,8 +922,8 @@ pub struct Inspect {
 const TOPLEVEL_OF: u32 = u32::MAX;
 
 impl Inspect {
-    pub fn new(cwd: String, diff: bool, paths: Vec<String>) -> Self {
-        Self { cwd, diff, paths, inner: None }
+    pub fn new(cwd: String, diff: bool, paths: Vec<String>, scope: ChangeScope) -> Self {
+        Self { cwd, diff, paths, scope, inner: None }
     }
 
     fn start(&mut self) -> Step {
@@ -950,10 +953,11 @@ impl Inspect {
             reused: false,
         };
         let paths = std::mem::take(&mut self.paths);
+        let scope = std::mem::replace(&mut self.scope, ChangeScope::All);
         let mut inner = Box::new(if self.diff {
-            Job::Diff(Diff::new(record, paths))
+            Job::Diff(Diff::new(record, paths, scope))
         } else {
-            Job::Changes(Changes::new(record, paths))
+            Job::Changes(Changes::new(record, paths, scope))
         });
         let step = inner.start();
         self.inner = Some(inner);
@@ -1019,38 +1023,125 @@ pub fn parse_numstat(bytes: &[u8]) -> Vec<(String, Option<u32>, Option<u32>)> {
         .collect()
 }
 
+/// What a scope compares, as git's arguments: a commit and either another one or,
+/// when `to` is absent, the working tree, whose new files then count too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ends {
+    from: String,
+    to: Option<String>,
+}
+
+impl Ends {
+    pub fn of(scope: &ChangeScope, base: &str) -> Result<Self, String> {
+        Ok(match scope {
+            ChangeScope::All => Self { from: base.to_owned(), to: None },
+            ChangeScope::Unsaved => Self { from: "HEAD".to_owned(), to: None },
+            ChangeScope::Revisions(RevisionRange { from, to }) => Self {
+                from: match from {
+                    Some(id) => commit_id(id)?,
+                    None => base.to_owned(),
+                },
+                to: to.as_deref().map(commit_id).transpose()?,
+            },
+        })
+    }
+
+    /// `git diff`'s arguments for these ends, after its options.
+    fn args(&self) -> Vec<&str> {
+        let mut args = vec![self.from.as_str()];
+        args.extend(self.to.as_deref());
+        args
+    }
+
+    /// New files git does not track are part of the working tree only.
+    fn untracked(&self) -> bool {
+        self.to.is_none()
+    }
+}
+
+/// The exit of a listing that found nothing, for one there was no need to run.
+fn listed_nothing() -> Exit {
+    Exit { code: Some(0), ..Exit::default() }
+}
+
+/// A revision named by a viewer, as `changes` listed it: a commit's hash. Anything
+/// else is refused before it reaches git, where it could pass for an option.
+fn commit_id(id: &str) -> Result<String, String> {
+    if (4..=64).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(id.to_owned())
+    } else {
+        Err(format!("{id:?} does not name a commit"))
+    }
+}
+
+/// `git log -z --format=%H%x1f%ct%x1f%s`: hash, commit time in seconds, subject.
+pub fn parse_log(bytes: &[u8]) -> Vec<Revision> {
+    nul_separated(bytes)
+        .into_iter()
+        .filter_map(|entry| {
+            let mut fields = entry.splitn(3, '\x1f');
+            let id = fields.next()?.trim().to_owned();
+            let time = fields.next()?.parse::<u64>().ok().map(|seconds| seconds * 1000);
+            let title = fields.next().unwrap_or_default().to_owned();
+            (!id.is_empty()).then_some(Revision { id, title, time })
+        })
+        .collect()
+}
+
 mod changes {
     pub const NAMES: u32 = 0;
     pub const STATS: u32 = 1;
     pub const UNTRACKED: u32 = 2;
     pub const BRANCH: u32 = 3;
-    pub const COUNT: usize = 4;
+    pub const LOG: u32 = 4;
+    pub const COUNT: usize = 5;
 }
 
-/// Everything since the base commit, committed or not, plus files git does not
-/// know yet; of `paths` alone when there are any.
+/// Commits listed since the base; a branch with more is shown its latest ones.
+const MAX_REVISIONS: usize = 300;
+
+/// Between the ends a scope names (by default everything since the base commit,
+/// committed or not, plus files git does not know yet); of `paths` alone when there
+/// are any. Also lists the commits made since the base.
 pub struct Changes {
     record: Record,
     paths: Vec<String>,
+    scope: ChangeScope,
     exits: Vec<Option<Exit>>,
 }
 
 impl Changes {
-    pub fn new(record: Record, paths: Vec<String>) -> Self {
-        Self { record, paths, exits: vec![None; changes::COUNT] }
+    pub fn new(record: Record, paths: Vec<String>, scope: ChangeScope) -> Self {
+        Self { record, paths, scope, exits: vec![None; changes::COUNT] }
     }
 
     fn start(&mut self) -> Step {
         use changes::*;
+        let ends = match Ends::of(&self.scope, &self.record.base) {
+            Ok(ends) => ends,
+            Err(error) => return Step::Finish(Err(error)),
+        };
         let (worktree, base, paths) = (&self.record.worktree, &self.record.base, &self.paths);
-        let diff =
-            |tag, how| only(git(tag, worktree, &["diff", NO_RENAMES, how, "-z", base]), paths);
-        Step::Run(vec![
-            diff(NAMES, "--name-status"),
-            diff(STATS, "--numstat"),
-            untracked(UNTRACKED, worktree, paths),
-            git(BRANCH, worktree, &["rev-parse", "--abbrev-ref", "HEAD"]),
-        ])
+        let diff = |tag, how| {
+            let mut args = vec!["diff", NO_RENAMES, how, "-z"];
+            args.extend(ends.args());
+            only(git(tag, worktree, &args), paths)
+        };
+        let log_range = format!("{base}..HEAD");
+        let max = format!("--max-count={MAX_REVISIONS}");
+        // Along the branch's own line: a merge of another branch is one commit here,
+        // not every commit it brought.
+        let log = ["log", "--first-parent", &max, "-z", "--format=%H%x1f%ct%x1f%s", &log_range];
+        let mut run = vec![diff(NAMES, "--name-status"), diff(STATS, "--numstat")];
+        if ends.untracked() {
+            run.push(untracked(UNTRACKED, worktree, paths));
+        } else {
+            // A range of commits has no new files in it.
+            self.exits[UNTRACKED as usize] = Some(listed_nothing());
+        }
+        run.push(git(BRANCH, worktree, &["rev-parse", "--abbrev-ref", "HEAD"]));
+        run.push(git(LOG, worktree, &log));
+        Step::Run(run)
     }
 
     fn on_exit(&mut self, tag: u32, exit: Exit) -> Step {
@@ -1062,7 +1153,7 @@ impl Changes {
             return Step::Wait;
         }
         let exits: Vec<Exit> = self.exits.drain(..).flatten().collect();
-        // The branch is decoration; the rest is the answer.
+        // The branch and the log are decoration; the rest is the answer.
         if let Some(failed) = exits[..BRANCH as usize].iter().find(|exit| !exit.ok()) {
             return Step::Finish(Err(format!("git: {}", failed.reason())));
         }
@@ -1083,12 +1174,20 @@ impl Changes {
         }));
         files.sort_by(|a, b| a.path.cmp(&b.path));
         let branch = exits[BRANCH as usize].text().trim().to_owned();
+        // Like the branch, the commits are decoration: without them, there is no
+        // picking one, but the changes are still right.
+        let revisions = if exits[LOG as usize].ok() {
+            parse_log(&exits[LOG as usize].stdout)
+        } else {
+            Vec::new()
+        };
         Step::Finish(Ok(Answer::Changes(EnvironmentChanges {
             // A detached HEAD has no branch name.
             branch: (exits[BRANCH as usize].ok() && branch != "HEAD" && !branch.is_empty())
                 .then_some(branch),
             base: Some(self.record.base.clone()),
             files,
+            revisions,
         })))
     }
 }
@@ -1228,6 +1327,7 @@ mod diff {
 pub struct Diff {
     record: Record,
     paths: Vec<String>,
+    scope: ChangeScope,
     tracked: Option<Exit>,
     untracked: Option<Exit>,
     /// New files still to diff, last first.
@@ -1237,10 +1337,11 @@ pub struct Diff {
 }
 
 impl Diff {
-    pub fn new(record: Record, paths: Vec<String>) -> Self {
+    pub fn new(record: Record, paths: Vec<String>, scope: ChangeScope) -> Self {
         Self {
             record,
             paths,
+            scope,
             tracked: None,
             untracked: None,
             pending: Vec::new(),
@@ -1250,16 +1351,20 @@ impl Diff {
     }
 
     fn start(&mut self) -> Step {
-        let (worktree, base) = (&self.record.worktree, &self.record.base);
-        let mut tracked = only(
-            git(
-                diff::TRACKED,
-                worktree,
-                &["diff", "--no-color", "--no-ext-diff", NO_RENAMES, base],
-            ),
-            &self.paths,
-        );
+        let ends = match Ends::of(&self.scope, &self.record.base) {
+            Ok(ends) => ends,
+            Err(error) => return Step::Finish(Err(error)),
+        };
+        let worktree = &self.record.worktree;
+        let mut args = vec!["diff", "--no-color", "--no-ext-diff", NO_RENAMES];
+        args.extend(ends.args());
+        let mut tracked = only(git(diff::TRACKED, worktree, &args), &self.paths);
         tracked.limit = DIFF_LIMIT;
+        if !ends.untracked() {
+            // A range of commits has no new files in it.
+            self.untracked = Some(listed_nothing());
+            return Step::Run(vec![tracked]);
+        }
         Step::Run(vec![tracked, untracked(diff::UNTRACKED, worktree, &self.paths)])
     }
 
@@ -1627,9 +1732,11 @@ mod tests {
 
     #[test]
     fn changes_join_names_stats_and_untracked_files() {
-        let mut job = Changes::new(record(), Vec::new());
+        let mut job = Changes::new(record(), Vec::new(), ChangeScope::All);
         assert_eq!(run(job.start()).len(), changes::COUNT);
         assert_eq!(job.on_exit(changes::BRANCH, out("qcc/thr_1\n")), Step::Wait);
+        let log = "f00d\x1f1700000000\x1fFix the parser\0beef\x1f1690000000\x1fAdd a parser\0";
+        assert_eq!(job.on_exit(changes::LOG, out(log)), Step::Wait);
         assert_eq!(
             job.on_exit(changes::NAMES, out("M\0src/a.rs\0A\0img.png\0D\0old.txt\0")),
             Step::Wait
@@ -1640,6 +1747,15 @@ mod tests {
         let Step::Finish(Ok(Answer::Changes(changes))) = step else { panic!("{step:?}") };
         assert_eq!(changes.branch.as_deref(), Some("qcc/thr_1"));
         assert_eq!(changes.base.as_deref(), Some("abc123"));
+        let revisions: Vec<_> =
+            changes.revisions.iter().map(|r| (r.id.as_str(), r.title.as_str(), r.time)).collect();
+        assert_eq!(
+            revisions,
+            [
+                ("f00d", "Fix the parser", Some(1_700_000_000_000)),
+                ("beef", "Add a parser", Some(1_690_000_000_000))
+            ]
+        );
         let rows: Vec<_> = changes
             .files
             .iter()
@@ -1658,7 +1774,7 @@ mod tests {
 
     #[test]
     fn a_checkout_of_the_users_own_is_measured_from_its_top_against_head() {
-        let mut job = Inspect::new("/src/app/crates".into(), false, Vec::new());
+        let mut job = Inspect::new("/src/app/crates".into(), false, Vec::new(), ChangeScope::All);
         let first = run(job.start());
         assert_eq!(first[0].args, ["-C", "/src/app/crates", "rev-parse", "--show-toplevel"]);
         let next = run(job.on_exit(TOPLEVEL_OF, out("/src/app\n")));
@@ -1666,6 +1782,7 @@ mod tests {
         assert_eq!(next[0].args[..2], ["-C", "/src/app"]);
         assert_eq!(next[0].args.last().map(String::as_str), Some("HEAD"));
         job.on_exit(changes::BRANCH, out("main\n"));
+        job.on_exit(changes::LOG, out(""));
         job.on_exit(changes::NAMES, out("M\0src/a.rs\0"));
         job.on_exit(changes::UNTRACKED, out(""));
         let step = job.on_exit(changes::STATS, out("1\t1\tsrc/a.rs\0"));
@@ -1679,7 +1796,7 @@ mod tests {
 
     #[test]
     fn a_directory_outside_git_says_so() {
-        let mut job = Inspect::new("/tmp/notes".into(), true, Vec::new());
+        let mut job = Inspect::new("/tmp/notes".into(), true, Vec::new(), ChangeScope::All);
         job.start();
         let step = job.on_exit(TOPLEVEL_OF, fatal("fatal: not a git repository"));
         let Step::Finish(Err(error)) = step else { panic!("{step:?}") };
@@ -1688,18 +1805,84 @@ mod tests {
 
     #[test]
     fn changes_report_a_git_failure() {
-        let mut job = Changes::new(record(), Vec::new());
+        let mut job = Changes::new(record(), Vec::new(), ChangeScope::All);
         job.start();
         job.on_exit(changes::BRANCH, out("HEAD\n"));
+        job.on_exit(changes::LOG, failed("fatal: bad object abc123"));
         job.on_exit(changes::NAMES, failed("fatal: bad object abc123"));
         job.on_exit(changes::STATS, failed("fatal: bad object abc123"));
         let step = job.on_exit(changes::UNTRACKED, out(""));
         assert_eq!(step, Step::Finish(Err("git: fatal: bad object abc123".into())));
     }
 
+    fn range(from: Option<&str>, to: Option<&str>) -> ChangeScope {
+        ChangeScope::Revisions(RevisionRange {
+            from: from.map(str::to_owned),
+            to: to.map(str::to_owned),
+        })
+    }
+
+    #[test]
+    fn a_scope_names_the_ends_of_the_diff() {
+        let ends = |scope: ChangeScope| {
+            Ends::of(&scope, "abc123").map(|ends| (ends.args().join(" "), ends.untracked()))
+        };
+        assert_eq!(ends(ChangeScope::All), Ok(("abc123".into(), true)));
+        assert_eq!(ends(ChangeScope::Unsaved), Ok(("HEAD".into(), true)));
+        assert_eq!(ends(range(Some("f00d"), Some("beef"))), Ok(("f00d beef".into(), false)));
+        assert_eq!(ends(range(None, Some("beef"))), Ok(("abc123 beef".into(), false)));
+        assert_eq!(ends(range(Some("f00d"), None)), Ok(("f00d".into(), true)));
+        // Only a commit's hash: nothing git could take for an option or a path.
+        for bad in ["--output=/tmp/x", "HEAD", "f00d..beef", "abc"] {
+            assert!(ends(range(Some(bad), None)).is_err(), "{bad}");
+            assert!(ends(range(None, Some(bad))).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn changes_between_commits_have_no_new_files() {
+        let mut job = Changes::new(record(), Vec::new(), range(Some("f00d"), Some("beef")));
+        let first = run(job.start());
+        assert_eq!(first.len(), changes::COUNT - 1);
+        assert_eq!(first[0].args[2..], ["diff", NO_RENAMES, "--name-status", "-z", "f00d", "beef"]);
+        assert!(first.iter().all(|cmd| cmd.tag != changes::UNTRACKED));
+        // The commits are still listed from the base, whatever the scope.
+        assert_eq!(first.last().unwrap().args.last().unwrap(), "abc123..HEAD");
+        job.on_exit(changes::BRANCH, out("qcc/thr_1\n"));
+        job.on_exit(changes::LOG, out(""));
+        job.on_exit(changes::NAMES, out("M\0src/a.rs\0"));
+        let step = job.on_exit(changes::STATS, out("1\t0\tsrc/a.rs\0"));
+        let Step::Finish(Ok(Answer::Changes(changes))) = step else { panic!("{step:?}") };
+        assert_eq!(changes.files.len(), 1);
+
+        let mut job = Changes::new(record(), Vec::new(), range(Some("-x"), None));
+        assert_eq!(job.start(), Step::Finish(Err("\"-x\" does not name a commit".into())));
+    }
+
+    #[test]
+    fn a_diff_of_uncommitted_work_is_against_head_with_new_files() {
+        let mut job = Diff::new(record(), Vec::new(), ChangeScope::Unsaved);
+        let first = run(job.start());
+        assert_eq!(first[0].args.last().unwrap(), "HEAD");
+        assert_eq!(first[1].tag, diff::UNTRACKED);
+
+        let mut job = Diff::new(record(), Vec::new(), range(Some("f00d"), Some("beef")));
+        let first = run(job.start());
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].args[first[0].args.len() - 2..], ["f00d", "beef"]);
+        let step = job.on_exit(diff::TRACKED, out("diff --git a/x b/x\n"));
+        assert_eq!(
+            step,
+            Step::Finish(Ok(Answer::Diff {
+                diff: "diff --git a/x b/x\n".into(),
+                truncated: false
+            }))
+        );
+    }
+
     #[test]
     fn diff_appends_new_files_to_the_tracked_patch() {
-        let mut job = Diff::new(record(), Vec::new());
+        let mut job = Diff::new(record(), Vec::new(), ChangeScope::All);
         let first = run(job.start());
         assert_eq!(first[0].limit, DIFF_LIMIT);
         assert_eq!(job.on_exit(diff::UNTRACKED, out("b.txt\0a.txt\0")), Step::Wait);
@@ -1724,7 +1907,7 @@ mod tests {
     #[test]
     fn a_diff_of_some_files_names_them_literally() {
         let paths = vec!["src/*.rs".to_owned(), "new.txt".to_owned()];
-        let mut job = Diff::new(record(), paths.clone());
+        let mut job = Diff::new(record(), paths.clone(), ChangeScope::All);
         let first = run(job.start());
         for cmd in &first {
             assert_eq!(cmd.args[cmd.args.len() - 3..], ["--", "src/*.rs", "new.txt"]);
@@ -1735,7 +1918,7 @@ mod tests {
         let next = run(job.on_exit(diff::TRACKED, out("")));
         assert_eq!(next[0].args.last().unwrap(), "new.txt");
 
-        let mut job = Changes::new(record(), paths);
+        let mut job = Changes::new(record(), paths, ChangeScope::All);
         let first = run(job.start());
         assert!(
             first[..3].iter().all(|cmd| cmd.args.ends_with(&["src/*.rs".into(), "new.txt".into()]))
@@ -1744,7 +1927,7 @@ mod tests {
 
     #[test]
     fn an_oversized_diff_is_cut_and_says_so() {
-        let mut job = Diff::new(record(), Vec::new());
+        let mut job = Diff::new(record(), Vec::new(), ChangeScope::All);
         job.start();
         job.on_exit(diff::UNTRACKED, out("new.txt\0"));
         // The tracked diff hit its limit and was stopped: no exit code.

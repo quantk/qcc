@@ -669,15 +669,17 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                             inspect,
                             paths: Vec::new(),
                             scope: change_scope(scope),
+                            full: false,
                         })
                     }
-                    EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope } => {
+                    EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope, full } => {
                         wit::EnvironmentRequest::Diff(wit::EnvironmentQuery {
                             thread: thread.0,
                             cwd,
                             inspect,
                             paths,
                             scope: change_scope(scope),
+                            full,
                         })
                     }
                     EnvironmentRequest::Deliver { thread, cwd, mode } => {

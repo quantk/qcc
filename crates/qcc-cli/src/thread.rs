@@ -302,6 +302,10 @@ pub(crate) enum ThreadCommand {
         paths: Vec<String>,
         #[command(flatten)]
         scope: Scope,
+        /// Show each changed file whole, its unchanged lines as context, not just a
+        /// few lines around each change.
+        #[arg(long)]
+        full: bool,
     },
     /// Put a thread away: release its session and remove its environment. The
     /// timeline stays readable.
@@ -748,9 +752,13 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Diff { thread, paths, scope } => {
-            let params =
-                ThreadDiffParams { thread_id: ThreadId::new(thread), paths, scope: scope.scope() };
+        ThreadCommand::Diff { thread, paths, scope, full } => {
+            let params = ThreadDiffParams {
+                thread_id: ThreadId::new(thread),
+                paths,
+                scope: scope.scope(),
+                full,
+            };
             let result = client.call::<ThreadDiff>(params).await?;
             if json {
                 print_json(&result)?;

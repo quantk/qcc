@@ -1251,6 +1251,12 @@ export type ThreadDiffParams = {
 	paths?: string[],
 	/**  Which part of the work; all of it when absent. */
 	scope?: ChangeScope,
+	/**
+	 *  Each changed file whole, its unchanged lines as context around the changes,
+	 *  instead of a few lines around each change. Meant for a file or two at a time:
+	 *  the diff of every file in full soon hits the size limit.
+	 */
+	full?: boolean,
 };
 
 export type ThreadDiffResult = {

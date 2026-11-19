@@ -914,6 +914,8 @@ pub struct Inspect {
     diff: bool,
     paths: Vec<String>,
     scope: ChangeScope,
+    /// The diff shows whole files: see [`Diff::whole_files`].
+    full: bool,
     /// The job that does the work, once the top of the checkout is known.
     inner: Option<Box<Job>>,
 }
@@ -923,7 +925,14 @@ const TOPLEVEL_OF: u32 = u32::MAX;
 
 impl Inspect {
     pub fn new(cwd: String, diff: bool, paths: Vec<String>, scope: ChangeScope) -> Self {
-        Self { cwd, diff, paths, scope, inner: None }
+        Self { cwd, diff, paths, scope, full: false, inner: None }
+    }
+
+    /// The diff, when asked for, shows whole files: see [`Diff::whole_files`].
+    #[must_use]
+    pub fn whole_files(mut self, full: bool) -> Self {
+        self.full = full;
+        self
     }
 
     fn start(&mut self) -> Step {
@@ -955,7 +964,7 @@ impl Inspect {
         let paths = std::mem::take(&mut self.paths);
         let scope = std::mem::replace(&mut self.scope, ChangeScope::All);
         let mut inner = Box::new(if self.diff {
-            Job::Diff(Diff::new(record, paths, scope))
+            Job::Diff(Diff::new(record, paths, scope).whole_files(self.full))
         } else {
             Job::Changes(Changes::new(record, paths, scope))
         });
@@ -1322,12 +1331,20 @@ mod diff {
     pub const NEW_FILE: u32 = 2;
 }
 
+/// Lines of context around each change in a diff of whole files: more than any
+/// file has, so each file's hunks merge into one that runs from its first line to
+/// its last. Far below `i32::MAX`, which git keeps it in, so adding a line number
+/// to it cannot overflow.
+const WHOLE_FILE_CONTEXT: &str = "--unified=100000000";
+
 /// The same changes as one patch, of `paths` alone when there are any. New files
 /// are diffed against nothing, one by one, because git only diffs what it tracks.
 pub struct Diff {
     record: Record,
     paths: Vec<String>,
     scope: ChangeScope,
+    /// Whole files as context: see [`Diff::whole_files`].
+    full: bool,
     tracked: Option<Exit>,
     untracked: Option<Exit>,
     /// New files still to diff, last first.
@@ -1342,12 +1359,22 @@ impl Diff {
             record,
             paths,
             scope,
+            full: false,
             tracked: None,
             untracked: None,
             pending: Vec::new(),
             out: String::new(),
             truncated: false,
         }
+    }
+
+    /// Show each changed file whole, its unchanged lines as the context of one hunk,
+    /// so a viewer can read the changes in place. New files are whole anyway. The
+    /// size limit stays: a large file comes back cut short and says so.
+    #[must_use]
+    pub fn whole_files(mut self, full: bool) -> Self {
+        self.full = full;
+        self
     }
 
     fn start(&mut self) -> Step {
@@ -1357,6 +1384,9 @@ impl Diff {
         };
         let worktree = &self.record.worktree;
         let mut args = vec!["diff", "--no-color", "--no-ext-diff", NO_RENAMES];
+        if self.full {
+            args.push(WHOLE_FILE_CONTEXT);
+        }
         args.extend(ends.args());
         let mut tracked = only(git(diff::TRACKED, worktree, &args), &self.paths);
         tracked.limit = DIFF_LIMIT;
@@ -1922,6 +1952,65 @@ mod tests {
         let first = run(job.start());
         assert!(
             first[..3].iter().all(|cmd| cmd.args.ends_with(&["src/*.rs".into(), "new.txt".into()]))
+        );
+    }
+
+    #[test]
+    fn a_diff_of_whole_files_asks_git_for_all_their_lines() {
+        let mut job = Diff::new(record(), vec!["a.txt".into()], ChangeScope::All).whole_files(true);
+        let first = run(job.start());
+        assert_eq!(
+            first[0].args[2..],
+            [
+                "diff",
+                "--no-color",
+                "--no-ext-diff",
+                NO_RENAMES,
+                WHOLE_FILE_CONTEXT,
+                "abc123",
+                "--",
+                "a.txt"
+            ]
+        );
+        // `ls-files` lists files, it does not diff them.
+        assert!(!first[1].args.iter().any(|arg| arg == WHOLE_FILE_CONTEXT));
+        // A new file is whole anyway, and diffed the same way as without the flag.
+        assert_eq!(job.on_exit(diff::UNTRACKED, out("a.txt\0")), Step::Wait);
+        let next = run(job.on_exit(diff::TRACKED, out("")));
+        assert_eq!(
+            &next[0].args[2..],
+            ["diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", "a.txt"]
+        );
+        assert_eq!(next[0].limit, DIFF_LIMIT);
+
+        // Without the flag, git keeps its few lines of context.
+        let first = run(Diff::new(record(), Vec::new(), ChangeScope::All).start());
+        assert!(!first[0].args.iter().any(|arg| arg == WHOLE_FILE_CONTEXT));
+    }
+
+    #[test]
+    fn an_inspected_checkout_can_show_whole_files_too() {
+        let mut job = Inspect::new("/src/app/web".into(), true, Vec::new(), ChangeScope::All)
+            .whole_files(true);
+        job.start();
+        let first = run(job.on_exit(TOPLEVEL_OF, out("/src/app\n")));
+        assert!(first[0].args.iter().any(|arg| arg == WHOLE_FILE_CONTEXT), "{:?}", first[0].args);
+    }
+
+    #[test]
+    fn a_whole_file_too_large_is_cut_and_says_so() {
+        let mut job = Diff::new(record(), vec!["big".into()], ChangeScope::All).whole_files(true);
+        let first = run(job.start());
+        assert_eq!(first[0].limit, DIFF_LIMIT);
+        job.on_exit(diff::UNTRACKED, out(""));
+        let big = Exit { code: None, truncated: true, ..out("diff --git a/big b/big\n") };
+        let step = job.on_exit(diff::TRACKED, big);
+        assert_eq!(
+            step,
+            Step::Finish(Ok(Answer::Diff {
+                diff: "diff --git a/big b/big\n".into(),
+                truncated: true
+            }))
         );
     }
 

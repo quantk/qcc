@@ -1592,8 +1592,13 @@ fn a_thread_moves_into_a_worktree_where_the_user_says() {
 #[test]
 fn a_thread_in_a_checkout_of_its_own_reports_what_is_uncommitted_there() {
     let dir = tempfile::tempdir().unwrap();
-    let repo = repo(dir.path(), &[("README.md", "hello\n"), ("src/a.txt", "one\n")]);
+    let long: String = (1..=20).map(|n| format!("line {n}\n")).collect();
+    let repo = repo(
+        dir.path(),
+        &[("README.md", "hello\n"), ("src/a.txt", "one\n"), ("src/long.txt", &long)],
+    );
     write(repo.join("src/a.txt"), "one\ntwo\n");
+    write(repo.join("src/long.txt"), &long.replace("line 10\n", "line ten\n"));
     write(repo.join("src/new.txt"), "new\n");
     let daemon = Daemon::start(&dir.path().join("data"));
     let cwd = repo.join("src");
@@ -1626,12 +1631,20 @@ fn a_thread_in_a_checkout_of_its_own_reports_what_is_uncommitted_there() {
         files,
         [
             ("src/a.txt".to_owned(), "modified".to_owned()),
+            ("src/long.txt".to_owned(), "modified".to_owned()),
             ("src/new.txt".to_owned(), "untracked".to_owned())
         ]
     );
     let diff = daemon.qcc(&["thread", "diff", &id]);
     assert!(diff.ok, "{}", diff.stderr);
     assert!(diff.stdout.contains("+two") && diff.stdout.contains("+new"), "{}", diff.stdout);
+    // A few lines around the change by default; the whole file with `--full`.
+    assert!(!diff.stdout.contains(" line 1\n"), "{}", diff.stdout);
+    let full = daemon.qcc(&["thread", "diff", &id, "--full", "src/long.txt", "src/new.txt"]);
+    assert!(full.ok, "{}", full.stderr);
+    assert!(full.stdout.contains("@@ -1,20 +1,20 @@\n line 1\n"), "{}", full.stdout);
+    assert!(full.stdout.contains("-line 10\n+line ten\n") && full.stdout.contains(" line 20\n"));
+    assert!(full.stdout.contains("+new\n") && !full.stdout.contains("+two"), "{}", full.stdout);
 }
 
 #[test]

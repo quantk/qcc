@@ -230,7 +230,12 @@ impl Core {
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadDiff::NAME => match params::<ThreadDiff>(raw) {
-                Ok(p) => self.environment_query(&p.thread_id, p.scope, Some(p.paths), responder),
+                Ok(p) => self.environment_query(
+                    &p.thread_id,
+                    p.scope,
+                    Some((p.paths, p.full)),
+                    responder,
+                ),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadGet::NAME => {

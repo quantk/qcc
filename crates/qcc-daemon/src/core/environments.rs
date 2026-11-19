@@ -216,13 +216,14 @@ impl Core {
         Ok((plugin.clone(), info.id.clone(), thread.cwd.clone(), true))
     }
 
-    /// `thread.changes`, or with `diff` (the paths to diff, all when empty)
-    /// `thread.diff`, of the part of the work `scope` names: answered by an environment plugin, off the core task.
+    /// `thread.changes`, or with `diff` (the paths to diff, all when empty, and
+    /// whether whole files) `thread.diff`, of the part of the work `scope` names:
+    /// answered by an environment plugin, off the core task.
     pub(super) fn environment_query(
         &mut self,
         id: &ThreadId,
         scope: ChangeScope,
-        diff: Option<Vec<String>>,
+        diff: Option<(Vec<String>, bool)>,
         responder: Responder,
     ) {
         let (plugin, environment, cwd, inspect) = match self.changes_source(id) {
@@ -231,7 +232,9 @@ impl Core {
         };
         let thread = id.clone();
         let request = match diff {
-            Some(paths) => EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope },
+            Some((paths, full)) => {
+                EnvironmentRequest::Diff { thread, cwd, inspect, paths, scope, full }
+            }
             None => EnvironmentRequest::Changes { thread, cwd, inspect, scope },
         };
         tokio::spawn(async move {

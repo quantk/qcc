@@ -45,6 +45,7 @@ qcc thread diff <thread-id>        # everything as one patch: commits, uncommitt
 qcc thread diff <thread-id> src/a.rs src/b.rs   # only these files (paths as in thread changes)
 qcc thread diff <thread-id> --uncommitted        # only what is not committed yet
 qcc thread diff <thread-id> --from <commit> --to <commit>   # a run of the thread's commits
+qcc thread diff <thread-id> --full src/a.rs     # the whole file as context, not 3 lines around each change
 qcc thread archive <thread-id>     # release the session, delete the worktree, remove the thread from the list
 ```
 
@@ -66,7 +67,8 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
   answers with an error.
 - The whole patch is limited to 2 MB, and a large lockfile can push the other files out of it, so
   `thread diff` accepts paths: the app reads the diff a few files at a time, the ones that are
-  visible.
+  visible. `--full` makes each file one hunk from its first line to its last; the 2 MB limit
+  still holds, so it is meant for a file or two at a time.
 - `.worktreeinclude` in the repository root (gitignore syntax) lists untracked files of the main
   checkout that are copied into a new worktree: `.env`, certificates.
 - **Bringing the work back into your checkout**: `qcc thread deliver <id>` applies everything the

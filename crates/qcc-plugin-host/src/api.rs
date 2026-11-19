@@ -116,6 +116,8 @@ pub enum EnvironmentRequest {
         /// Only these files; every file when empty.
         paths: Vec<String>,
         scope: ChangeScope,
+        /// Whole files as context, not a few lines around each change.
+        full: bool,
     },
     /// Answered with [`Outcome::EnvironmentDelivered`].
     Deliver {

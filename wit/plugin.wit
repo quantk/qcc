@@ -739,6 +739,9 @@ interface types {
     paths: list<string>,
     /// Which part of the work to tell.
     scope: change-scope,
+    /// For `diff`: each file whole, its unchanged lines as context around the
+    /// changes, instead of a few lines around each change. `changes` ignores it.
+    full: bool,
   }
 
   /// Which part of a thread's work `changes` and `diff` tell.

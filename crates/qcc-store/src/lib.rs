@@ -759,6 +759,7 @@ mod tests {
             created_at,
             resolved_at: None,
             resolution: None,
+            author: None,
         };
         let mut first = comment("c1", "a", 10);
         store.save_comment(&comment("c2", "a", 20)).unwrap();

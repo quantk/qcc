@@ -119,6 +119,8 @@ pub enum UiPlacement {
     App,
     /// A tab of the thread view.
     ThreadTab,
+    /// A tab of the panel beside the thread view.
+    ThreadPanel,
 }
 
 /// Which threads a thread tab is offered for.

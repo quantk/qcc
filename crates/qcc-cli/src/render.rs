@@ -362,6 +362,8 @@ pub fn plugin(plugin: &PluginInfo) -> String {
         ("timers", permissions.timers),
         ("threads", permissions.threads),
         ("skills", permissions.skills),
+        ("turn-events", permissions.turn_events),
+        ("comments", permissions.comments),
     ] {
         if on {
             granted.push(name.to_owned());

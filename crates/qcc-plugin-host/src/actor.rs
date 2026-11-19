@@ -123,6 +123,11 @@ impl PluginHandle {
     /// Deliver an event nobody waits on, like process output: the plugin's answer is
     /// only logged.
     pub fn post(&self, request: PluginRequest) -> Result<(), PluginError> {
+        // Every turn of every thread is not news for a plugin that did not ask.
+        if matches!(request, PluginRequest::TurnEnded { .. }) && !self.inner.permissions.turn_events
+        {
+            return Ok(());
+        }
         self.inner
             .tx
             .send(Message::Internal(convert::event(request, |id| self.takes_images(id))))
@@ -192,6 +197,7 @@ pub(crate) fn spawn(
         next_timer: 0,
         processes: HashMap::new(),
         next_process: 0,
+        next_request: 0,
         deferred: HashMap::new(),
         early: HashMap::new(),
         output: Arc::default(),
@@ -238,6 +244,8 @@ struct State {
     next_timer: u64,
     processes: HashMap<u64, Box<dyn ProcessHandle>>,
     next_process: u64,
+    /// The last id given out by `threads.diff`.
+    next_request: u64,
     /// Callers waiting for an answer the plugin deferred, by the plugin's token.
     deferred: HashMap<u64, Reply>,
     /// Answers given during the very `handle` call that defers them: the token is
@@ -714,6 +722,63 @@ impl imports::threads::Host for State {
 
     fn watch(&mut self, thread: String) -> Result<(), String> {
         self.threads(ThreadsCall::Watch(ThreadId(thread))).map(|_| ())
+    }
+
+    fn diff(&mut self, thread: String) -> Result<u64, String> {
+        let request = self.next_request + 1;
+        self.threads(ThreadsCall::Diff { thread: ThreadId(thread), request })?;
+        self.next_request = request;
+        Ok(request)
+    }
+
+    fn set_skill(&mut self, thread: String, skill: String, enabled: bool) -> Result<(), String> {
+        self.threads(ThreadsCall::SetSkill { thread: ThreadId(thread), skill, enabled }).map(|_| ())
+    }
+
+    fn providers(&mut self) -> Result<Vec<wit::ProviderInfo>, String> {
+        match self.threads(ThreadsCall::Providers)? {
+            ThreadsAnswer::Providers(providers) => {
+                Ok(providers.into_iter().map(convert::provider_info).collect())
+            }
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+}
+
+impl State {
+    /// A `comments` call, which goes to the core the way `threads` calls do.
+    fn comments(&self, call: ThreadsCall) -> Result<ThreadsAnswer, String> {
+        if !self.permissions.comments {
+            return Err(self.denied("comments"));
+        }
+        (self.services.threads)(&self.plugin_id, call)
+    }
+}
+
+impl imports::comments::Host for State {
+    fn add(
+        &mut self,
+        comment: imports::comments::NewComment,
+    ) -> Result<imports::comments::LineComment, String> {
+        let comment = convert::new_comment(&self.plugin_id, comment);
+        match self.comments(ThreadsCall::AddComment(comment))? {
+            ThreadsAnswer::Comment(comment) => Ok(convert::line_comment(*comment)),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+
+    fn list(
+        &mut self,
+        thread: String,
+        include_resolved: bool,
+    ) -> Result<Vec<imports::comments::LineComment>, String> {
+        let call = ThreadsCall::ListComments { thread: ThreadId(thread), include_resolved };
+        match self.comments(call)? {
+            ThreadsAnswer::Comments(comments) => {
+                Ok(comments.into_iter().map(convert::line_comment).collect())
+            }
+            other => Err(format!("unexpected answer {other:?}")),
+        }
     }
 }
 

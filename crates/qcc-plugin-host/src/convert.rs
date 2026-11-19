@@ -9,13 +9,15 @@ use qcc_domain::{
     Revision, Role, SkillInfo, TextChannel, ThreadId, ThreadState, TokenUsage, TranscriptEntry,
     TurnStatus, UiPlacement, UiScope, UiViewInfo, UsageSnapshot, UserInput,
 };
+use qcc_domain::{CommentAuthor, DiffSide, LineComment};
 use qcc_domain::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 use qcc_domain::{LimitStatus, LimitWindow, RateLimits};
 
 use crate::api::{
-    Contribution, EnvironmentRequest, Outcome, PluginRequest, ProviderRequest, SessionStart,
-    SettledThread, SpawnThread, ThreadSummary, UiRequest,
+    Contribution, EnvironmentRequest, NewComment, Outcome, PluginRequest, ProviderRequest,
+    SessionStart, SettledThread, SpawnThread, ThreadSummary, UiRequest,
 };
+use crate::bindings::qcc::plugin::comments as wit_comments;
 use crate::bindings::qcc::plugin::threads as wit_threads;
 use crate::bindings::wit;
 
@@ -44,6 +46,14 @@ fn item_status(status: wit::ItemStatus) -> ItemStatus {
         wit::ItemStatus::Failed => ItemStatus::Failed,
         wit::ItemStatus::Declined => ItemStatus::Declined,
         wit::ItemStatus::Interrupted => ItemStatus::Interrupted,
+    }
+}
+
+fn turn_status_to_wit(status: TurnStatus) -> wit::TurnStatus {
+    match status {
+        TurnStatus::Completed => wit::TurnStatus::Completed,
+        TurnStatus::Failed => wit::TurnStatus::Failed,
+        TurnStatus::Interrupted => wit::TurnStatus::Interrupted,
     }
 }
 
@@ -279,6 +289,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
             placement: match view.placement {
                 wit::UiPlacement::App => UiPlacement::App,
                 wit::UiPlacement::ThreadTab => UiPlacement::ThreadTab,
+                wit::UiPlacement::ThreadPanel => UiPlacement::ThreadPanel,
             },
             scope: match view.scope {
                 wit::UiScope::AllThreads => UiScope::AllThreads,
@@ -383,11 +394,84 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
             ThreadState::Failed => wit::ThreadState::Failed,
             ThreadState::Archived => wit::ThreadState::Archived,
         },
-        last_turn: thread.last_turn_status.map(|status| match status {
-            TurnStatus::Completed => wit::TurnStatus::Completed,
-            TurnStatus::Failed => wit::TurnStatus::Failed,
-            TurnStatus::Interrupted => wit::TurnStatus::Interrupted,
-        }),
+        last_turn: thread.last_turn_status.map(turn_status_to_wit),
+    }
+}
+
+pub(crate) fn provider_info(info: ProviderInfo) -> wit::ProviderInfo {
+    let c = info.capabilities;
+    wit::ProviderInfo {
+        id: info.id.0,
+        name: info.name,
+        capabilities: wit::ProviderCapabilities {
+            resume: c.resume,
+            steer: c.steer,
+            permission_modes: c.permission_modes.into_iter().map(mode_to_wit).collect(),
+            mcp_live: c.mcp_live,
+            compact: c.compact,
+            list_skills: c.list_skills,
+            context_usage: c.context_usage,
+            images: c.images,
+            rate_limits: c.rate_limits,
+        },
+    }
+}
+
+fn author_from_wit(plugin: &str, author: wit_comments::CommentAuthor) -> CommentAuthor {
+    CommentAuthor {
+        plugin: plugin.to_owned(),
+        name: author.name,
+        thread: author.thread.map(ThreadId),
+        severity: author.severity,
+        stale: author.stale,
+    }
+}
+
+/// A comment as a plugin leaves it; `plugin` is the caller, which the host knows.
+pub(crate) fn new_comment(plugin: &str, comment: wit_comments::NewComment) -> NewComment {
+    NewComment {
+        thread: ThreadId(comment.thread),
+        path: comment.path,
+        line: comment.line,
+        side: match comment.side {
+            wit_comments::DiffSide::Old => DiffSide::Old,
+            wit_comments::DiffSide::New => DiffSide::New,
+        },
+        quote: comment.quote,
+        text: comment.text,
+        author: author_from_wit(plugin, comment.author),
+    }
+}
+
+pub(crate) fn line_comment(comment: LineComment) -> wit_comments::LineComment {
+    let (plugin, author) = match comment.author {
+        Some(author) => (
+            Some(author.plugin),
+            Some(wit_comments::CommentAuthor {
+                name: author.name,
+                thread: author.thread.map(|thread| thread.0),
+                severity: author.severity,
+                stale: author.stale,
+            }),
+        ),
+        None => (None, None),
+    };
+    wit_comments::LineComment {
+        id: comment.id.0,
+        thread: comment.thread_id.0,
+        path: comment.path,
+        line: comment.line,
+        side: match comment.side {
+            DiffSide::Old => wit_comments::DiffSide::Old,
+            DiffSide::New => wit_comments::DiffSide::New,
+        },
+        quote: comment.quote,
+        text: comment.text,
+        created_at: comment.created_at,
+        resolved_at: comment.resolved_at,
+        resolution: comment.resolution,
+        plugin,
+        author,
     }
 }
 
@@ -625,6 +709,17 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
             wit::Event::Command(wit::CommandCall { command, thread: thread.map(|t| t.0), args })
         }
         PluginRequest::Settings(values) => wit::Event::Settings(values),
+        PluginRequest::TurnEnded { summary, status } => wit::Event::TurnEnded(wit::TurnEnded {
+            thread: thread_info(*summary),
+            status: turn_status_to_wit(status),
+        }),
+        PluginRequest::ThreadDiff { request, thread, answer } => {
+            wit::Event::ThreadDiff(wit::ThreadDiff {
+                request,
+                thread: thread.0,
+                answer: answer.map(|(diff, truncated)| wit::EnvironmentDiff { diff, truncated }),
+            })
+        }
         PluginRequest::ThreadSettled(settled) => {
             let SettledThread { summary, last_message } = *settled;
             wit::Event::ThreadSettled(wit::SettledThread {

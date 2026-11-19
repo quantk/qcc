@@ -1087,6 +1087,12 @@ pub struct PluginPermissions {
     pub timers: bool,
     pub threads: bool,
     pub skills: bool,
+    /// Hears of every turn that ends.
+    #[serde(default)]
+    pub turn_events: bool,
+    /// Leaves and reads comments on lines of threads' changes.
+    #[serde(default)]
+    pub comments: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
 }

@@ -2,10 +2,10 @@
 //! crate.
 
 use qcc_domain::{
-    AgentSkill, ChangeScope, CommandInfo, DeliverMode, EnvironmentChanges, EnvironmentInfo,
-    InteractionResolution, McpServer, ModelInfo, PermissionMode, ProviderId, ProviderInfo,
-    RateLimits, SettingField, SkillInfo, SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry,
-    UiViewInfo, UserInput,
+    AgentSkill, ChangeScope, CommandInfo, CommentAuthor, DeliverMode, DiffSide, EnvironmentChanges,
+    EnvironmentInfo, InteractionResolution, LineComment, McpServer, ModelInfo, PermissionMode,
+    ProviderId, ProviderInfo, RateLimits, SettingField, SkillInfo, SkillRef, Thread, ThreadId,
+    ThreadState, TranscriptEntry, TurnStatus, UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +170,19 @@ pub enum PluginRequest {
     /// The plugin's settings, by id, defaults filled in. Posted like
     /// [`PluginRequest::ThreadSettled`].
     Settings(Vec<(String, String)>),
+    /// A turn of some thread ended; for plugins with the `turn_events` permission.
+    /// Posted like [`PluginRequest::ThreadSettled`].
+    TurnEnded {
+        summary: Box<ThreadSummary>,
+        status: TurnStatus,
+    },
+    /// The answer to a [`ThreadsCall::Diff`]. Posted like
+    /// [`PluginRequest::ThreadSettled`].
+    ThreadDiff {
+        request: u64,
+        thread: ThreadId,
+        answer: Result<(String, bool), String>,
+    },
 }
 
 /// A thread as plugins see it: the projection and where it is.
@@ -189,10 +202,46 @@ pub struct SettledThread {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadsCall {
     Spawn(SpawnThread),
-    Send { thread: ThreadId, text: String },
+    Send {
+        thread: ThreadId,
+        text: String,
+    },
     Get(ThreadId),
     Transcript(ThreadId),
     Watch(ThreadId),
+    /// Ask for the thread's diff; the answer is posted as
+    /// [`PluginRequest::ThreadDiff`] with `request`, which the host picks.
+    Diff {
+        thread: ThreadId,
+        request: u64,
+    },
+    /// Turn one of the plugin's own skills on or off in a thread.
+    SetSkill {
+        thread: ThreadId,
+        skill: String,
+        enabled: bool,
+    },
+    Providers,
+    /// The `comments` import, checked against the `comments` permission instead.
+    AddComment(NewComment),
+    /// The `comments` import: the thread's comments, resolved ones if asked for.
+    ListComments {
+        thread: ThreadId,
+        include_resolved: bool,
+    },
+}
+
+/// A comment a plugin leaves. Its author's `plugin` is the caller, whatever the
+/// plugin says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewComment {
+    pub thread: ThreadId,
+    pub path: String,
+    pub line: u32,
+    pub side: DiffSide,
+    pub quote: Option<String>,
+    pub text: String,
+    pub author: CommentAuthor,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -217,6 +266,9 @@ pub enum ThreadsAnswer {
     Done,
     Thread(Box<ThreadSummary>),
     Transcript(Vec<TranscriptEntry>),
+    Providers(Vec<ProviderInfo>),
+    Comment(Box<LineComment>),
+    Comments(Vec<LineComment>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

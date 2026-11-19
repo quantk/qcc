@@ -38,6 +38,27 @@ pub struct LineComment {
     /// What was done about it, in the words of whoever resolved it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<String>,
+    /// Who left it when it was not the user: a plugin, such as a reviewer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<CommentAuthor>,
+}
+
+/// A comment left by a plugin rather than by the user. The daemon sets `plugin`
+/// itself, so no plugin can pass its remarks off as another's.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CommentAuthor {
+    pub plugin: String,
+    /// Who in the plugin: a reviewer's name.
+    pub name: String,
+    /// The thread whose work the comment is, such as a reviewer's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadId>,
+    /// How much it matters, in the plugin's own words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub severity: Option<String>,
+    /// The changes moved on while the comment was being made: the line may be off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 impl LineComment {

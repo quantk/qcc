@@ -7,7 +7,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::Context;
 use qcc_domain::{
     AgentSkill, Automation, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
-    ProviderLimits, RateLimits, ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, UserInput,
+    ProviderLimits, RateLimits, ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
+    UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Outcome, PluginError, PluginHandle, PluginHost, PluginRequest,
@@ -327,6 +328,8 @@ pub(crate) struct Core {
     waiters: Vec<Waiter>,
     next_waiter: u64,
     watches: Vec<Watch>,
+    /// Turns that ended since plugins were last told, oldest first.
+    turn_ends: Vec<(ThreadId, TurnStatus)>,
     /// Skills plugins offer, written out where agents can read them.
     skills: Vec<plugins::OfferedSkill>,
     /// Oldest first.
@@ -457,6 +460,7 @@ impl Core {
             waiters: Vec::new(),
             next_waiter: 0,
             watches: Vec::new(),
+            turn_ends: Vec::new(),
             skills,
             models: HashMap::new(),
             agent_skills: HashMap::new(),
@@ -490,6 +494,7 @@ impl Core {
             self.release_idle();
             self.drain_queues();
             self.settle_waits();
+            self.announce_turn_ends();
             if let Some(error) = self.fatal.take() {
                 return Err(error);
             }
@@ -602,6 +607,11 @@ impl Core {
                     let params = ThreadUpdatedNotification { subscription, thread: thread.clone() };
                     notify(&watcher.out, THREAD_UPDATED, params)
                 });
+            }
+        }
+        for event in &events {
+            if let EventPayload::TurnCompleted { status, .. } = &event.payload {
+                self.turn_ends.push((event.thread_id.clone(), *status));
             }
         }
         for event in events {

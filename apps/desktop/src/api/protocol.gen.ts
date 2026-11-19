@@ -286,6 +286,22 @@ export type CommentAddParams = {
 	text: string,
 };
 
+/**
+ *  A comment left by a plugin rather than by the user. The daemon sets `plugin`
+ *  itself, so no plugin can pass its remarks off as another's.
+ */
+export type CommentAuthor = {
+	plugin: string,
+	/**  Who in the plugin: a reviewer's name. */
+	name: string,
+	/**  The thread whose work the comment is, such as a reviewer's. */
+	thread?: ThreadId | null,
+	/**  How much it matters, in the plugin's own words. */
+	severity?: string | null,
+	/**  The changes moved on while the comment was being made: the line may be off. */
+	stale?: boolean,
+};
+
 export type CommentDeleteParams = {
 	comment_id: CommentId,
 };
@@ -647,6 +663,8 @@ export type LineComment = {
 	resolved_at?: number | null,
 	/**  What was done about it, in the words of whoever resolved it. */
 	resolution?: string | null,
+	/**  Who left it when it was not the user: a plugin, such as a reviewer. */
+	author?: CommentAuthor | null,
 };
 
 export type McpServerSettings = {
@@ -799,6 +817,10 @@ export type PluginPermissions = {
 	timers: boolean,
 	threads: boolean,
 	skills: boolean,
+	/**  Hears of every turn that ends. */
+	turn_events?: boolean,
+	/**  Leaves and reads comments on lines of threads' changes. */
+	comments?: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
 };
@@ -1728,7 +1750,9 @@ export type UiPlacement =
 /**  A screen of its own, next to the overview. */
 "app" | 
 /**  A tab of the thread view. */
-"threadTab";
+"threadTab" | 
+/**  A tab of the panel beside the thread view. */
+"threadPanel";
 
 export type UiRenderItemParams = {
 	plugin: string,

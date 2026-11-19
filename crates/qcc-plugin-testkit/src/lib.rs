@@ -7,7 +7,11 @@
 //! * [`Harness::conformance`] checks the rules every bridge owes the core;
 //! * [`Harness::assert_golden`] compares the assembled timeline with a recorded one;
 //! * [`ScriptedProcesses`] replays recorded agent traffic instead of running the agent.
+//!
+//! Plugins that are not bridges run on a [`Bench`], where the test answers for the
+//! daemon.
 
+mod bench;
 mod scripted;
 
 use std::path::Path;
@@ -27,6 +31,8 @@ use qcc_plugin_host::{
 pub use qcc_plugin_host::{Outcome, ProviderRequest};
 use qcc_runtime::{GrammarViolation, NewThread, SequentialMint, ThreadEngine, Timeline};
 
+pub use bench::{Bench, BenchBuilder, Daemon};
+pub use qcc_plugin_host::{ThreadSummary, ThreadsAnswer, ThreadsCall};
 pub use scripted::{ScriptStep, ScriptedProcesses, message_key, script_from_recording};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);

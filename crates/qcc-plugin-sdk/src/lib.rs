@@ -503,6 +503,11 @@ pub trait Plugin: Default + 'static {
         let _ = diff;
     }
 
+    /// The comments on a thread's changes changed. Needs the `comments` permission.
+    fn on_comments_changed(&mut self, thread: String) {
+        let _ = thread;
+    }
+
     /// The changed files asked for with [`threads::changes`].
     fn on_thread_changes(&mut self, changes: ThreadChanges) {
         let _ = changes;
@@ -670,6 +675,10 @@ pub mod __private {
             }
             Event::ThreadDiff(diff) => {
                 plugin.on_thread_diff(diff);
+                Ok(Outcome::Done)
+            }
+            Event::CommentsChanged(thread) => {
+                plugin.on_comments_changed(thread);
                 Ok(Outcome::Done)
             }
             Event::ThreadChanges(changes) => {

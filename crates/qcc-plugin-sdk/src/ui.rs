@@ -184,6 +184,25 @@ pub fn select<V: Into<String>, L: Into<String>>(
     )
 }
 
+/// Text that opens a place in the app when clicked: a thread, or with `path` (and
+/// `line`) that file of the thread's changes. The app decides how it opens it; a
+/// plugin cannot point anywhere else.
+pub fn link(
+    label: impl Into<String>,
+    thread: impl Into<String>,
+    path: Option<&str>,
+    line: Option<u32>,
+) -> Node {
+    let mut node = Node::new("link", json!({ "label": label.into(), "thread": thread.into() }));
+    if let Some(path) = path {
+        node = node.with("path", path);
+    }
+    if let Some(line) = line {
+        node = node.with("line", line);
+    }
+    node
+}
+
 /// An on/off switch: `action` arrives with `"true"` or `"false"`, what it is now.
 pub fn switch(label: impl Into<String>, on: bool, action: impl Into<String>) -> Node {
     Node::new("switch", json!({ "label": label.into(), "checked": on, "action": action.into() }))
@@ -203,6 +222,7 @@ mod tests {
             input("note", "Save", "save"),
             select("Agent", [("codex", "Codex")], "codex", "agent"),
             switch("On", true, "on"),
+            link("a.rs:3", "thr_1", Some("a.rs"), Some(3)),
         ]);
         assert_eq!(
             tree.to_value(),
@@ -220,6 +240,7 @@ mod tests {
                     { "type": "select", "label": "Agent", "value": "codex", "action": "agent",
                       "options": [{ "value": "codex", "label": "Codex" }] },
                     { "type": "switch", "label": "On", "checked": true, "action": "on" },
+                    { "type": "link", "label": "a.rs:3", "thread": "thr_1", "path": "a.rs", "line": 3 },
                 ],
             })
         );

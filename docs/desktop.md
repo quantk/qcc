@@ -139,7 +139,8 @@ passes the open comments to the agent (see
 agent are shown struck through, with its note. You can also resolve, reopen or delete a comment
 yourself. A comment a reviewer left (see [Reviewers](reviewers.md)) carries the reviewer's name and
 the severity it gave; **Outdated** means the changes moved on while it looked, so the line may be
-off. A click on the name opens the reviewer's thread.
+off. A click on the name opens the reviewer's thread. **Sent** marks an open comment already handed
+to the agent.
 
 ### Right panel
 
@@ -159,9 +160,13 @@ off. A click on the name opens the reviewer's thread.
   and read files, tools, MCP calls by server, skills used and programs run (count, failures; the
   tooltip has the average and longest time).
 - "Details": agent, model, effort, permission mode, session id, directory and environment, dates.
-- "Reviewers" (the `reviewers` plugin): whether and how the thread is reviewed — profiles, agent,
-  delivery, trigger, delay, rounds at most — the rounds it had, and **Review now** (see
-  [Reviewers](reviewers.md)). Plugins can add tabs here the same way.
+- "Reviewers" (the `reviewers` plugin): **Run a review**, how each reviewer of the running round
+  gets on, and the findings of every round with their status (open, sent, fixed, dismissed),
+  grouped by reviewer or severity; `file:line` opens that line in Changes; findings are sent,
+  dismissed and restored here. Below, how the thread is reviewed: profiles, agent, model and
+  effort, delivery, trigger, delay, rounds at most, and the rounds' history (see
+  [Reviewers](reviewers.md)). Reviewers themselves are service threads, kept out of the sidebar
+  and the overview; "reasoning" opens one. Plugins can add tabs here the same way.
 
 In a narrow window the panel opens over the thread, and `Esc` closes it. This is the default
 layout: the panel's tabs are blocks like everything else (see [Block layout](#block-layout)).

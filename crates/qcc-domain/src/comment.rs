@@ -38,6 +38,9 @@ pub struct LineComment {
     /// What was done about it, in the words of whoever resolved it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolution: Option<String>,
+    /// When it was last handed to the agent with a message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_at: Option<u64>,
     /// Who left it when it was not the user: a plugin, such as a reviewer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub author: Option<CommentAuthor>,

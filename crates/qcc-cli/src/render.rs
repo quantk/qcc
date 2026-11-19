@@ -114,7 +114,11 @@ pub fn command(command: &CommandContribution) -> String {
         usage.push_str(" --thread <id>");
     }
     for param in &info.params {
-        let flag = format!("--{} <{}>", param.name, param.label.to_lowercase());
+        let flag = if param.positional {
+            format!("<{}>…", param.label.to_lowercase())
+        } else {
+            format!("--{} <{}>", param.name, param.label.to_lowercase())
+        };
         usage.push_str(&if param.required { format!(" {flag}") } else { format!(" [{flag}]") });
     }
     format!("{usage}\n  {}", info.description)

@@ -100,7 +100,8 @@ Whatever the trigger, a round starts only if:
 
 ## Reviewers
 
-Each profile of a round is a child thread of the reviewed one, in its directory, in the
+Each profile of a round is a service thread under the reviewed one (hidden: not in the sidebar,
+the overview or `qcc thread list` without `--hidden`; the panel opens it), in its directory, in the
 **`read-only`** permission mode (see [Permission mode](agents.md#permission-mode)): it reads and
 looks around, nothing that changes a file runs, and it never stops to ask you. Claude Code, Codex
 and opencode can run that way. An agent that cannot runs its reviewer in `ask` mode instead, and
@@ -123,24 +124,59 @@ From the second round on, a reviewer is pointed only at the files changed since 
 and told what it found before with what became of it (resolved, with the agent's note, or still open), so it checks
 the fixes instead of starting over.
 
+## The panel
+
+The **Reviewers** tab of the panel beside the thread is where reviews are followed; there is no
+other thread to switch to. From the top:
+
+- **Run a review** and the rounds so far. While a round runs, each reviewer has a line: *looking…*,
+  *waiting for your approval* (an agent that cannot run read-only), *done, N findings* or
+  *error*. "reasoning" opens the reviewer's own thread, to read how it got there; its panel
+  leads back to the reviewed thread.
+- **Findings** of the current and the earlier rounds, grouped by reviewer or by severity, the ones
+  still to do first. Each shows its severity, where it stands, `file:line` (a click opens that line
+  in the Changes tab), **stale** when the changes moved on while the reviewer looked, the reviewer
+  and the round, its text, and the agent's note once fixed.
+- What can be done: **Send** one finding, **Send all open**, or pick some and **Send selected**
+  (one message either way); **Dismiss** a finding that needs nothing; **Restore** a dismissed or
+  fixed one. With **auto** delivery the round's findings are sent on their own, and their statuses
+  show the same.
+- **Settings**: everything of [Setting up a thread](#setting-up-a-thread), and the rounds' history.
+
+The panel draws itself again as a round goes and when a finding's status changes, without
+polling: the plugin tells the app (`views.refresh`).
+
 ## Findings
 
-Once every reviewer of the round answered:
+Once every reviewer of the round answered, each finding gets an id (`f1`, `f2`, … within the
+thread) and a status:
 
-- each finding with a file and a line of the changes becomes a **line comment**, marked with the
-  reviewer's name and severity (Changes tab and panel). The mark opens the reviewer's thread.
-  If the changes moved on while the reviewers worked, the comments are marked **Outdated**: the
-  line may be off. A finding about the change as a whole, or about a file the changes do not touch,
-  stays a remark;
-- a reviewer that did not answer in the format has its reply kept as one remark;
-- with **collect** delivery that is all: **Send to agent** on the Changes tab hands the comments over
-  when you choose;
-- with **auto** delivery the agent also gets **one message** for the whole round (queued if it is
-  working) listing the findings and remarks, each with its comment id. The agent resolves the
-  comments with `qcc comment resolve <id> --note …` as it deals with them.
+| Status | |
+| --- | --- |
+| open | nobody acted on it yet |
+| sent | handed to the agent with a message |
+| fixed | the agent resolved its comment (`qcc comment resolve <id> --note …`); its note is shown |
+| dismissed | you decided it needs nothing |
 
-The panel shows the rounds of the thread, the round running, and why the last attempt started
-nothing.
+- A finding with a file and a line of the changes is also a **line comment** in the Changes tab,
+  marked with the reviewer's name and severity, **Outdated** when stale, **Sent** once handed over.
+  It is the same finding: sending it there with **Send to agent**, resolving or reopening it there,
+  or deleting it (which counts as dismissed) changes its status in the panel, and the other way
+  round. Dismissing resolves the comment with "Dismissed by the user", so the agent sees it closed.
+- A finding about the change as a whole, about a file the changes do not touch, or a reviewer's
+  reply that was not in the format, is a **remark**: in the same list, with no comment. It is sent
+  in the text of the message, and its status is kept by the plugin.
+- Sending hands the comments over the way **Send to agent** does (each in full, with how to
+  resolve it) and lists the remarks in the message.
+
+From the CLI:
+
+```sh
+qcc reviewers findings --thread <id> [--json]   # every finding, with its status
+qcc reviewers send [<finding-id>…] --thread <id> # those named, or every open one, in one message
+qcc reviewers dismiss <finding-id>… --thread <id>
+qcc reviewers restore <finding-id>… --thread <id>
+```
 
 ## How it is built
 
@@ -153,7 +189,9 @@ permissions `kv`, `timers`, `threads`, `turn-events`, `comments`, `files` and `s
   and marks findings stale; `threads.changes` lists the files with their line counts and the
   base for the prompt (both answered later, as events); `threads.spawn` and
   `threads.watch` run the reviewers, `threads.send` delivers the message;
-- `comments.add` leaves the comments; the daemon records the plugin as their author;
+- `comments.add` leaves the comments, with the plugin as their author; `comments.resolve`
+  dismisses and restores them, `comments.send` hands them to the agent as the user's button does
+  (the daemon notes when), and `comments-changed` tells the plugin when anyone changes them;
 - `files` reads the profiles; the panel is a `thread-panel` view built from UI nodes.
 
 Rounds in flight are kept in its key-value store and picked up again after a restart of the

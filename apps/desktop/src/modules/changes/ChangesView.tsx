@@ -3,6 +3,7 @@ import { useMemo } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
 import { readFiles } from "../../state/changes";
+import { useApp } from "../../state/store";
 import { plural } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
@@ -17,6 +18,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
   const files = useMemo(() => readFiles(state), [state]);
   const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
   const review = useReview(thread, files, paths);
+  const focus = useApp((app) => (app.changesFocus?.threadId === thread.id ? app.changesFocus : null));
 
   return (
     <div className="changes">
@@ -64,6 +66,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
           reader={reader}
           state={state}
           review={review}
+          focus={focus}
           inset={20}
           lead={(jump) => (
             <div className="flex flex-col gap-3">

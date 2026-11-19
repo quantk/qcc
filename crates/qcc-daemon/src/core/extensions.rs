@@ -8,10 +8,10 @@ use qcc_plugin_host::{
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, CommentAddParams,
-    Empty, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
-    SendMode, ThreadChangesResult, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams,
-    ThreadSpawnParams, UI_CHANGED, UiChangedNotification, UiContributionsResult,
-    UiItemContribution, UiTreeResult, UiViewContribution,
+    Empty, MessageContext, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams,
+    ProviderSkillsResult, SendMode, ThreadChangesResult, ThreadDiffResult, ThreadSendParams,
+    ThreadSetSkillParams, ThreadSpawnParams, UI_CHANGED, UiChangedNotification,
+    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
@@ -229,6 +229,20 @@ impl Core {
                 .comments_of(&thread, include_resolved)
                 .map(ThreadsAnswer::Comments)
                 .map_err(|error| error.message),
+            ThreadsCall::ResolveComments { ids, resolution, reopen } => self
+                .plugin_resolve_comments(plugin, ids, resolution, reopen)
+                .map(|()| ThreadsAnswer::Done)
+                .map_err(|error| error.message),
+            ThreadsCall::SendComments { thread, ids, text } => self
+                .thread_send(ThreadSendParams {
+                    thread_id: thread,
+                    text,
+                    delivery: SendMode::Queue,
+                    context: vec![MessageContext::Comments { comment_ids: ids }],
+                    attachments: Vec::new(),
+                })
+                .map(|_| ThreadsAnswer::Done)
+                .map_err(|error| error.message),
             ThreadsCall::ReadFile { root, path } => {
                 self.plugin_read_file(plugin, &root, &path).map(ThreadsAnswer::File)
             }
@@ -432,8 +446,17 @@ impl Core {
             let answer = tokio::time::timeout(QUERY_TIMEOUT, plugin.call(request)).await;
             let error = |message: String| RpcError::new(codes::PLUGIN_ERROR, message);
             let result = match answer {
-                Ok(Ok(Outcome::CommandResult { message, thread })) => {
-                    Ok(CommandRunResult { message, thread_id: thread })
+                Ok(Ok(Outcome::CommandResult { message, thread, data })) => {
+                    let data = match data.map(|data| serde_json::from_str::<Value>(&data)) {
+                        Some(Ok(value)) => Some(value),
+                        Some(Err(invalid)) => {
+                            return responder.reply::<Empty>(Err(error(format!(
+                                "the plugin answered with invalid JSON: {invalid}"
+                            ))));
+                        }
+                        None => None,
+                    };
+                    Ok(CommandRunResult { message, thread_id: thread, data })
                 }
                 Ok(Ok(other)) => Err(error(format!("the plugin answered with {other:?}"))),
                 Ok(Err(failure)) => Err(error(failure.to_string())),

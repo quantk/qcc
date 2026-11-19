@@ -266,6 +266,21 @@ impl Core {
         &mut self,
         p: ThreadSendParams,
     ) -> Result<ThreadSendResult, RpcError> {
+        let sent: Vec<qcc_domain::CommentId> = p
+            .context
+            .iter()
+            .flat_map(|context| match context {
+                MessageContext::Comments { comment_ids } => comment_ids.clone(),
+                MessageContext::Thread { .. } => Vec::new(),
+            })
+            .collect();
+        let result = self.send_message(p)?;
+        // The comments went to the agent along with it.
+        self.comments_sent(&sent);
+        Ok(result)
+    }
+
+    fn send_message(&mut self, p: ThreadSendParams) -> Result<ThreadSendResult, RpcError> {
         let ThreadSendParams { thread_id, text, delivery, context, attachments } = p;
         if text.trim().is_empty() && attachments.is_empty() {
             return Err(RpcError::new(codes::INVALID_PARAMS, "the message is empty"));

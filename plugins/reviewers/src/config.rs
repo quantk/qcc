@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::findings::{Finding, Severity};
+use crate::ledger::{Grouping, Record};
 use crate::profile::Delivery;
 
 /// When a review starts on its own.
@@ -90,6 +91,8 @@ pub struct ThreadConfig {
     /// The turn in which the agent answers the findings of a review may start the
     /// next one.
     pub review_responses: bool,
+    /// How the panel groups the findings.
+    pub grouping: Grouping,
 }
 
 impl Default for ThreadConfig {
@@ -174,6 +177,7 @@ impl Defaults {
             delay_ms: self.delay_ms,
             max_rounds: self.max_rounds,
             review_responses: false,
+            grouping: Grouping::default(),
         }
     }
 }
@@ -264,6 +268,10 @@ pub struct Progress {
     pub history: Vec<RoundRecord>,
     /// Why the last attempt to start a review did not, for the panel.
     pub note: Option<String>,
+    /// Every finding of every round, oldest first.
+    pub findings: Vec<Record>,
+    /// The number of the last finding.
+    pub last_finding: u32,
 }
 
 /// How many finished rounds the panel keeps.

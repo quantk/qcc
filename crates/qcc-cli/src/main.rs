@@ -289,10 +289,29 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             // A global flag after the command name is still the global flag.
             let json = json || args.iter().any(|arg| arg == "--json");
             args.retain(|arg| arg != "--json");
-            let params = plugin_command(args)?;
+            let (mut params, words) = plugin_command(args)?;
+            if !words.is_empty() {
+                // Words without a name go to the command's positional parameter.
+                let commands = client.call::<CommandList>(Empty {}).await?.commands;
+                let positional = commands
+                    .iter()
+                    .find(|c| c.plugin == params.plugin && c.command.id == params.command)
+                    .and_then(|c| c.command.params.iter().find(|p| p.positional))
+                    .with_context(|| {
+                        format!(
+                            "unexpected {:?}: give values as --<name> <value>",
+                            words.first().map(String::as_str).unwrap_or_default()
+                        )
+                    })?;
+                params.args.insert(positional.name.clone(), words.join(" "));
+            }
             let result = client.call::<CommandRun>(params).await?;
             if json {
-                print_json(&result)?;
+                // What the command found, for programs; or the result itself.
+                match &result.data {
+                    Some(data) => print_json(data)?,
+                    None => print_json(&result)?,
+                }
             } else {
                 out(&result.message);
                 if let Some(thread) = &result.thread_id {
@@ -458,17 +477,20 @@ fn absolute(folder: PathBuf) -> anyhow::Result<String> {
     Ok(std::path::absolute(folder)?.display().to_string())
 }
 
-/// `<plugin> <command> [--thread <id>] [--<name> <value> | --<name>=<value>]…`
-fn plugin_command(args: Vec<String>) -> anyhow::Result<CommandRunParams> {
+/// `<plugin> <command> [--thread <id>] [--<name> <value> | --<name>=<value> | <word>]…`;
+/// the words without a name come back apart, for the positional parameter.
+fn plugin_command(args: Vec<String>) -> anyhow::Result<(CommandRunParams, Vec<String>)> {
     let mut args = args.into_iter();
     let (Some(plugin), Some(command)) = (args.next(), args.next()) else {
         bail!("run a plugin command as `qcc <plugin> <command>`; `qcc command list` shows them");
     };
     let mut thread_id = std::env::var(paths::THREAD_ID_ENV).ok().filter(|id| !id.is_empty());
     let mut values = BTreeMap::new();
+    let mut words = Vec::new();
     while let Some(arg) = args.next() {
         let Some(name) = arg.strip_prefix("--") else {
-            bail!("unexpected {arg:?}: give values as --<name> <value>");
+            words.push(arg);
+            continue;
         };
         let (name, value) = match name.split_once('=') {
             Some((name, value)) => (name.to_owned(), value.to_owned()),
@@ -483,5 +505,7 @@ fn plugin_command(args: Vec<String>) -> anyhow::Result<CommandRunParams> {
             values.insert(name, value);
         }
     }
-    Ok(CommandRunParams { plugin, command, thread_id: thread_id.map(ThreadId::new), args: values })
+    let params =
+        CommandRunParams { plugin, command, thread_id: thread_id.map(ThreadId::new), args: values };
+    Ok((params, words))
 }

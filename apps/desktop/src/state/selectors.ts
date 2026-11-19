@@ -198,9 +198,14 @@ export function rootOf(thread: Thread, threads: Readonly<Record<string, Thread>>
   return current;
 }
 
-/** The threads a thread started, oldest first. */
+/**
+ * The threads a thread started, oldest first. A plugin's service threads (`hidden`,
+ * such as reviewers) are left out: the plugin shows them its own way.
+ */
 export function childrenOf(threads: readonly Thread[], id: string): Thread[] {
-  return threads.filter((thread) => thread.parent === id).sort((a, b) => a.created_at - b.created_at);
+  return threads
+    .filter((thread) => thread.parent === id && !thread.hidden)
+    .sort((a, b) => a.created_at - b.created_at);
 }
 
 export type TreeRow = {

@@ -416,6 +416,9 @@ interface types {
     required: bool,
     /// A hint shown in an empty field.
     placeholder: option<string>,
+    /// The CLI's words without a `--name` go to this parameter, separated by
+    /// spaces: `qcc reviewers send f1 f2`. At most one parameter of a command.
+    positional: bool,
   }
 
   /// A command people run from the CLI (`qcc <plugin-id> <id>`) and the app's
@@ -900,6 +903,8 @@ interface types {
     message: string,
     /// A thread the command made, which the app opens.
     thread: option<thread-id>,
+    /// What the command found, as JSON, for programs: `qcc … --json` prints it.
+    data: option<json>,
   }
 
   record process-output {
@@ -929,6 +934,9 @@ interface types {
     provider-models(provider-models),
     /// The changed files asked for with `threads.changes`.
     thread-changes(thread-changes),
+    /// The comments on a thread's changes changed: left, resolved, reopened, sent
+    /// to the agent or deleted, by anyone (permission `comments`).
+    comments-changed(thread-id),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -1167,11 +1175,20 @@ interface comments {
     /// The plugin that left it; absent for the user's own comments.
     plugin: option<string>,
     author: option<comment-author>,
+    /// When it was last handed to the agent with a message.
+    sent-at: option<u64>,
   }
 
   add: func(comment: new-comment) -> result<line-comment, string>;
   /// The thread's comments, oldest first; resolved ones only if asked for.
   %list: func(thread: thread-id, include-resolved: bool) -> result<list<line-comment>, string>;
+  /// Mark comments the plugin left dealt with, saying what became of them; or,
+  /// with `reopen`, open them again. Comments of others are refused.
+  resolve: func(ids: list<string>, resolution: option<string>, reopen: bool) -> result<_, string>;
+  /// Hand comments to the thread's agent with a message, the way the user's "send
+  /// to agent" does: queued behind a running turn, each comment in full with how
+  /// to resolve it. Needs the `threads` permission too.
+  send: func(thread: thread-id, ids: list<string>, text: string) -> result<_, string>;
 }
 
 /// Permission `files`. Read text files where a thread works and in the plugin's

@@ -165,6 +165,11 @@ function CommentCard({ thread, comment, label }: { thread: Thread; comment: Line
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {resolved ? <Badge variant="secondary">Resolved</Badge> : <Badge variant="outline">Open</Badge>}
         <CommentAuthorMark comment={comment} />
+        {comment.sent_at != null && comment.resolved_at == null && (
+          <Badge variant="outline" title="Handed to the agent with a message">
+            Sent
+          </Badge>
+        )}
         {label && <span className="truncate font-mono">{label}</span>}
         {label && comment.quote && (
           <code className="min-w-0 truncate" title={comment.quote}>

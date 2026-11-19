@@ -5,15 +5,100 @@ use std::collections::BTreeSet;
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::ui::{self, Node, Tone};
 
-use crate::config::{self, ThreadConfig, Trigger};
+use crate::config::{self, Critic, ThreadConfig, Trigger};
+use crate::ledger::{self, Grouping, Status};
 use crate::profile::Delivery;
-use crate::{Reviewers, apply, profiles_for, state_of};
+use crate::{
+    Reviewers, apply, dismiss_findings, findings_of, profiles_for, send_findings, state_of,
+};
 
 pub(crate) const VIEW: &str = "reviewers";
 
 const DELAYS: [u64; 6] = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 const ROUNDS: [u32; 6] = [1, 2, 3, 5, 10, 0];
 const EVERY: [u32; 4] = [2, 3, 5, 10];
+
+/// How a reviewer of the running round is doing.
+fn critic_progress(critic: &Critic) -> (String, Tone) {
+    if let Some(problem) = &critic.problem {
+        return (format!("error: {problem}"), Tone::Danger);
+    }
+    if critic.done {
+        return (
+            format!("done, {}", crate::count_of(critic.findings.len(), "finding")),
+            Tone::Success,
+        );
+    }
+    match threads::get(&critic.thread).map(|info| info.state) {
+        Ok(ThreadState::Waiting) => ("waiting for your approval".to_owned(), Tone::Warning),
+        Ok(ThreadState::Failed) => ("failed".to_owned(), Tone::Danger),
+        Ok(ThreadState::Idle) => ("finishing…".to_owned(), Tone::Muted),
+        Ok(ThreadState::Working) => ("looking…".to_owned(), Tone::Muted),
+        Ok(ThreadState::Archived) | Err(_) => ("gone".to_owned(), Tone::Danger),
+    }
+}
+
+fn severity_tone(severity: crate::findings::Severity) -> Tone {
+    use crate::findings::Severity;
+    match severity {
+        Severity::Critical | Severity::High => Tone::Danger,
+        Severity::Medium => Tone::Warning,
+        Severity::Low | Severity::Info => Tone::Muted,
+    }
+}
+
+/// One finding: what, where, how much it matters, where it stands, what to do.
+fn finding_node(
+    thread: &str,
+    record: &ledger::Record,
+    status: Status,
+    note: Option<&str>,
+    picked: &BTreeSet<String>,
+) -> Node {
+    let mut head = Vec::new();
+    if status.pending() {
+        head.push(ui::switch("", picked.contains(&record.id), format!("pick:{}", record.id)));
+    }
+    head.push(ui::badge(record.severity.as_str()).tone(severity_tone(record.severity)));
+    let status_tone = match status {
+        Status::Open => Tone::Warning,
+        Status::Sent => Tone::Muted,
+        Status::Fixed => Tone::Success,
+        Status::Dismissed => Tone::Muted,
+    };
+    head.push(ui::badge(status.label()).tone(status_tone));
+    match (&record.file, record.line) {
+        (Some(file), line) if record.comment.is_some() => {
+            let at = record.location().unwrap_or_default();
+            head.push(ui::link(at, thread.to_owned(), Some(file), line));
+        }
+        (Some(_), _) => head.push(ui::text(record.location().unwrap_or_default())),
+        (None, _) => head.push(ui::text("about the whole change").tone(Tone::Muted)),
+    }
+    if record.stale {
+        head.push(ui::badge("stale").tone(Tone::Warning));
+    }
+    head.push(
+        ui::text(format!("{} · round {} · {}", record.reviewer, record.round, record.id))
+            .tone(Tone::Muted),
+    );
+    let mut body = vec![ui::row(head), ui::markdown(record.text.clone())];
+    if let Some(note) = note {
+        body.push(ui::text(format!("Agent: {note}")).tone(Tone::Success));
+    }
+    let mut actions = Vec::new();
+    if status == Status::Open {
+        actions.push(ui::button("Send", "send").value(record.id.clone()));
+    }
+    if status.pending() {
+        actions.push(ui::button("Dismiss", "dismiss").value(record.id.clone()));
+    } else {
+        actions.push(ui::button("Restore", "restore").value(record.id.clone()));
+    }
+    actions.push(ui::link("reasoning", record.critic.clone(), None, None));
+    body.push(ui::row(actions));
+    ui::stack(body)
+}
 
 /// `1 comment`, `2 comments`.
 fn count(n: u32, what: &str) -> String {
@@ -177,14 +262,56 @@ impl Reviewers {
     }
 
     fn panel(&mut self, thread: &str) -> Node {
+        // A reviewer's own thread: what it reviewed, and the way back.
+        if let Some(reviewed) = crate::load::<String>(&format!("{}{thread}", crate::REVIEWER_OF)) {
+            return ui::stack([
+                ui::heading("Reviewers"),
+                ui::text("This thread is a reviewer: what it read and thought on the way to its findings.")
+                    .tone(Tone::Muted),
+                ui::link("Back to the reviewed thread", reviewed, None, None),
+            ]);
+        }
         let config = self.config_of(thread);
         let state = state_of(thread);
         let (profiles, problems) = profiles_for(thread);
-        let mut nodes = vec![
-            ui::heading("Reviewers"),
-            ui::switch("Review this thread on its own", config.enabled, "enabled"),
-        ];
+        let mut nodes = vec![ui::heading("Reviewers")];
 
+        // The review first: start one, and how the one running gets on.
+        let limit = if config.max_rounds == 0 {
+            "no limit".to_owned()
+        } else {
+            config.max_rounds.to_string()
+        };
+        let mut head = vec![
+            ui::button("Run a review", "review").primary(),
+            ui::badge(format!("{} of {limit} rounds", state.rounds)),
+        ];
+        if state.round.is_none() && self.starting(thread) {
+            head.push(ui::badge("reading the changes…"));
+        } else if state.round.is_none() && self.armed(thread) {
+            head.push(ui::badge("next: once the agent stays idle"));
+        }
+        nodes.push(ui::row(head));
+        if let Some(note) = &state.note {
+            nodes.push(ui::text(note.clone()).tone(Tone::Muted));
+        }
+        if let Some(round) = &state.round {
+            nodes.push(ui::text(format!("Round {}", round.number)).tone(Tone::Muted));
+            for critic in &round.critics {
+                let (label, tone) = critic_progress(critic);
+                nodes.push(ui::row([
+                    ui::badge(label).tone(tone),
+                    ui::text(critic.profile.clone()),
+                    ui::link("reasoning", critic.thread.clone(), None, None),
+                ]));
+            }
+        }
+
+        self.findings_section(thread, &config, &mut nodes);
+
+        nodes.push(ui::divider());
+        nodes.push(ui::heading("Settings"));
+        nodes.push(ui::switch("Review this thread on its own", config.enabled, "enabled"));
         nodes.push(ui::text("Profiles").tone(Tone::Muted));
         for profile in &profiles {
             let chosen = config.profiles.contains(&profile.name);
@@ -271,26 +398,6 @@ impl Reviewers {
             "review-responses",
         ));
 
-        nodes.push(ui::divider());
-        let limit = if config.max_rounds == 0 {
-            "no limit".to_owned()
-        } else {
-            config.max_rounds.to_string()
-        };
-        let mut status = vec![("Rounds".to_owned(), format!("{} of {limit}", state.rounds))];
-        if let Some(round) = &state.round {
-            let done = round.critics.iter().filter(|c| c.done).count();
-            status.push((
-                "Running".to_owned(),
-                format!("round {}: {done} of {} reviewers done", round.number, round.critics.len()),
-            ));
-        } else if self.armed(thread) {
-            status.push(("Next".to_owned(), "once the agent stays idle".to_owned()));
-        }
-        nodes.push(ui::key_values(status));
-        if let Some(note) = &state.note {
-            nodes.push(ui::text(note.clone()).tone(Tone::Muted));
-        }
         if !state.history.is_empty() {
             let rows = state.history.iter().rev().map(|record| {
                 let mut outcome = count(record.comments, "comment");
@@ -310,9 +417,62 @@ impl Reviewers {
             });
             nodes.push(ui::table(["Round", "Reviewers", "Outcome"], rows));
         }
-        let review = ui::button("Review now", "review").primary();
-        nodes.push(ui::row([review, ui::button("Count rounds again", "reset")]));
+        nodes.push(ui::button("Count rounds again", "reset"));
         ui::stack(nodes)
+    }
+
+    /// The findings of every round, grouped, with where each stands and what can
+    /// be done about it.
+    fn findings_section(&mut self, thread: &str, config: &ThreadConfig, nodes: &mut Vec<Node>) {
+        let findings = findings_of(thread);
+        if findings.is_empty() {
+            return;
+        }
+        let picked = self.picked.entry(thread.to_owned()).or_default();
+        picked.retain(|id| findings.iter().any(|f| &f.0.id == id && f.1.pending()));
+        let open = findings.iter().filter(|f| f.1 == Status::Open).count();
+        nodes.push(ui::divider());
+        nodes.push(ui::heading("Findings"));
+        let counts: Vec<String> = [Status::Open, Status::Sent, Status::Fixed, Status::Dismissed]
+            .iter()
+            .map(|status| (status, findings.iter().filter(|f| f.1 == *status).count()))
+            .filter(|(_, n)| *n > 0)
+            .map(|(status, n)| format!("{n} {}", status.as_str()))
+            .collect();
+        nodes.push(ui::text(counts.join(" · ")).tone(Tone::Muted));
+        let mut actions = Vec::new();
+        if open > 0 {
+            actions.push(ui::button(format!("Send all open ({open})"), "send-open").primary());
+        }
+        if !picked.is_empty() {
+            actions.push(ui::button(format!("Send selected ({})", picked.len()), "send-picked"));
+            actions
+                .push(ui::button(format!("Dismiss selected ({})", picked.len()), "dismiss-picked"));
+        }
+        if !actions.is_empty() {
+            nodes.push(ui::row(actions));
+        }
+        nodes.push(ui::select(
+            "Group by",
+            [(Grouping::Reviewer.as_str(), "Reviewer"), (Grouping::Severity.as_str(), "Severity")],
+            config.grouping.as_str(),
+            "grouping",
+        ));
+        let picked = picked.clone();
+        for (title, members) in ledger::grouped(&findings, config.grouping) {
+            nodes.push(ui::text(title).tone(Tone::Muted));
+            for (record, status, note) in members {
+                nodes.push(finding_node(thread, record, *status, note.as_deref(), &picked));
+            }
+        }
+    }
+
+    /// A round is being started: its changes are being read.
+    fn starting(&self, thread: &str) -> bool {
+        self.diffs
+            .values()
+            .any(|why| matches!(why, crate::DiffFor::Start { thread: t, .. } if t == thread))
+            || self.changes.values().any(|pending| pending.thread == thread)
     }
 
     fn act(&mut self, thread: &str, action: &str, value: &str) -> Result<Option<String>, String> {
@@ -326,6 +486,34 @@ impl Reviewers {
             }
             "reset" => {
                 crate::reset(thread);
+                return Ok(None);
+            }
+            "send" => return send_findings(thread, &[value.to_owned()]).map(Some),
+            "send-open" => return send_findings(thread, &[]).map(Some),
+            "send-picked" | "dismiss-picked" => {
+                let ids: Vec<String> =
+                    self.picked.remove(thread).unwrap_or_default().into_iter().collect();
+                return if action == "send-picked" {
+                    send_findings(thread, &ids)
+                } else {
+                    dismiss_findings(thread, &ids, false)
+                }
+                .map(Some);
+            }
+            "dismiss" => return dismiss_findings(thread, &[value.to_owned()], false).map(Some),
+            "restore" => return dismiss_findings(thread, &[value.to_owned()], true).map(Some),
+            "grouping" => {
+                config.grouping =
+                    Grouping::parse(value).ok_or_else(|| format!("cannot group by {value:?}"))?;
+            }
+            _ if action.starts_with("pick:") => {
+                let id = &action["pick:".len()..];
+                let picked = self.picked.entry(thread.to_owned()).or_default();
+                if value == "true" {
+                    picked.insert(id.to_owned());
+                } else {
+                    picked.remove(id);
+                }
                 return Ok(None);
             }
             "models-refresh" => {

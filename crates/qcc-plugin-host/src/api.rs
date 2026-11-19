@@ -2,10 +2,10 @@
 //! crate.
 
 use qcc_domain::{
-    AgentSkill, ChangeScope, CommandInfo, CommentAuthor, DeliverMode, DiffSide, EnvironmentChanges,
-    EnvironmentInfo, InteractionResolution, LineComment, McpServer, ModelInfo, PermissionMode,
-    ProviderId, ProviderInfo, RateLimits, SettingField, SkillInfo, SkillRef, Thread, ThreadId,
-    ThreadState, TranscriptEntry, TurnStatus, UiViewInfo, UserInput,
+    AgentSkill, ChangeScope, CommandInfo, CommentAuthor, CommentId, DeliverMode, DiffSide,
+    EnvironmentChanges, EnvironmentInfo, InteractionResolution, LineComment, McpServer, ModelInfo,
+    PermissionMode, ProviderId, ProviderInfo, RateLimits, SettingField, SkillInfo, SkillRef,
+    Thread, ThreadId, ThreadState, TranscriptEntry, TurnStatus, UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,6 +183,9 @@ pub enum PluginRequest {
         thread: ThreadId,
         answer: Result<(String, bool), String>,
     },
+    /// The comments on a thread's changed; for plugins with the `comments`
+    /// permission. Posted like [`PluginRequest::ThreadSettled`].
+    CommentsChanged(ThreadId),
     /// The answer to a [`ThreadsCall::Changes`]. Posted like
     /// [`PluginRequest::ThreadSettled`].
     ThreadChanges {
@@ -261,6 +264,18 @@ pub enum ThreadsCall {
     ListComments {
         thread: ThreadId,
         include_resolved: bool,
+    },
+    /// The `comments` import: resolve or reopen comments the plugin left.
+    ResolveComments {
+        ids: Vec<CommentId>,
+        resolution: Option<String>,
+        reopen: bool,
+    },
+    /// The `comments` import, which needs `threads` too: hand comments to the agent.
+    SendComments {
+        thread: ThreadId,
+        ids: Vec<CommentId>,
+        text: String,
     },
     /// The `files` import, checked against the `files` permission: a file's text.
     ReadFile {
@@ -350,5 +365,7 @@ pub enum Outcome {
     CommandResult {
         message: String,
         thread: Option<ThreadId>,
+        /// JSON text, as the plugin wrote it.
+        data: Option<String>,
     },
 }

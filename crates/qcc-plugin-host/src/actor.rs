@@ -4,7 +4,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use qcc_domain::ThreadId;
+use qcc_domain::{CommentId, ThreadId};
 use tokio::sync::oneshot;
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Engine, ResourceLimiter, Store};
@@ -125,6 +125,10 @@ impl PluginHandle {
     pub fn post(&self, request: PluginRequest) -> Result<(), PluginError> {
         // Every turn of every thread is not news for a plugin that did not ask.
         if matches!(request, PluginRequest::TurnEnded { .. }) && !self.inner.permissions.turn_events
+        {
+            return Ok(());
+        }
+        if matches!(request, PluginRequest::CommentsChanged(_)) && !self.inner.permissions.comments
         {
             return Ok(());
         }
@@ -820,6 +824,25 @@ impl imports::comments::Host for State {
             ThreadsAnswer::Comment(comment) => Ok(convert::line_comment(*comment)),
             other => Err(format!("unexpected answer {other:?}")),
         }
+    }
+
+    fn resolve(
+        &mut self,
+        ids: Vec<String>,
+        resolution: Option<String>,
+        reopen: bool,
+    ) -> Result<(), String> {
+        let ids = ids.into_iter().map(CommentId::new).collect();
+        self.comments(ThreadsCall::ResolveComments { ids, resolution, reopen }).map(|_| ())
+    }
+
+    fn send(&mut self, thread: String, ids: Vec<String>, text: String) -> Result<(), String> {
+        // A message to an agent is what the `threads` permission is about.
+        if !self.permissions.threads {
+            return Err(self.denied("threads"));
+        }
+        let ids = ids.into_iter().map(CommentId::new).collect();
+        self.comments(ThreadsCall::SendComments { thread: ThreadId(thread), ids, text }).map(|_| ())
     }
 
     fn list(

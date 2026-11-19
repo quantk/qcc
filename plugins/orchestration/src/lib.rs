@@ -59,6 +59,7 @@ fn param(name: &str, label: &str, placeholder: &str) -> CommandParam {
         label: label.into(),
         required: false,
         placeholder: Some(placeholder.into()),
+        positional: false,
     }
 }
 
@@ -192,6 +193,7 @@ impl Orchestration {
                 source.id, child.id
             ),
             thread: Some(child.id),
+            data: None,
         })
     }
 
@@ -211,6 +213,7 @@ impl Orchestration {
                 source.id, reviewer.id
             ),
             thread: Some(reviewer.id),
+            data: None,
         })
     }
 

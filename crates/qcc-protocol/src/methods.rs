@@ -1357,6 +1357,9 @@ pub struct CommandRunResult {
     /// A thread the command made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<ThreadId>,
+    /// What the command found, for programs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 // ----- plugin UI --------------------------------------------------------------------

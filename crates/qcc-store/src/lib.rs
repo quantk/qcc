@@ -759,6 +759,7 @@ mod tests {
             created_at,
             resolved_at: None,
             resolution: None,
+            sent_at: None,
             author: None,
         };
         let mut first = comment("c1", "a", 10);

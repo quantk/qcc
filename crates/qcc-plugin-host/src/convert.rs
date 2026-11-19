@@ -311,6 +311,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                     label: p.label,
                     required: p.required,
                     placeholder: p.placeholder,
+                    positional: p.positional,
                 })
                 .collect(),
         }),
@@ -512,6 +513,7 @@ pub(crate) fn line_comment(comment: LineComment) -> wit_comments::LineComment {
         resolution: comment.resolution,
         plugin,
         author,
+        sent_at: comment.sent_at,
     }
 }
 
@@ -595,9 +597,11 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
         wit::Outcome::EnvironmentDiff(diff) => {
             Outcome::EnvironmentDiff { diff: diff.diff, truncated: diff.truncated }
         }
-        wit::Outcome::CommandResult(result) => {
-            Outcome::CommandResult { message: result.message, thread: result.thread.map(ThreadId) }
-        }
+        wit::Outcome::CommandResult(result) => Outcome::CommandResult {
+            message: result.message,
+            thread: result.thread.map(ThreadId),
+            data: result.data,
+        },
         // The actor resolves deferred answers; one never leaves it.
         wit::Outcome::Deferred(_) => Outcome::Done,
     }
@@ -753,6 +757,7 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
             thread: thread_info(*summary),
             status: turn_status_to_wit(status),
         }),
+        PluginRequest::CommentsChanged(thread) => wit::Event::CommentsChanged(thread.0),
         PluginRequest::ThreadChanges { request, thread, answer } => {
             wit::Event::ThreadChanges(wit::ThreadChanges {
                 request,

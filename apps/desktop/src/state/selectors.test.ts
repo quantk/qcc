@@ -67,6 +67,9 @@ describe("thread families", () => {
     expect(rootOf(find("a1x"), byId).id).toBe("a");
     expect(rootOf(find("orphan"), byId).id).toBe("orphan");
     expect(childrenOf(threads, "a").map((t) => t.id)).toEqual(["a1", "a2"]);
+    // A plugin's service thread (a reviewer) is not among them.
+    const reviewer = { ...find("a2"), id: "reviewer", hidden: true } as Thread;
+    expect(childrenOf([...threads, reviewer], "a").map((t) => t.id)).toEqual(["a1", "a2"]);
   });
 });
 

@@ -106,6 +106,7 @@ impl Fixture {
                             created_at: 0,
                             resolved_at: None,
                             resolution: None,
+                            sent_at: None,
                             author: Some(new.author.clone()),
                         };
                         world.comments.push(comment.clone());
@@ -113,6 +114,19 @@ impl Fixture {
                     }
                     ThreadsCall::ListComments { .. } => {
                         ThreadsAnswer::Comments(world.comments.clone())
+                    }
+                    ThreadsCall::ResolveComments { ids, resolution, reopen } => {
+                        for comment in world.comments.iter_mut().filter(|c| ids.contains(&c.id)) {
+                            comment.resolved_at = (!reopen).then_some(1);
+                            comment.resolution = resolution.clone().filter(|_| !reopen);
+                        }
+                        ThreadsAnswer::Done
+                    }
+                    ThreadsCall::SendComments { ids, .. } => {
+                        for comment in world.comments.iter_mut().filter(|c| ids.contains(&c.id)) {
+                            comment.sent_at = Some(1);
+                        }
+                        ThreadsAnswer::Done
                     }
                     ThreadsCall::Watch(_)
                     | ThreadsCall::Diff { .. }
@@ -277,6 +291,7 @@ fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
         .unwrap();
     assert_eq!(spawn.parent.as_ref().map(ThreadId::as_str), Some(SOURCE));
     assert_eq!(spawn.permission_mode, Some(PermissionMode::ReadOnly), "echo runs read-only");
+    assert!(spawn.hidden, "a reviewer is a service thread, followed in the panel");
     assert_eq!(spawn.cwd.as_deref(), Some("/work"));
     let prompt = spawn.prompt.unwrap();
     // No diff in the prompt: the files, the base, and how to look.
@@ -396,22 +411,23 @@ fn auto_delivery_sends_one_message_and_its_answer_is_not_reviewed_again() {
     fixture.critic_answers("thr_critic2", "I could not decide on anything worth a JSON object.");
     // The changes moved on while they worked: the comments are marked stale.
     fixture.answer_diff(&DIFF.replace("new();", "newer();"));
-    let calls =
-        fixture.bench.wait_for_call("sent the findings", |c| matches!(c, ThreadsCall::Send { .. }));
-    let sent: Vec<&String> = calls
+    let calls = fixture
+        .bench
+        .wait_for_call("sent the findings", |c| matches!(c, ThreadsCall::SendComments { .. }));
+    let sent: Vec<(&Vec<CommentId>, &String)> = calls
         .iter()
         .filter_map(|call| match call {
-            ThreadsCall::Send { text, .. } => Some(text),
+            ThreadsCall::SendComments { ids, text, .. } => Some((ids, text)),
             _ => None,
         })
         .collect();
     assert_eq!(sent.len(), 1, "one message for the whole round");
-    let message = sent[0];
+    assert!(!calls.iter().any(|c| matches!(c, ThreadsCall::Send { .. })));
+    let (ids, message) = sent[0];
+    // The comment goes along as a comment, the way the user's "send" hands it over.
+    assert_eq!(ids, &vec![CommentId::new("cmt_1")]);
     assert!(message.contains("review round 1"), "{message}");
-    assert!(
-        message.contains("(high, from general) [cmt_1] at src/a.rs:2: new() can fail"),
-        "{message}"
-    );
+    assert!(message.contains("One finding on lines of your changes is below"), "{message}");
     assert!(message.contains("from security): I could not decide"), "{message}");
     // A finding on a file the changes do not touch is no comment, only a remark.
     assert!(
@@ -646,4 +662,99 @@ fn an_agent_that_cannot_run_read_only_reviews_in_ask_mode_and_says_so() {
         })
         .expect("the reviewer started");
     assert_eq!(spawn.permission_mode, Some(PermissionMode::Ask));
+}
+
+/// The findings as `qcc reviewers findings --json` gives them.
+fn findings(fixture: &Fixture) -> Vec<serde_json::Value> {
+    let request = PluginRequest::Command {
+        command: "findings".into(),
+        thread: Some(ThreadId::new(SOURCE)),
+        args: Vec::new(),
+    };
+    match fixture.bench.call(request).unwrap() {
+        Outcome::CommandResult { data: Some(data), .. } => serde_json::from_str(&data).unwrap(),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+fn status_of(fixture: &Fixture, id: &str) -> String {
+    let all = findings(fixture);
+    let found = all.iter().find(|f| f["id"] == id).unwrap_or_else(|| panic!("no {id}: {all:?}"));
+    found["status"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn findings_are_sent_dismissed_restored_and_fixed_with_their_comments() {
+    let fixture = Fixture::new(Grant::AllRequested);
+    fixture.command("configure", &[("enabled", "on"), ("trigger", "every-turn")]).unwrap();
+    fixture.turn_ended(TurnStatus::Completed);
+    fixture.start_round(DIFF);
+    fixture.bench.wait_for_call("started a reviewer", |_| fixture.spawns() == 1);
+    fixture.critic_answers("thr_critic1", FINDING);
+    fixture.answer_diff(DIFF);
+    fixture.bench.wait_for_call("left a comment", |c| matches!(c, ThreadsCall::AddComment(_)));
+    // The panel is told to draw itself again as the round goes.
+    assert!(fixture.bench.calls().iter().any(|c| matches!(c, ThreadsCall::RefreshView { .. })));
+
+    // f1 sits on a line, with a comment; f2 is about a file the changes do not touch.
+    let all = findings(&fixture);
+    assert_eq!(all.len(), 2, "{all:?}");
+    assert_eq!(all[0]["id"], "f1");
+    assert_eq!(all[0]["comment"], "cmt_1");
+    assert_eq!(all[0]["reviewer"], "general");
+    assert_eq!(all[1]["id"], "f2");
+    assert!(all[1]["comment"].is_null());
+    assert!(all.iter().all(|f| f["status"] == "open"), "{all:?}");
+
+    // Sent with the user's "send all open": the comment through the daemon, the remark
+    // in the text, in one message.
+    fixture.bench.take_calls();
+    let sent = fixture.command("send", &[]).unwrap();
+    assert!(sent.contains("sent 2 findings"), "{sent}");
+    let calls = fixture.bench.calls();
+    let text = calls
+        .iter()
+        .find_map(|call| match call {
+            ThreadsCall::SendComments { ids, text, .. }
+                if ids == &vec![CommentId::new("cmt_1")] =>
+            {
+                Some(text.clone())
+            }
+            _ => None,
+        })
+        .expect("sent with its comment");
+    assert!(text.contains("at elsewhere.rs:3: not in the diff"), "{text}");
+    assert_eq!(status_of(&fixture, "f1"), "sent");
+    assert_eq!(status_of(&fixture, "f2"), "sent");
+    assert!(fixture.command("send", &[]).unwrap_err().to_string().contains("no open findings"));
+
+    // Dismissed: its comment is resolved with the user's words; restored: open again.
+    fixture.command("dismiss", &[("ids", "f1 f2")]).unwrap();
+    assert_eq!(status_of(&fixture, "f1"), "dismissed");
+    assert_eq!(status_of(&fixture, "f2"), "dismissed");
+    assert_eq!(fixture.comments()[0].resolution.as_deref(), Some("Dismissed by the user"));
+    fixture.command("restore", &[("ids", "f1")]).unwrap();
+    assert_eq!(status_of(&fixture, "f1"), "sent", "sent before, and open again");
+    assert!(fixture.comments()[0].resolved_at.is_none());
+
+    // The agent resolves the comment: fixed, with its note.
+    {
+        let mut world = fixture.world.lock().unwrap();
+        world.comments[0].resolved_at = Some(2);
+        world.comments[0].resolution = Some("handled the error".into());
+    }
+    let all = findings(&fixture);
+    assert_eq!(all[0]["status"], "fixed");
+    assert_eq!(all[0]["note"], "handled the error");
+    let bogus = fixture.command("dismiss", &[("ids", "f9")]).unwrap_err();
+    assert!(bogus.to_string().contains("no finding f9"), "{bogus}");
+
+    // The panel lists them with their statuses and a way to the place in Changes.
+    let panel = fixture.panel().to_string();
+    assert!(panel.contains("Fixed") && panel.contains("Dismissed"), "{panel}");
+    assert!(
+        panel.contains(r#""type":"link""#) && panel.contains(r#""path":"src/a.rs""#),
+        "{panel}"
+    );
+    assert!(panel.contains("Agent: handled the error"), "{panel}");
 }

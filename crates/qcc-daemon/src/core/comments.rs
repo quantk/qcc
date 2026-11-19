@@ -8,6 +8,8 @@ use qcc_protocol::methods::{
     CommentResolveParams, CommentResult, CommentsUpdatedNotification, Empty,
 };
 
+use qcc_plugin_host::PluginRequest;
+
 use super::{Core, notify, now_ms, thread_not_found};
 
 fn internal(error: qcc_store::StoreError) -> RpcError {
@@ -54,6 +56,7 @@ impl Core {
             created_at: now_ms(),
             resolved_at: None,
             resolution: None,
+            sent_at: None,
             author,
         };
         self.store.save_comment(&comment).map_err(internal)?;
@@ -115,8 +118,53 @@ impl Core {
         })
     }
 
-    /// Tell every connection that watches threads what the comments on `thread` are now.
+    /// Note that comments were handed to the agent with a message.
+    pub(super) fn comments_sent(&mut self, ids: &[CommentId]) {
+        let now = now_ms();
+        let mut threads: Vec<ThreadId> = Vec::new();
+        for id in ids {
+            let Ok(Some(mut comment)) = self.store.comment(id) else { continue };
+            comment.sent_at = Some(now);
+            if let Err(error) = self.store.save_comment(&comment) {
+                tracing::warn!(%id, %error, "cannot note that a comment was sent");
+                continue;
+            }
+            if !threads.contains(&comment.thread_id) {
+                threads.push(comment.thread_id);
+            }
+        }
+        for thread in &threads {
+            self.comments_changed(thread);
+        }
+    }
+
+    /// A plugin resolves or reopens comments it left; those of others are refused.
+    pub(super) fn plugin_resolve_comments(
+        &mut self,
+        plugin: &str,
+        ids: Vec<CommentId>,
+        resolution: Option<String>,
+        reopen: bool,
+    ) -> Result<(), RpcError> {
+        for id in &ids {
+            let comment = self.find_comment(id)?;
+            if comment.author.as_ref().is_none_or(|author| author.plugin != plugin) {
+                return Err(RpcError::new(
+                    codes::INVALID_PARAMS,
+                    format!("comment {id} was not left by plugin {plugin}"),
+                ));
+            }
+        }
+        self.comment_resolve(CommentResolveParams { comment_ids: ids, resolution, reopen })
+            .map(|_| ())
+    }
+
+    /// Tell every connection that watches threads what the comments on `thread` are
+    /// now, and the plugins that read comments that they changed.
     fn comments_changed(&mut self, thread: &ThreadId) {
+        for plugin in self.host.plugins().iter().filter(|p| p.permissions().comments) {
+            let _ = plugin.post(PluginRequest::CommentsChanged(thread.clone()));
+        }
         if self.watchers.is_empty() {
             return;
         }

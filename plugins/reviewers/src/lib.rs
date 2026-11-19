@@ -16,6 +16,7 @@
 pub mod config;
 pub mod diff;
 pub mod findings;
+pub mod ledger;
 mod panel;
 pub mod profile;
 pub mod prompt;
@@ -27,9 +28,12 @@ use qcc_plugin_sdk::threads::SpawnOptions;
 
 use crate::config::{Critic, Defaults, Progress, Round, RoundRecord, ThreadConfig, Trigger};
 use crate::findings::{Finding, Report};
+use crate::ledger::Status;
 use crate::profile::{Delivery, Profile, Source};
 
 const SKILL_NAME: &str = "qcc-reviewers";
+/// This plugin's id, which the daemon records as the author of its comments.
+const PLUGIN_ID: &str = "reviewers";
 const SKILL_BODY: &str = include_str!("../SKILL.md");
 
 /// `config/<thread>`: the reviews the user set up for a thread.
@@ -38,6 +42,8 @@ const CONFIG: &str = "config/";
 const STATE: &str = "state/";
 /// `critic/<reviewer thread>`: the thread it reviews, while it works.
 const CRITIC: &str = "critic/";
+/// `reviewer-of/<reviewer thread>`: the thread it reviewed, kept for its panel.
+pub(crate) const REVIEWER_OF: &str = "reviewer-of/";
 
 /// Where profiles live besides the built-in ones.
 const GLOBAL_DIR: &str = "profiles";
@@ -47,8 +53,8 @@ const MAX_LOOSE_REPLY: usize = 4_000;
 
 /// Why a diff was asked for.
 /// A round waiting for the list of changed files.
-struct Pending {
-    thread: String,
+pub(crate) struct Pending {
+    pub(crate) thread: String,
     /// The command that asked for the round, to be answered.
     token: Option<u64>,
     diff: String,
@@ -72,7 +78,7 @@ pub(crate) fn read_only_providers() -> Vec<String> {
         .collect()
 }
 
-enum DiffFor {
+pub(crate) enum DiffFor {
     /// To start a round; `token` answers the command that asked for it.
     Start { thread: String, token: Option<u64> },
     /// To tell whether a finished round's findings are stale.
@@ -92,13 +98,15 @@ pub struct Reviewers {
     /// Rounds waiting for `threads.changes`, by request.
     changes: HashMap<u64, Pending>,
     next_token: u64,
+    /// The findings picked in each thread's panel.
+    picked: HashMap<String, std::collections::BTreeSet<String>>,
     /// Agents' models, for the panel.
     models: HashMap<String, panel::Models>,
     /// The agent each `threads.models` request is about.
     model_requests: HashMap<u64, String>,
 }
 
-fn load<T: serde::de::DeserializeOwned>(key: &str) -> Option<T> {
+pub(crate) fn load<T: serde::de::DeserializeOwned>(key: &str) -> Option<T> {
     let bytes = kv::get(key).ok()??;
     serde_json::from_slice(&bytes).ok()
 }
@@ -281,9 +289,11 @@ impl Reviewers {
         if let Err(error) = &result {
             Self::note(thread, error.clone());
         }
+        redraw(thread);
         let Some(token) = token else { return };
-        let outcome =
-            result.map(|message| Outcome::CommandResult(CommandResult { message, thread: None }));
+        let outcome = result.map(|message| {
+            Outcome::CommandResult(CommandResult { message, thread: None, data: None })
+        });
         if let Err(error) = completions::complete(token, outcome.as_ref().map_err(String::as_str)) {
             log::warn(format!("cannot answer the review request: {error}"));
         }
@@ -314,6 +324,7 @@ impl Reviewers {
         }
         let request = threads::diff(thread)?;
         self.diffs.insert(request, DiffFor::Start { thread: thread.to_owned(), token });
+        redraw(thread);
         Ok(())
     }
 
@@ -441,7 +452,8 @@ impl Reviewers {
                 permission_mode: Some(mode),
                 skills_enabled: Vec::new(),
                 skills_disabled: Vec::new(),
-                hidden: false,
+                // A service thread: the panel is where reviews are followed.
+                hidden: true,
             });
             let critic = match spawned {
                 Ok(critic) => critic,
@@ -451,6 +463,7 @@ impl Reviewers {
                 }
             };
             save(&format!("{CRITIC}{}", critic.id), &thread);
+            save(&format!("{REVIEWER_OF}{}", critic.id), &thread);
             if let Err(error) = threads::watch(&critic.id) {
                 log::error(format!("cannot follow reviewer {}: {error}", critic.id));
             }
@@ -511,7 +524,9 @@ impl Reviewers {
         // it goes along as a remark about the whole.
         let mut changed: std::collections::BTreeSet<String> = state.files.keys().cloned().collect();
         changed.extend(diff::files(current).into_iter().map(|file| file.path));
-        let mut sent: Vec<(String, Finding, Option<String>)> = Vec::new();
+        let mut sent_comments: Vec<String> = Vec::new();
+        let mut sent_remarks: Vec<(String, Finding)> = Vec::new();
+        let mut new_records: Vec<ledger::Record> = Vec::new();
         for critic in &round.critics {
             if let Some(problem) = &critic.problem {
                 record.problems.push(format!("{}: {problem}", critic.profile));
@@ -550,39 +565,221 @@ impl Reviewers {
                 } else {
                     record.general += 1;
                 }
-                if critic.delivery == Delivery::Auto {
-                    sent.push((critic.profile.clone(), finding.clone(), comment));
+                let auto = critic.delivery == Delivery::Auto;
+                match &comment {
+                    Some(id) if auto => sent_comments.push(id.clone()),
+                    None if auto => sent_remarks.push((critic.profile.clone(), finding.clone())),
+                    _ => {}
                 }
+                let remark = comment.is_none();
+                state.last_finding += 1;
+                new_records.push(ledger::Record {
+                    id: format!("f{}", state.last_finding),
+                    round: round.number,
+                    reviewer: critic.profile.clone(),
+                    critic: critic.thread.clone(),
+                    file: finding.file.clone(),
+                    line: finding.line,
+                    severity: finding.severity,
+                    text: finding.text.clone(),
+                    stale,
+                    comment,
+                    status: if auto && remark { Status::Sent } else { Status::Open },
+                    dismissed: false,
+                });
             }
         }
         let auto = round.critics.iter().any(|critic| critic.delivery == Delivery::Auto);
-        if auto && (!sent.is_empty() || !record.problems.is_empty()) {
-            let items: Vec<prompt::Sent<'_>> = sent
+        if auto
+            && (!sent_comments.is_empty()
+                || !sent_remarks.is_empty()
+                || !record.problems.is_empty())
+        {
+            let remarks: Vec<prompt::Remark<'_>> = sent_remarks
                 .iter()
-                .map(|(reviewer, finding, comment)| prompt::Sent {
-                    reviewer,
-                    finding,
-                    comment: comment.as_deref(),
-                })
+                .map(|(reviewer, finding)| prompt::Remark { reviewer, finding })
                 .collect();
-            let message = prompt::summary(round.number, &items, stale, &record.problems);
-            // The agent's next turn answers it: the one after the running one, if any.
-            let busy = threads::get(thread).is_ok_and(|info| info.state != ThreadState::Idle);
-            match threads::send(thread, &message) {
-                Ok(()) => {
+            let intro =
+                format!("qcc reviewers finished review round {} of your changes.", round.number);
+            let message = prompt::findings_message(
+                &intro,
+                sent_comments.len(),
+                &remarks,
+                stale,
+                &record.problems,
+            );
+            match deliver(thread, &sent_comments, &message) {
+                Ok(answer_in) => {
                     record.sent = true;
-                    state.awaiting_response = if busy { 2 } else { 1 };
+                    state.awaiting_response = answer_in;
                 }
                 Err(error) => {
                     record.problems.push(format!("cannot send the findings: {error}"));
+                    // Not sent after all.
+                    for finding in &mut new_records {
+                        finding.status = Status::Open;
+                    }
                 }
             }
         }
+        state.findings.extend(new_records);
+        // Drawn again once saved, below.
         state.history.push(record);
         let excess = state.history.len().saturating_sub(config::HISTORY);
         state.history.drain(..excess);
         save_state(thread, &state);
+        redraw(thread);
     }
+}
+
+/// Hand findings to the agent: their comments through the daemon, as the user's
+/// "send to agent" does, with `text`. Returns in how many turn ends the agent's
+/// answer ends: 1 when it is idle, 2 behind a running turn.
+fn deliver(thread: &str, comment_ids: &[String], text: &str) -> Result<u32, String> {
+    let busy = threads::get(thread).is_ok_and(|info| info.state != ThreadState::Idle);
+    if comment_ids.is_empty() {
+        threads::send(thread, text)?;
+    } else {
+        comments::send(thread, comment_ids, text)?;
+    }
+    Ok(if busy { 2 } else { 1 })
+}
+
+/// Tell the app that the thread's panel shows something else now.
+pub(crate) fn redraw(thread: &str) {
+    if let Err(error) = views::refresh(panel::VIEW, Some(thread)) {
+        log::debug(format!("cannot redraw the panel of {thread}: {error}"));
+    }
+}
+
+/// The thread's findings, oldest first, each with where it stands and the agent's
+/// note on a fixed one.
+pub(crate) fn findings_of(thread: &str) -> Vec<ledger::Standing> {
+    let state = state_of(thread);
+    let comments: Vec<ledger::CommentState> = comments::list(thread, true)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|comment| comment.plugin.as_deref() == Some(PLUGIN_ID))
+        .map(|comment| ledger::CommentState {
+            id: comment.id,
+            resolved: comment.resolved_at.is_some(),
+            resolution: comment.resolution,
+            sent: comment.sent_at.is_some(),
+        })
+        .collect();
+    state
+        .findings
+        .into_iter()
+        .map(|record| {
+            let (status, note) = ledger::status(&record, &comments);
+            (record, status, note)
+        })
+        .collect()
+}
+
+/// The findings named by `ids` (all when empty and `all` says which), or the first
+/// id that names none.
+fn pick(
+    findings: &[ledger::Standing],
+    ids: &[String],
+    all: impl Fn(Status) -> bool,
+) -> Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Ok(findings.iter().filter(|f| all(f.1)).map(|f| f.0.id.clone()).collect());
+    }
+    for id in ids {
+        if !findings.iter().any(|f| &f.0.id == id) {
+            return Err(format!(
+                "this thread has no finding {id}; `qcc reviewers findings` lists them"
+            ));
+        }
+    }
+    Ok(ids.to_vec())
+}
+
+/// Send findings to the agent in one message: the open ones when `ids` is empty.
+pub(crate) fn send_findings(thread: &str, ids: &[String]) -> Result<String, String> {
+    let findings = findings_of(thread);
+    let ids = pick(&findings, ids, |status| status == Status::Open)?;
+    let chosen: Vec<&ledger::Standing> =
+        findings.iter().filter(|f| ids.contains(&f.0.id)).collect();
+    if let Some(done) = chosen.iter().find(|f| !f.1.pending()) {
+        return Err(format!("finding {} is {}; restore it first", done.0.id, done.1.as_str()));
+    }
+    if chosen.is_empty() {
+        return Err("there are no open findings to send".into());
+    }
+    let comment_ids: Vec<String> = chosen.iter().filter_map(|f| f.0.comment.clone()).collect();
+    let remarks_of: Vec<Finding> = chosen
+        .iter()
+        .filter(|f| f.0.comment.is_none())
+        .map(|f| Finding {
+            file: f.0.file.clone(),
+            line: f.0.line,
+            severity: f.0.severity,
+            text: f.0.text.clone(),
+        })
+        .collect();
+    let remarks: Vec<prompt::Remark<'_>> = chosen
+        .iter()
+        .filter(|f| f.0.comment.is_none())
+        .zip(&remarks_of)
+        .map(|(f, finding)| prompt::Remark { reviewer: &f.0.reviewer, finding })
+        .collect();
+    let stale = chosen.iter().any(|f| f.0.stale);
+    let message = prompt::findings_message(
+        "The user asks you to deal with findings of qcc reviewers about your changes.",
+        comment_ids.len(),
+        &remarks,
+        stale,
+        &[],
+    );
+    let answer_in = deliver(thread, &comment_ids, &message)?;
+    let mut state = state_of(thread);
+    state.awaiting_response = answer_in;
+    for record in state.findings.iter_mut().filter(|r| ids.contains(&r.id) && r.comment.is_none()) {
+        record.status = Status::Sent;
+    }
+    save_state(thread, &state);
+    redraw(thread);
+    Ok(format!("sent {} to the agent", count_of(chosen.len(), "finding")))
+}
+
+/// Dismiss findings (`restore`: open them again).
+pub(crate) fn dismiss_findings(
+    thread: &str,
+    ids: &[String],
+    restore: bool,
+) -> Result<String, String> {
+    if ids.is_empty() {
+        return Err("name the findings by id; `qcc reviewers findings` lists them".into());
+    }
+    let findings = findings_of(thread);
+    let ids = pick(&findings, ids, |_| false)?;
+    let mut state = state_of(thread);
+    for record in state.findings.iter_mut().filter(|r| ids.contains(&r.id)) {
+        match &record.comment {
+            Some(comment) => {
+                let note = (!restore).then(|| ledger::DISMISSED_NOTE.to_owned());
+                // A deleted comment has nothing to resolve; the finding stays as it is.
+                if comments::resolve(std::slice::from_ref(comment), note.as_deref(), restore)
+                    .is_ok()
+                {
+                    record.dismissed = !restore;
+                }
+            }
+            None => record.status = if restore { Status::Open } else { Status::Dismissed },
+        }
+    }
+    save_state(thread, &state);
+    redraw(thread);
+    let done = if restore { "restored" } else { "dismissed" };
+    Ok(format!("{done} {}", count_of(ids.len(), "finding")))
+}
+
+/// `1 finding`, `2 findings`.
+pub(crate) fn count_of(n: usize, what: &str) -> String {
+    if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") }
 }
 
 /// Count rounds again and forget what was reviewed. A round in flight is dropped:
@@ -606,7 +803,7 @@ fn earlier_findings(thread: &str, profile: &str) -> Vec<prompt::Earlier> {
     let Ok(all) = comments::list(thread, true) else { return Vec::new() };
     all.into_iter()
         .filter(|comment| {
-            comment.plugin.as_deref() == Some("reviewers")
+            comment.plugin.as_deref() == Some(PLUGIN_ID)
                 && comment.author.as_ref().is_some_and(|author| author.name == profile)
         })
         .map(|comment| prompt::Earlier {
@@ -624,7 +821,22 @@ fn param(name: &str, label: &str, placeholder: &str) -> CommandParam {
         label: label.into(),
         required: false,
         placeholder: Some(placeholder.into()),
+        positional: false,
     }
+}
+
+/// The finding ids a command takes as words: `qcc reviewers send f1 f2`.
+fn ids_param(label: &str, placeholder: &str) -> CommandParam {
+    CommandParam { positional: true, ..param("ids", label, placeholder) }
+}
+
+fn ids_arg(call: &CommandCall) -> Vec<String> {
+    call.args
+        .iter()
+        .filter(|(key, _)| key == "ids")
+        .flat_map(|(_, value)| value.split([' ', ',']).map(str::trim).map(str::to_owned))
+        .filter(|id| !id.is_empty())
+        .collect()
 }
 
 fn flag(value: &str) -> Result<bool, String> {
@@ -744,6 +956,39 @@ impl Commands for Reviewers {
                 ],
             },
             CommandInfo {
+                id: "findings".into(),
+                title: "List this thread's review findings".into(),
+                description: "Every finding of every round, with where it stands: open, sent \
+                              to the agent, fixed or dismissed."
+                    .into(),
+                thread: true,
+                params: Vec::new(),
+            },
+            CommandInfo {
+                id: "send".into(),
+                title: "Send review findings to the agent".into(),
+                description: "Hand findings to the agent in one message: those named, or every \
+                              open one."
+                    .into(),
+                thread: true,
+                params: vec![ids_param("Findings", "f1 f2; empty: every open one")],
+            },
+            CommandInfo {
+                id: "dismiss".into(),
+                title: "Dismiss review findings".into(),
+                description: "Mark findings as needing nothing; their comments are resolved."
+                    .into(),
+                thread: true,
+                params: vec![CommandParam { required: true, ..ids_param("Findings", "f1 f2") }],
+            },
+            CommandInfo {
+                id: "restore".into(),
+                title: "Restore dismissed review findings".into(),
+                description: "Open dismissed or fixed findings again.".into(),
+                thread: true,
+                params: vec![CommandParam { required: true, ..ids_param("Findings", "f1 f2") }],
+            },
+            CommandInfo {
                 id: "reset".into(),
                 title: "Count review rounds again".into(),
                 description: "Forget the rounds this thread has had and what they reviewed, \
@@ -766,7 +1011,8 @@ impl Commands for Reviewers {
     fn run(&mut self, call: CommandCall) -> Result<Reply<CommandResult>, String> {
         self.rewatch();
         let thread = call.thread.clone().ok_or("name a thread")?;
-        let done = |message: String| Ok(Reply::Now(CommandResult { message, thread: None }));
+        let done =
+            |message: String| Ok(Reply::Now(CommandResult { message, thread: None, data: None }));
         match call.command.as_str() {
             "request" => {
                 self.next_token += 1;
@@ -784,6 +1030,56 @@ impl Commands for Reviewers {
                 }
                 done(describe(&config, &state_of(&thread)))
             }
+            "findings" => {
+                let findings = findings_of(&thread);
+                let data: Vec<serde_json::Value> = findings
+                    .iter()
+                    .map(|(record, status, note)| {
+                        serde_json::json!({
+                            "id": record.id,
+                            "round": record.round,
+                            "reviewer": record.reviewer,
+                            "reviewer_thread": record.critic,
+                            "file": record.file,
+                            "line": record.line,
+                            "severity": record.severity,
+                            "text": record.text,
+                            "stale": record.stale,
+                            "comment": record.comment,
+                            "status": status.as_str(),
+                            "note": note,
+                        })
+                    })
+                    .collect();
+                let mut lines: Vec<String> = findings
+                    .iter()
+                    .map(|(record, status, note)| {
+                        let at = record.location().map(|at| format!(" {at}")).unwrap_or_default();
+                        let stale = if record.stale { " (stale)" } else { "" };
+                        let note = note.as_deref().map(|n| format!(" — {n}")).unwrap_or_default();
+                        format!(
+                            "{}  {:<9} {:<8} {}{at}{stale}: {}{note}",
+                            record.id,
+                            status.as_str(),
+                            record.severity.as_str(),
+                            record.reviewer,
+                            record.text
+                        )
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    lines.push("no findings yet".into());
+                }
+                let data = serde_json::to_string(&data).expect("findings serialize");
+                Ok(Reply::Now(CommandResult {
+                    message: lines.join("\n"),
+                    thread: None,
+                    data: Some(data),
+                }))
+            }
+            "send" => done(send_findings(&thread, &ids_arg(&call))?),
+            "dismiss" => done(dismiss_findings(&thread, &ids_arg(&call), false)?),
+            "restore" => done(dismiss_findings(&thread, &ids_arg(&call), true)?),
             "reset" => {
                 reset(&thread);
                 done("review rounds are counted again from none".into())
@@ -964,6 +1260,13 @@ impl Plugin for Reviewers {
         self.models_came(answer);
     }
 
+    fn on_comments_changed(&mut self, thread: String) {
+        // The agent resolved one, the user sent or reopened one: their findings moved.
+        if !state_of(&thread).findings.is_empty() {
+            redraw(&thread);
+        }
+    }
+
     fn on_thread_changes(&mut self, answer: ThreadChanges) {
         let Some(pending) = self.changes.remove(&answer.request) else { return };
         let (thread, token) = (pending.thread.clone(), pending.token);
@@ -1017,6 +1320,7 @@ impl Plugin for Reviewers {
         critic.done = true;
         let all_done = round.critics.iter().all(|critic| critic.done);
         save_state(&thread, &state);
+        redraw(&thread);
         if all_done {
             self.close_round(&thread);
         }

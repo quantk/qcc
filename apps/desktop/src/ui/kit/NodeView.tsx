@@ -4,6 +4,7 @@
 
 import { type ReactNode, useState } from "react";
 
+import { store } from "../../state/store";
 import { Choice } from "./Choice";
 import { Markdown } from "./Markdown";
 import { Button } from "@/components/ui/button";
@@ -158,6 +159,25 @@ function draw(value: unknown, act: NodeAction, busy: boolean, depth: number, key
             onChange={(value) => act(action, value ?? "")}
           />
         </label>
+      );
+    }
+    case "link": {
+      // A place in the app, opened by the app: a thread, or a file (and line) of its
+      // changes. A plugin names the place; it cannot point anywhere else.
+      const thread = str(node.thread);
+      if (!thread) return null;
+      const path = str(node.path);
+      const line = typeof node.line === "number" && Number.isInteger(node.line) && node.line > 0 ? node.line : null;
+      const label = str(node.label) ?? (path ? (line ? `${path}:${line}` : path) : "Open");
+      return (
+        <button
+          key={key}
+          type="button"
+          className="pn-link h-auto cursor-pointer border-0 bg-transparent p-0 text-sm text-primary underline-offset-2 shadow-none hover:underline"
+          onClick={() => (path ? store().openChangesAt(thread, path, line) : store().select(thread))}
+        >
+          {label}
+        </button>
       );
     }
     case "switch": {

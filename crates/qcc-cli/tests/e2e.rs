@@ -3443,9 +3443,25 @@ fn eventually<T>(what: &str, check: impl Fn() -> Option<T>) -> T {
 }
 
 impl Daemon {
+    /// The thread's reviewers: service threads, listed only with `--hidden`.
     fn children(&self, thread: &str) -> Vec<Value> {
-        let listed = self.qcc(&["thread", "list", "--parent", thread, "--json"]).json();
+        let listed = self.qcc(&["thread", "list", "--parent", thread, "--hidden", "--json"]).json();
         listed["threads"].as_array().unwrap().clone()
+    }
+
+    /// The thread's findings, as `qcc reviewers findings --json` lists them.
+    fn findings(&self, thread: &str) -> Vec<Value> {
+        let listed = self.qcc(&["reviewers", "findings", "--thread", thread, "--json"]);
+        assert!(listed.ok, "{}", listed.stderr);
+        listed.json().as_array().unwrap().clone()
+    }
+
+    /// Every comment of the thread, resolved ones too.
+    fn comments_all(&self, thread: &str) -> Vec<Value> {
+        let listed =
+            self.qcc_env(&["--json", "comment", "list", "--all"], &[("QCC_THREAD_ID", thread)]);
+        assert!(listed.ok, "{}", listed.stderr);
+        listed.json_lines()[0].as_array().unwrap().clone()
     }
 
     fn comments(&self, thread: &str) -> Vec<Value> {
@@ -3522,6 +3538,11 @@ fn reviewers_review_a_thread_once_its_agent_is_done_and_leave_comments() {
     // Then it stays idle: one reviewer looks.
     let critic = eventually("started a reviewer", || daemon.children(&id).first().cloned());
     assert_eq!(critic["parent"], id.as_str());
+    // A service thread: not among the thread's children in lists, nor anywhere else.
+    assert_eq!(critic["hidden"], true);
+    let listed = daemon.qcc(&["thread", "list", "--parent", &id, "--json"]).json();
+    assert!(listed["threads"].as_array().unwrap().is_empty(), "{listed}");
+    assert!(!daemon.qcc(&["thread", "list"]).stdout.contains(critic["id"].as_str().unwrap()));
     assert_eq!(critic["permission_mode"], "read-only", "echo runs reviewers read-only");
     let critic = critic["id"].as_str().unwrap().to_owned();
     assert!(daemon.qcc(&["thread", "wait", &critic]).ok);
@@ -3600,25 +3621,27 @@ fn reviewers_send_their_findings_to_the_agent_in_one_message() {
     let events = daemon.eventually(&id, "was sent the findings", |events| {
         inputs(events).iter().any(|text| text.starts_with("qcc reviewers finished review round 1"))
     });
-    let sent: Vec<&str> = inputs(&events)
-        .into_iter()
-        .filter(|text| text.starts_with("qcc reviewers finished"))
+    let sent: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["type"] == "input/submitted")
+        .filter(|e| e["text"].as_str().unwrap().starts_with("qcc reviewers finished"))
         .collect();
     assert_eq!(sent.len(), 1);
+    let text = sent[0]["text"].as_str().unwrap();
+    let notes = sent[0]["notes"].to_string();
     let comment =
         daemon.comments(&id).iter().find(|c| c["author"]["name"] == "finder").cloned().unwrap();
     let id_of_comment = comment["id"].as_str().unwrap();
-    assert!(
-        sent[0].contains(&format!(
-            "(high, from finder) [{id_of_comment}] at a.txt:2: Name this better"
-        )),
-        "{}",
-        sent[0]
-    );
-    assert!(sent[0].contains("qcc comment resolve"), "{}", sent[0]);
+    // The comment goes along as the user's "send to agent" hands one over.
+    assert!(text.contains("One finding on lines of your changes is below"), "{text}");
+    assert!(notes.contains(&format!("{id_of_comment} at a.txt:2")), "{notes}");
+    assert!(notes.contains("Name this better") && notes.contains("qcc comment resolve"), "{notes}");
+    assert!(comment["sent_at"].is_u64(), "{comment}");
     // The echo reviewer of the general profile answered with no findings object:
     // its words go along as one remark.
-    assert!(sent[0].contains("from general)"), "{}", sent[0]);
+    assert!(text.contains("from general)"), "{text}");
+    let findings = daemon.findings(&id);
+    assert!(findings.iter().all(|f| f["status"] == "sent"), "{findings:?}");
     // The agent's answer to them is a turn of its own, which is not reviewed again.
     assert!(daemon.qcc(&["thread", "wait", &id]).ok);
     write(repo.join("a.txt"), "one\ntwo\nthree\n");
@@ -3730,4 +3753,83 @@ fn the_reviewers_panel_offers_the_models_of_the_agent_and_is_redrawn_when_they_c
     assert!(picked.is_ok(), "{picked:?}");
     let status = daemon.qcc(&["reviewers", "configure", "--thread", &id]);
     assert!(status.stdout.contains("agent: echo, model: echo-2"), "{}", status.stdout);
+}
+
+#[test]
+fn reviewers_findings_are_listed_sent_and_dismissed_from_the_cli() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(dir.path(), &[("a.txt", "one\n"), (".qcc/reviewers/finder.md", FINDER)]);
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let id = daemon.spawn_in_dir(&repo, "first");
+    let configured = daemon.qcc(&[
+        "reviewers",
+        "configure",
+        "--thread",
+        &id,
+        "--profiles",
+        "finder,general",
+        "--trigger",
+        "manual",
+    ]);
+    assert!(configured.ok, "{}", configured.stderr);
+    assert_eq!(
+        daemon.qcc(&["reviewers", "findings", "--thread", &id]).stdout.trim(),
+        "no findings yet"
+    );
+    write(repo.join("a.txt"), "one\ntwo\n");
+    assert!(daemon.qcc(&["reviewers", "request", "--thread", &id]).ok);
+    let findings = eventually("found something", || {
+        let findings = daemon.findings(&id);
+        (findings.len() == 2).then_some(findings)
+    });
+    // On a line, with its comment; and the general reviewer's loose words as a remark.
+    let on_line = findings.iter().find(|f| f["reviewer"] == "finder").unwrap();
+    let remark = findings.iter().find(|f| f["reviewer"] == "general").unwrap();
+    assert_eq!((on_line["file"].as_str(), on_line["line"].as_u64()), (Some("a.txt"), Some(2)));
+    assert!(on_line["comment"].is_string() && remark["comment"].is_null());
+    assert!(findings.iter().all(|f| f["status"] == "open"), "{findings:?}");
+    let (line_id, remark_id) =
+        (on_line["id"].as_str().unwrap().to_owned(), remark["id"].as_str().unwrap().to_owned());
+    let listed = daemon.qcc(&["reviewers", "findings", "--thread", &id]).stdout;
+    assert!(listed.contains(&format!("{line_id}  open")) && listed.contains("a.txt:2"), "{listed}");
+
+    // Sent by id, as words: one message, the comment along with it.
+    let sent = daemon.qcc(&["reviewers", "send", &line_id, "--thread", &id]);
+    assert!(sent.ok && sent.stdout.contains("sent 1 finding"), "{}{}", sent.stdout, sent.stderr);
+    let events = daemon.eventually(&id, "was sent the finding", |events| {
+        inputs(events)
+            .iter()
+            .any(|text| text.starts_with("The user asks you to deal with findings"))
+    });
+    let notes =
+        events.iter().rev().find(|e| e["type"] == "input/submitted").unwrap()["notes"].to_string();
+    assert!(notes.contains("Name this better"), "{notes}");
+    let status = |finding: &str| {
+        let all = daemon.findings(&id);
+        all.iter().find(|f| f["id"] == finding).unwrap()["status"].as_str().unwrap().to_owned()
+    };
+    assert_eq!(status(&line_id), "sent");
+    assert_eq!(status(&remark_id), "open");
+
+    // Dismissed: closed for the agent too. Restored: back where it was.
+    assert!(daemon.qcc(&["reviewers", "dismiss", &line_id, &remark_id, "--thread", &id]).ok);
+    assert_eq!(status(&line_id), "dismissed");
+    assert_eq!(status(&remark_id), "dismissed");
+    let comment = daemon.comments_all(&id);
+    assert_eq!(comment[0]["resolution"], "Dismissed by the user", "{comment:?}");
+    assert!(daemon.qcc(&["reviewers", "restore", &line_id, "--thread", &id]).ok);
+    assert_eq!(status(&line_id), "sent");
+
+    // The agent resolves the comment from its session: fixed, with its note.
+    let env = [("QCC_THREAD_ID", id.as_str())];
+    let comment_id = on_line["comment"].as_str().unwrap();
+    assert!(daemon.qcc_env(&["comment", "resolve", comment_id, "--note", "renamed"], &env).ok);
+    let all = daemon.findings(&id);
+    let fixed = all.iter().find(|f| f["id"] == line_id.as_str()).unwrap();
+    assert_eq!(
+        (fixed["status"].as_str(), fixed["note"].as_str()),
+        (Some("fixed"), Some("renamed"))
+    );
+    let unknown = daemon.qcc(&["reviewers", "dismiss", "f99", "--thread", &id]);
+    assert!(!unknown.ok && unknown.stderr.contains("no finding f99"), "{}", unknown.stderr);
 }

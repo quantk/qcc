@@ -276,6 +276,9 @@ pub struct CommandParam {
     pub required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub placeholder: Option<String>,
+    /// The CLI's words without a `--name` go here, separated by spaces.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub positional: bool,
 }
 
 /// A command a plugin contributes to the CLI and the app's command palette.

@@ -21,6 +21,7 @@ import {
 import type { ChangedFile } from "../../api/protocol.gen";
 import { type ChangesState, type ThreadChangesReader, isBinary } from "../../state/changes";
 import type { DiffFile, DiffLine } from "../../state/diff";
+import { type ChangesFocus, focusRow } from "../../state/focus";
 import {
   type DiffRow,
   type FileNote,
@@ -57,6 +58,7 @@ export function ChangesDiff({
   review,
   lead,
   inset,
+  focus,
 }: {
   reader: ThreadChangesReader;
   state: ChangesState;
@@ -65,6 +67,8 @@ export function ChangesDiff({
   lead: (jump: (path: string) => void) => ReactNode;
   /** Pixels between the diff and the sides of the view. */
   inset: number;
+  /** A place to bring into view, asked for from elsewhere (a reviewer's finding). */
+  focus?: ChangesFocus | null;
 }) {
   const owner = useId();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -209,6 +213,31 @@ export function ChangesDiff({
     anchor.current = { key, offset: 0, header: `f:${path}`, headerOffset: 0 };
     element.scrollTop = start;
   }, [rows, state, virtualizer]);
+
+  // A place asked for: its file is opened, read, then scrolled to.
+  const focusing = useRef<ChangesFocus | null>(null);
+  const focusSeen = useRef(0);
+  useEffect(() => {
+    if (!focus || focus.seq === focusSeen.current) return;
+    focusSeen.current = focus.seq;
+    focusing.current = focus;
+    toggle(focus.path, true);
+  }, [focus, toggle]);
+  useLayoutEffect(() => {
+    const want = focusing.current;
+    const element = scrollRef.current;
+    if (!want || !element) return;
+    const failed = state.diffs.get(want.path)?.state === "failed";
+    const found = focusRow(want, fileOf(want.path));
+    const key = found ?? `f:${want.path}`;
+    const at = rows.findIndex((row) => row.key === key);
+    const start = virtualizer.measurementsCache[at + 1]?.start;
+    if (at < 0 || start === undefined) return;
+    anchor.current = { key, offset: 0, header: `f:${want.path}`, headerOffset: 0 };
+    element.scrollTop = start;
+    // Not read yet: the header is in view, so it is read; the line comes after.
+    if (found !== null || failed) focusing.current = null;
+  }, [rows, state, virtualizer, fileOf]);
 
   const gutter = `calc(${extent.digits}ch + 12px)`;
   const width = `max(100%, calc(${2 * inset + 2}px + 2 * ${gutter} + ${extent.columns + 3}ch + 12px))`;

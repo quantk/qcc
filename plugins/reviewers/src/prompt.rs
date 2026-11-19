@@ -163,39 +163,50 @@ pub fn critic(review: &Review<'_>, files: &[&Changed]) -> String {
     prompt
 }
 
-/// One finding in the message to the agent.
-pub struct Sent<'a> {
+/// A remark in the message to the agent: a finding with no comment to carry it.
+pub struct Remark<'a> {
     pub reviewer: &'a str,
     pub finding: &'a Finding,
-    /// The comment that holds it, if one does.
-    pub comment: Option<&'a str>,
 }
 
-/// The one message a round sends the agent.
-pub fn summary(round: u32, sent: &[Sent<'_>], stale: bool, problems: &[String]) -> String {
-    let mut text = format!("qcc reviewers finished review round {round} of your changes.");
+/// The message that hands findings to the agent. The findings on lines go along as
+/// comments, which the daemon spells out in full with how to resolve them; the
+/// message says so, and lists the remarks that have no comment.
+pub fn findings_message(
+    intro: &str,
+    comments: usize,
+    remarks: &[Remark<'_>],
+    stale: bool,
+    problems: &[String],
+) -> String {
+    let mut text = intro.to_owned();
     if stale {
         text.push_str(
-            " You changed files while they worked, so some lines they point at may have moved.",
+            " You changed files while the reviewers worked, so some lines they point at may \
+             have moved.",
         );
     }
-    if sent.is_empty() {
+    if comments == 0 && remarks.is_empty() {
         text.push_str(" They found nothing to change.");
-    } else {
-        text.push_str(" Their findings:\n");
-        for item in sent {
+    }
+    if comments > 0 {
+        text.push_str(&format!(
+            " {} on lines of your changes {} below, as comments. Fix what you agree with, and \
+             resolve each comment when it is dealt with, saying what you did or why not.",
+            if comments == 1 { "One finding".to_owned() } else { format!("{comments} findings") },
+            if comments == 1 { "is" } else { "are" },
+        ));
+    }
+    if !remarks.is_empty() {
+        text.push_str("\n\nRemarks about the change as a whole, with no comment to resolve:\n");
+        for item in remarks {
             let place = item.finding.location().map(|at| format!(" at {at}")).unwrap_or_default();
-            let comment = item.comment.map(|id| format!(" [{id}]")).unwrap_or_default();
             text.push_str(&format!(
-                "\n- ({}, from {}){comment}{place}: {}",
+                "\n- ({}, from {}){place}: {}",
                 item.finding.severity, item.reviewer, item.finding.text
             ));
         }
-        text.push_str(
-            "\n\nFix what you agree with. Each finding in [brackets] is a comment on your \
-             changes: when it is dealt with, resolve it with `qcc comment resolve <id> --note \
-             \"<what you did, or why not>\"` (if `qcc` is not found, use \"$QCC_BIN\").",
-        );
+        text.push_str("\n\nSay in your reply what you did about each remark.");
     }
     for problem in problems {
         text.push_str(&format!("\n\n(Note: {problem}.)"));
@@ -291,26 +302,32 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_lists_findings_with_their_comments() {
-        let found = Finding {
-            file: Some("a.rs".into()),
-            line: Some(3),
+    fn the_message_points_to_the_comments_and_lists_the_remarks() {
+        let general =
+            Finding { file: None, line: None, severity: Severity::Low, text: "no tests".into() };
+        let elsewhere = Finding {
+            file: Some("b.rs".into()),
+            line: Some(4),
             severity: Severity::High,
             text: "boom".into(),
         };
-        let general =
-            Finding { file: None, line: None, severity: Severity::Low, text: "no tests".into() };
-        let sent = [
-            Sent { reviewer: "general", finding: &found, comment: Some("cmt_1") },
-            Sent { reviewer: "security", finding: &general, comment: None },
+        let remarks = [
+            Remark { reviewer: "security", finding: &general },
+            Remark { reviewer: "general", finding: &elsewhere },
         ];
-        let text = summary(2, &sent, true, &["security did not answer in the format".into()]);
-        assert!(text.contains("round 2"));
+        let problems = ["security did not answer in the format".to_owned()];
+        let text = findings_message("Round 2 is done.", 2, &remarks, true, &problems);
+        assert!(text.starts_with("Round 2 is done."));
         assert!(text.contains("may have moved"));
-        assert!(text.contains("- (high, from general) [cmt_1] at a.rs:3: boom"));
+        assert!(text.contains("2 findings on lines of your changes are below, as comments"));
         assert!(text.contains("- (low, from security): no tests"));
-        assert!(text.contains("qcc comment resolve"));
+        assert!(text.contains("- (high, from general) at b.rs:4: boom"));
         assert!(text.contains("(Note: security did not answer"));
-        assert!(summary(1, &[], false, &[]).contains("found nothing"));
+        let one = findings_message("Done.", 1, &[], false, &[]);
+        assert!(
+            one.contains("One finding on lines of your changes is below")
+                && !one.contains("Remarks")
+        );
+        assert!(findings_message("Done.", 0, &[], false, &[]).contains("found nothing"));
     }
 }

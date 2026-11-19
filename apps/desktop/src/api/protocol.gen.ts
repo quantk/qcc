@@ -257,6 +257,8 @@ export type CommandParam = {
 	label: string,
 	required: boolean,
 	placeholder?: string | null,
+	/**  The CLI's words without a `--name` go here, separated by spaces. */
+	positional?: boolean,
 };
 
 export type CommandRunParams = {
@@ -272,6 +274,8 @@ export type CommandRunResult = {
 	message: string,
 	/**  A thread the command made. */
 	thread_id?: ThreadId | null,
+	/**  What the command found, for programs. */
+	data?: Value | null,
 };
 
 export type CommentAddParams = {
@@ -663,6 +667,8 @@ export type LineComment = {
 	resolved_at?: number | null,
 	/**  What was done about it, in the words of whoever resolved it. */
 	resolution?: string | null,
+	/**  When it was last handed to the agent with a message. */
+	sent_at?: number | null,
 	/**  Who left it when it was not the user: a plugin, such as a reviewer. */
 	author?: CommentAuthor | null,
 };

@@ -52,6 +52,7 @@ import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
 import { noteUiChange, type UiChanges } from "./uiChanges";
+import type { ChangesFocus } from "./focus";
 
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
@@ -156,6 +157,8 @@ export type AppState = {
   comments: Readonly<Record<ThreadId, readonly LineComment[]>>;
   /** How often plugins said their views changed; see `uiChanges.ts`. */
   uiChanges: UiChanges;
+  /** A place in a thread's changes to bring into view; `seq` tells each request apart. */
+  changesFocus: ChangesFocus | null;
   /** The latest usage limits each provider's account reported; see `limits.ts`. */
   limits: Readonly<Record<ProviderId, ProviderLimits>>;
   /** The agents are being asked for their limits now. */
@@ -204,6 +207,7 @@ export class AppStore {
     agentSkills: {},
     comments: {},
     uiChanges: {},
+    changesFocus: null,
     limits: {},
     limitsRefreshing: false,
     limitErrors: [],
@@ -636,6 +640,14 @@ export class AppStore {
     this.go({ thread: threadId, view: this.state.view }, true);
   };
 
+  /** Open a thread's changes at a file, and a line of it as it is now. */
+  openChangesAt = (threadId: ThreadId, path: string, line: number | null) => {
+    this.select(threadId);
+    this.openThreadTab("changes");
+    const seq = (this.state.changesFocus?.seq ?? 0) + 1;
+    this.set({ changesFocus: { threadId, path, line, seq } });
+  };
+
   /** Leave the selected thread for one of the app's own screens. */
   openView = (view: string) => {
     this.go({ thread: null, view }, true);
@@ -655,9 +667,16 @@ export class AppStore {
     const threadId = place.thread;
     if (threadId === this.state.selected) return;
     this.set({ selected: threadId, loading: false, threadTab: null });
+    // A thread lists leave out (a plugin's service thread) is read on its own.
+    if (threadId !== null && !this.state.threads[threadId]) void this.readThread(threadId);
     this.selectedHold?.();
     this.selectedHold = threadId === null ? null : this.hold(threadId);
     this.seeSelected();
+  }
+
+  private async readThread(threadId: ThreadId) {
+    const result = await this.attempt(() => this.api.call("thread.get", { thread_id: threadId }));
+    if (result) this.mergeThreads([result.thread]);
   }
 
   async spawn(params: ThreadSpawnParams): Promise<Thread | null> {

@@ -20,7 +20,9 @@ The contract is `wit/plugin.wit`; how the pieces fit together is in
 A plugin can add its own screen and thread tab to the app, and draw timeline items of its own
 kind. It does not send markup or code; it answers with a tree of nodes from a fixed set (`stack`,
 `row`, `heading`, `text`, `markdown`, `code`, `badge`, `keyValues`, `table`, `button`, `input`,
-`select`, `switch`, `divider`). The app draws the nodes it knows and skips the rest. A `select`
+`select`, `switch`, `link`, `divider`). The app draws the nodes it knows and skips the rest. A
+`link` opens a place of the app: a thread, or with `path` (and `line`) that file of the thread's
+changes; a plugin names the place and cannot point anywhere else. A `select`
 sends its action with the value picked, a `switch` with `true` or `false`, and an `input` given a
 value starts with it and keeps what was submitted: enough for a small settings form.
 
@@ -62,7 +64,10 @@ plugin contributions are registered in the same registry as the built-in modules
 ## Commands, skills and threads
 
 `Commands` adds commands for the CLI (`qcc <plugin-id> <command>`) and the app's palette. A command
-has a title, a description, an "acts on a thread" flag and text parameters. The daemon itself checks
+has a title, a description, an "acts on a thread" flag and text parameters. One parameter may be
+`positional`: the CLI's words without a `--name` go to it, separated by spaces (`qcc reviewers
+dismiss f1 f2`). A result may carry `data`, JSON for programs, which `qcc … --json` prints instead
+of the message. The daemon itself checks
 that the thread exists and that required parameters are given. `Plugin::skills` offers instructions
 to agents (the `skills` permission: their text can reach every session); a skill with `on_request`
 is given only to threads that asked for it (`SpawnOptions::skills_enabled`). The `threads` import
@@ -92,7 +97,11 @@ is `plugins/reviewers`, see [Reviewers](reviewers.md)):
   view or for every copy without a thread. The daemon sends watching clients `ui.changed`, and the
   app asks for the view again. Use it when something the view shows arrives after it was drawn.
 - **Comments** (permission `comments`): `comments::add` leaves a comment on a line of a thread's
-  changes, and `comments::list` reads them. The daemon records the plugin as the comment's author
+  changes, and `comments::list` reads them; `comments::resolve` resolves or reopens comments the
+  plugin left (others' are refused), and `comments::send` (with `threads` too) hands comments to
+  the agent with a message, the way the user's "Send to agent" does. A comment's `sent-at` says
+  when it last went to the agent, whoever sent it. `Plugin::on_comments_changed` hears of every
+  change to a thread's comments. The daemon records the plugin as the comment's author
   (with the name, severity, reviewer thread and stale mark the plugin gives); the app shows it, and
   the note that hands comments to an agent says whose each one is.
 - **Files** (permission `files`): `files::read` and `files::list` read text files in a thread's

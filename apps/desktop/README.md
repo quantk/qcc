@@ -215,7 +215,8 @@ is how contributions that arrive at runtime stay current.
 Plugins of the daemon contribute through the same registry. `modules/plugin-ui` reads
 `ui.contributions` on every connection and turns each entry into a registration: a
 block (an `app` view becomes a block of the screens, a `threadTab` a thread block
-offered for all threads or only for the plugin's own providers; the user can move
+offered for all threads or only for the plugin's own providers, a `threadPanel` the
+same in the panel beside the thread; the user can move
 either to any slot that fits it, like a built-in block) or the renderer of the plugin's
 extension items. What a plugin draws is a tree of UI nodes;
 `ui/kit/NodeView.tsx` draws the closed set of node types with the app's own components

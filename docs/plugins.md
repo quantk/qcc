@@ -20,7 +20,9 @@ The contract is `wit/plugin.wit`; how the pieces fit together is in
 A plugin can add its own screen and thread tab to the app, and draw timeline items of its own
 kind. It does not send markup or code; it answers with a tree of nodes from a fixed set (`stack`,
 `row`, `heading`, `text`, `markdown`, `code`, `badge`, `keyValues`, `table`, `button`, `input`,
-`divider`). The app draws the nodes it knows and skips the rest.
+`select`, `switch`, `divider`). The app draws the nodes it knows and skips the rest. A `select`
+sends its action with the value picked, a `switch` with `true` or `false`, and an `input` given a
+value starts with it and keeps what was submitted: enough for a small settings form.
 
 ```rust
 use qcc_plugin_sdk::{prelude::*, ui};   // feature "ui"
@@ -30,7 +32,7 @@ impl Ui for Notes {
         vec![UiViewInfo {
             id: "notes".into(),
             title: "Notes".into(),
-            placement: UiPlacement::ThreadTab,   // or App: a separate screen
+            placement: UiPlacement::ThreadTab,   // App: a separate screen; ThreadPanel: the panel beside the thread
             scope: UiScope::AllThreads,          // or OwnThreads: only threads of its own providers
         }]
     }
@@ -67,6 +69,26 @@ is given only to threads that asked for it (`SpawnOptions::skills_enabled`). The
 (the `threads` permission) creates, reads and directs threads as a client of the daemon, and
 `threads::watch` sends the `on_thread_settled` event when a thread finishes. An example of all of
 this is `plugins/orchestration` (see [Orchestration](orchestration.md)).
+
+A few more imports serve plugins that work alongside the user's threads (an example of all of them
+is `plugins/reviewers`, see [Reviewers](reviewers.md)):
+
+- **Turn events** (permission `turn-events`): `Plugin::on_turn_ended` hears of every turn that ends,
+  in every thread, with the thread as it is then and how the turn ended. Unlike `threads::watch`,
+  nothing needs to be subscribed again, and a thread that is already idle does not fire.
+- **Diffs** (`threads`): `threads::diff` asks for one patch of what a thread changed, as `qcc thread
+  diff` shows it; the environment that knows may take a while, so the answer comes later to
+  `Plugin::on_thread_diff` with the id `diff` returned.
+- **Skills of a thread** (`threads`): `threads::set_skill` turns one of the plugin's own skills on or
+  off in a thread, the way the user can. **Agents** (`threads`): `threads::providers` lists them.
+- **Comments** (permission `comments`): `comments::add` leaves a comment on a line of a thread's
+  changes, and `comments::list` reads them. The daemon records the plugin as the comment's author
+  (with the name, severity, reviewer thread and stale mark the plugin gives); the app shows it, and
+  the note that hands comments to an agent says whose each one is.
+- **Files** (permission `files`): `files::read` and `files::list` read text files in a thread's
+  working directory (`Root::Thread`) or in the plugin's own folder `<data>/plugin-data/<id>`
+  (`Root::Own`); paths are relative and cannot leave the root, through `..` or a link. Files are
+  read up to 1 MiB.
 
 `Plugin::settings` declares the plugin's settings (`SettingField` with `SettingKind`), and
 `Plugin::on_settings` receives their values: after the daemon starts and on every change. No

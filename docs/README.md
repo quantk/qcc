@@ -7,6 +7,9 @@
   worktrees, delivering their work back, comments on changes.
 - [orchestration.md](orchestration.md) — agents starting agents through the CLI, mode
   inheritance, `thread wait`, and the `orchestration` plugin (`handoff`, `review`).
+- [reviewers.md](reviewers.md) — the `reviewers` plugin: reviewer profiles, triggers (when the
+  agent is done, every turn, by hand), reviewers as child threads, findings as line comments or one
+  message to the agent.
 - [automations.md](automations.md) — prompts the daemon sends an agent on a schedule (cron or
   intervals): new thread or one thread per automation, overlapping and missed runs, history.
 - [desktop.md](desktop.md) — running the desktop app (`./dev desktop`, `./dev app`) and what each

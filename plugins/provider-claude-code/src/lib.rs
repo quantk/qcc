@@ -17,6 +17,35 @@ use bridge::Bridge;
 
 const PROGRAM: &str = "claude";
 
+/// Commands a read-only session may run: they only look.
+const READ_ONLY_COMMANDS: [&str; 11] = [
+    "git diff",
+    "git log",
+    "git show",
+    "git status",
+    "git blame",
+    "git ls-files",
+    "qcc thread diff",
+    "qcc thread changes",
+    "qcc thread show",
+    "qcc comment list",
+    "ls",
+];
+
+/// How a read-only session is started. `dontAsk` refuses whatever is not allowed
+/// here without asking; only the tools that read are there at all, and Bash only
+/// for the commands that look. `--restricted` keeps the user's settings files out,
+/// so allow rules of their own cannot loosen it.
+fn read_only_args() -> Vec<String> {
+    let mut args: Vec<String> =
+        ["--permission-mode", "dontAsk", "--restricted", "--tools", "Read,Grep,Glob,Bash"]
+            .map(String::from)
+            .into();
+    args.push("--allowedTools".into());
+    args.extend(READ_ONLY_COMMANDS.iter().map(|command| format!("Bash({command}:*)")));
+    args
+}
+
 #[derive(Default)]
 struct ClaudeCode {
     sessions: Sessions<Bridge>,
@@ -32,6 +61,7 @@ impl Provider for ClaudeCode {
                 resume: true,
                 steer: true,
                 permission_modes: vec![
+                    PermissionMode::ReadOnly,
                     PermissionMode::Ask,
                     PermissionMode::AcceptEdits,
                     PermissionMode::Auto,
@@ -68,9 +98,12 @@ impl Provider for ClaudeCode {
         if let Some(effort) = &start.effort {
             args.extend(["--effort".to_owned(), effort.clone()]);
         }
-        if let Some(mode) = start.permission_mode {
+        if start.permission_mode == Some(PermissionMode::ReadOnly) {
+            args.extend(read_only_args());
+        } else if let Some(mode) = start.permission_mode {
             // Without the flag the user's own Claude Code settings decide.
             let mode = match mode {
+                PermissionMode::ReadOnly => unreachable!("handled above"),
                 PermissionMode::Ask => "manual",
                 PermissionMode::AcceptEdits => "acceptEdits",
                 PermissionMode::Auto => "auto",
@@ -100,7 +133,11 @@ impl Provider for ClaudeCode {
             cwd: Some(start.cwd),
         })?;
 
-        self.sessions.insert(&start.thread, process, Bridge::new(start.resume.clone()));
+        let mut bridge = Bridge::new(start.resume.clone());
+        if start.permission_mode == Some(PermissionMode::ReadOnly) {
+            bridge = bridge.read_only();
+        }
+        self.sessions.insert(&start.thread, process, bridge);
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {
             let prompt = message(prompt, &start.prompt_notes, &start.prompt_attachments, true);

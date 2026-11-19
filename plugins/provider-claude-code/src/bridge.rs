@@ -139,6 +139,8 @@ pub struct Bridge {
     approvals: HashMap<String, Approval>,
     /// Tool calls the user refused: they settle as declined, not failed.
     denied: HashSet<String>,
+    /// A read-only session: nobody is asked, whatever would be asked is refused.
+    read_only: bool,
     total: TokenUsage,
     /// The main agent's latest request of the running turn. Its input is what the
     /// context holds; the turn's `result` sums every request and says nothing of that.
@@ -284,6 +286,7 @@ impl Bridge {
             tools: HashMap::new(),
             approvals: HashMap::new(),
             denied: HashSet::new(),
+            read_only: false,
             total: TokenUsage { input_tokens: 0, output_tokens: 0, cached_input_tokens: None },
             last_request: None,
             context_window: None,
@@ -294,6 +297,13 @@ impl Bridge {
             context_queries: 0,
             usage_queries: 0,
         }
+    }
+
+    /// A read-only session. Claude's own `dontAsk` mode refuses what is not allowed
+    /// up front; should it ask anyway, the bridge refuses instead of the user.
+    pub fn read_only(mut self) -> Self {
+        self.read_only = true;
+        self
     }
 
     /// The user sent a message that starts a turn.
@@ -516,6 +526,16 @@ impl Bridge {
             return;
         }
         let tool_use_id = str_field(request, "tool_use_id").to_owned();
+        if self.read_only {
+            if !tool_use_id.is_empty() {
+                self.denied.insert(tool_use_id);
+            }
+            let message = "This session is read-only: nothing that changes files may run, and \
+                           nobody can be asked. Read files and run only the read-only commands \
+                           you were allowed.";
+            output.writes.push(denial(&request_id, message).to_string());
+            return;
+        }
         let name = match str_field(request, "display_name") {
             "" => str_field(request, "tool_name"),
             name => name,
@@ -1301,6 +1321,20 @@ mod tests {
         assert_eq!(late.deltas, []);
         assert!(late.writes[0].contains("\"request_id\":\"r2\""), "{late:?}");
         assert!(late.writes[0].contains("\"behavior\":\"deny\""));
+    }
+
+    #[test]
+    fn a_read_only_session_refuses_what_would_be_asked_and_asks_nobody() {
+        let ask = json!({"type": "control_request", "request_id": "r1",
+                         "request": {"subtype": "can_use_tool", "tool_name": "Write",
+                                     "tool_use_id": "tu-1", "input": {"file_path": "/w/a"}}})
+        .to_string();
+        let mut bridge = Bridge::new(None).read_only();
+        bridge.prompt("go");
+        let output = bridge.on_line(&ask);
+        assert!(output.deltas.is_empty(), "nobody is asked: {:?}", output.deltas);
+        assert!(output.writes[0].contains("\"behavior\":\"deny\""), "{output:?}");
+        assert!(output.writes[0].contains("read-only"), "{output:?}");
     }
 
     #[test]

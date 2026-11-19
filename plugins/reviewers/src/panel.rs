@@ -206,6 +206,17 @@ impl Reviewers {
         }
 
         self.agent_fields(thread, &config, &mut nodes);
+        // Reviewers whose agent cannot run read-only may stop to ask.
+        if let Ok(source) = threads::get(thread) {
+            let read_only = crate::read_only_providers();
+            for profile in profiles.iter().filter(|p| config.profiles.contains(&p.name)) {
+                let (provider, _, _) = crate::agent_for(&config, profile, &self.defaults, &source);
+                if !read_only.contains(&provider) {
+                    let note = crate::asks_note(&profile.name, &provider);
+                    nodes.push(ui::text(format!("{note}.")).tone(Tone::Warning));
+                }
+            }
+        }
 
         nodes.push(ui::select(
             "Findings",

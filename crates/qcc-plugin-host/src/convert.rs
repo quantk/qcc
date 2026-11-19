@@ -342,6 +342,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
 
 fn mode_from_wit(mode: wit::PermissionMode) -> PermissionMode {
     match mode {
+        wit::PermissionMode::ReadOnly => PermissionMode::ReadOnly,
         wit::PermissionMode::Ask => PermissionMode::Ask,
         wit::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
         wit::PermissionMode::Auto => PermissionMode::Auto,
@@ -351,6 +352,7 @@ fn mode_from_wit(mode: wit::PermissionMode) -> PermissionMode {
 
 fn mode_to_wit(mode: PermissionMode) -> wit::PermissionMode {
     match mode {
+        PermissionMode::ReadOnly => wit::PermissionMode::ReadOnly,
         PermissionMode::Ask => wit::PermissionMode::Ask,
         PermissionMode::AcceptEdits => wit::PermissionMode::AcceptEdits,
         PermissionMode::Auto => wit::PermissionMode::Auto,

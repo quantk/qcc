@@ -754,10 +754,15 @@ export type PendingInteraction = {
  *  with the agent's own configuration.
  * 
  *  The variants are declared from the strictest to the loosest, and the ordering
- *  follows that: `Ask < AcceptEdits < Auto < Full`. A thread a thread started may
+ *  follows that: `ReadOnly < Ask < AcceptEdits < Auto < Full`. A thread a thread started may
  *  never run looser than its parent, and this order is what "looser" means.
  */
 export type PermissionMode = 
+/**
+ *  The agent reads and looks around and changes nothing; nobody is asked. What
+ *  would change something is refused. For reviewers and other lookers.
+ */
+"read-only" | 
 /**  Everything the agent wants approved is asked of the user. */
 "ask" | 
 /**  File edits inside the working directory go through; the rest is asked. */

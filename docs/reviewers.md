@@ -100,9 +100,12 @@ Whatever the trigger, a round starts only if:
 
 ## Reviewers
 
-Each profile of a round is a child thread of the reviewed one, in its directory, in `ask` mode: it
-may read files and look around, and is told not to change anything; whatever it tries beyond that
-waits for you. You can open it like any other thread. Its prompt has the diff (the files its
+Each profile of a round is a child thread of the reviewed one, in its directory, in the
+**`read-only`** permission mode (see [Permission mode](agents.md#permission-mode)): it reads and
+looks around, nothing that changes a file runs, and it never stops to ask you. Claude Code, Codex
+and opencode can run that way. An agent that cannot runs its reviewer in `ask` mode instead, and
+then it may ask you for approval; the panel says so before a round, and `qcc reviewers request`
+says so when it starts one. You can open it like any other thread. Its prompt has the diff (the files its
 profile covers), the task the agent was given and how to answer: a JSON object at the end of the
 reply,
 

@@ -10,13 +10,16 @@ use crate::ids::ProviderId;
 /// with the agent's own configuration.
 ///
 /// The variants are declared from the strictest to the loosest, and the ordering
-/// follows that: `Ask < AcceptEdits < Auto < Full`. A thread a thread started may
+/// follows that: `ReadOnly < Ask < AcceptEdits < Auto < Full`. A thread a thread started may
 /// never run looser than its parent, and this order is what "looser" means.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, specta::Type,
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum PermissionMode {
+    /// The agent reads and looks around and changes nothing; nobody is asked. What
+    /// would change something is refused. For reviewers and other lookers.
+    ReadOnly,
     /// Everything the agent wants approved is asked of the user.
     Ask,
     /// File edits inside the working directory go through; the rest is asked.
@@ -28,10 +31,12 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
-    pub const ALL: [Self; 4] = [Self::Ask, Self::AcceptEdits, Self::Auto, Self::Full];
+    pub const ALL: [Self; 5] =
+        [Self::ReadOnly, Self::Ask, Self::AcceptEdits, Self::Auto, Self::Full];
 
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::ReadOnly => "read-only",
             Self::Ask => "ask",
             Self::AcceptEdits => "accept-edits",
             Self::Auto => "auto",
@@ -51,7 +56,9 @@ impl std::str::FromStr for PermissionMode {
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         Self::ALL.into_iter().find(|mode| mode.as_str() == text).ok_or_else(|| {
-            format!("unknown permission mode {text:?}; use ask, accept-edits, auto or full")
+            format!(
+                "unknown permission mode {text:?}; use read-only, ask, accept-edits, auto or full"
+            )
         })
     }
 }

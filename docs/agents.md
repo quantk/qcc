@@ -185,6 +185,7 @@ A thread has a mode that qcc passes to the agent: `--permission-mode` on `thread
 | Mode           | Meaning                                                              |
 | -------------- | -------------------------------------------------------------------- |
 | *(not set)*    | the agent's own configuration decides; qcc changes nothing           |
+| `read-only`    | the agent only reads and looks; what would change something is refused, and nobody is asked |
 | `ask`          | everything the agent wants approved is asked of the user             |
 | `accept-edits` | file edits in the working directory go through; everything else is a question |
 | `auto`         | the provider's own automatic reviewer decides; the user is not asked |
@@ -194,7 +195,26 @@ How the mode reaches the agent: Claude Code gets the `--permission-mode` flag; C
 sandbox, the approval policy and the reviewer (`user` or `auto_review`) in `thread/start`; for ACP
 agents the bridge itself answers permission requests (so `auto` is not available for opencode:
 ACP has no reviewer of its own). A provider declares the modes it supports, see
-`qcc plugin list`. Requests addressed to the user arrive in the timeline and are closed with
+`qcc plugin list`.
+
+`read-only` is the strictest mode, so any thread may start a child in it. A provider declares it
+only when it can enforce it, not just tell the agent:
+
+- **Claude Code**: `--permission-mode dontAsk` with only the tools that read (`Read`, `Grep`,
+  `Glob`) and `Bash` limited to commands that look (`git diff`, `git log`, `git show`,
+  `git status`, `git blame`, `git ls-files`, `qcc thread diff`, `qcc thread changes`,
+  `qcc thread show`, `qcc comment list`, `ls`), and `--restricted`, so that allow rules in the
+  user's settings files cannot loosen it. Anything else is refused without a prompt; should a
+  prompt come anyway, the bridge refuses it.
+- **Codex**: the `read-only` sandbox with the approval policy `never`. A command that writes fails
+  in the sandbox. The sandbox also keeps `qcc` from reaching the daemon's socket, so a Codex
+  session in this mode reads changes with git.
+- **opencode**: permission rules in `OPENCODE_PERMISSION` that deny everything but reading,
+  searching and the same looking commands; opencode refuses the rest itself, and the bridge
+  refuses any request that reaches it.
+
+Known limits: a command that looks may still take an option that writes (`git diff
+--output=<file>`); Claude Code's allow rules match by prefix and cannot tell. Requests addressed to the user arrive in the timeline and are closed with
 `qcc interaction resolve`.
 
 Claude Code's questions (`AskUserQuestion`) are not a permission request. The bridge asks them in

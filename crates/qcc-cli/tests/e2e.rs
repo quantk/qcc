@@ -1132,7 +1132,7 @@ fn permission_mode_is_set_at_spawn_and_can_be_changed() {
     assert!(!unsupported.ok);
     assert!(
         unsupported.stderr.contains(
-            "cannot enforce permission mode \"auto\"; it supports: ask, accept-edits, full"
+            "cannot enforce permission mode \"auto\"; it supports: read-only, ask, accept-edits, full"
         ),
         "{}",
         unsupported.stderr
@@ -1152,7 +1152,7 @@ fn permission_mode_is_set_at_spawn_and_can_be_changed() {
     assert_eq!(codex["steer"], true);
     assert_eq!(
         codex["permission_modes"],
-        serde_json::json!(["ask", "accept-edits", "auto", "full"])
+        serde_json::json!(["read-only", "ask", "accept-edits", "auto", "full"])
     );
 }
 
@@ -3522,7 +3522,7 @@ fn reviewers_review_a_thread_once_its_agent_is_done_and_leave_comments() {
     // Then it stays idle: one reviewer looks.
     let critic = eventually("started a reviewer", || daemon.children(&id).first().cloned());
     assert_eq!(critic["parent"], id.as_str());
-    assert_eq!(critic["permission_mode"], "ask");
+    assert_eq!(critic["permission_mode"], "read-only", "echo runs reviewers read-only");
     let critic = critic["id"].as_str().unwrap().to_owned();
     assert!(daemon.qcc(&["thread", "wait", &critic]).ok);
 

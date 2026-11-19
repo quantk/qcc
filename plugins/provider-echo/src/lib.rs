@@ -9,7 +9,8 @@
 //! | `/slow <text>`       | streams one word per timer tick; can be interrupted          |
 //! | `/tool <name>`       | a tool call that opens and closes; `server__tool` is MCP     |
 //! | `/ask <question>`    | asks the user a question and echoes the answer               |
-//! | `/approve <command>` | asks for approval of a command item (not in `auto`/`full`)   |
+//! | `/approve <command>` | asks for approval of a command item (not in `auto`/`full`;  |
+//! |                      | refused without asking in `read-only`)                       |
 //! | `/exec <prog> <args>`| runs a process and streams its stdout                        |
 //! | `/kv`                | counts invocations in the plugin's key-value store           |
 //! | `/card <text>`       | an item of the plugin's own kind, drawn by the plugin        |
@@ -309,6 +310,20 @@ impl Echo {
                 }));
                 session.turn = Some(Turn::Asking { request_id });
             }
+            "/approve" if session.mode == Some(PermissionMode::ReadOnly) => {
+                // Read-only: the command is refused, and nobody is asked.
+                let key = ItemKey::Provider(session.request_id());
+                out.push(Delta::ItemOpen(ItemOpen {
+                    key: key.clone(),
+                    shape: command_item(rest, None),
+                }));
+                out.push(Delta::ItemClose(ItemClose {
+                    key,
+                    shape: command_item(rest, None),
+                    status: ItemStatus::Declined,
+                }));
+                out.push(completed());
+            }
             "/approve"
                 if matches!(session.mode, Some(PermissionMode::Auto | PermissionMode::Full)) =>
             {
@@ -503,6 +518,7 @@ impl Provider for Echo {
                 resume: true,
                 steer: true,
                 permission_modes: vec![
+                    PermissionMode::ReadOnly,
                     PermissionMode::Ask,
                     PermissionMode::AcceptEdits,
                     PermissionMode::Auto,

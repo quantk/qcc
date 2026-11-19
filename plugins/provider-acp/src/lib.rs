@@ -20,7 +20,15 @@ struct Agent {
     args: &'static [&'static str],
     /// The arguments that make it print its models, one id per line.
     models_args: Option<&'static [&'static str]>,
+    /// How the agent is told to run read-only, by its own rules: refusing what
+    /// writes without asking anyone. `None`: it cannot be, and does not offer it.
+    read_only_env: Option<(&'static str, &'static str)>,
 }
+
+/// opencode's permission rules for a read-only session: everything refused but the
+/// tools that read and the commands that only look. opencode enforces them itself
+/// and asks nobody.
+const OPENCODE_READ_ONLY: &str = r#"{"*":"deny","read":"allow","grep":"allow","glob":"allow","list":"allow","bash":{"*":"deny","git diff*":"allow","git log*":"allow","git show*":"allow","git status*":"allow","git blame*":"allow","git ls-files*":"allow","qcc thread diff*":"allow","qcc thread changes*":"allow","qcc thread show*":"allow","qcc comment list*":"allow","ls*":"allow"}}"#;
 
 /// Adding an ACP agent is one line here plus its executable in `plugin.toml`.
 const AGENTS: &[Agent] = &[Agent {
@@ -29,6 +37,7 @@ const AGENTS: &[Agent] = &[Agent {
     program: "opencode",
     args: &["acp"],
     models_args: Some(&["models"]),
+    read_only_env: Some(("OPENCODE_PERMISSION", OPENCODE_READ_ONLY)),
 }];
 
 #[derive(Default)]
@@ -53,11 +62,13 @@ impl Provider for AcpProvider {
                 steer: false,
                 // ACP has no automatic reviewer for `auto` to hand approvals to; the
                 // other modes are enforced by the bridge answering permission requests.
-                permission_modes: vec![
-                    PermissionMode::Ask,
-                    PermissionMode::AcceptEdits,
-                    PermissionMode::Full,
-                ],
+                permission_modes: self
+                    .agent
+                    .read_only_env
+                    .map(|_| PermissionMode::ReadOnly)
+                    .into_iter()
+                    .chain([PermissionMode::Ask, PermissionMode::AcceptEdits, PermissionMode::Full])
+                    .collect(),
                 // ACP has no way to turn a server off; qcc's are left out instead.
                 mcp_live: false,
                 // ACP has no way to ask for it.
@@ -75,10 +86,16 @@ impl Provider for AcpProvider {
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
         let context = session_context(&start);
+        let mut env = start.env;
+        if start.permission_mode == Some(PermissionMode::ReadOnly)
+            && let Some((name, value)) = self.agent.read_only_env
+        {
+            env.push((name.to_owned(), value.to_owned()));
+        }
         let process = process::spawn(&process::SpawnOptions {
             program: self.agent.program.into(),
             args: self.agent.args.iter().map(|arg| (*arg).to_owned()).collect(),
-            env: start.env,
+            env,
             cwd: Some(start.cwd.clone()),
         })?;
         let (bridge, handshake) = Bridge::new(Config {

@@ -130,6 +130,7 @@ export const attentionLabel: Record<Attention, string> = {
 };
 
 export const modeLabel: Record<PermissionMode, string> = {
+  "read-only": "Read only",
   ask: "Ask every time",
   "accept-edits": "Accept edits",
   auto: "Auto review",
@@ -137,7 +138,7 @@ export const modeLabel: Record<PermissionMode, string> = {
 };
 
 /** Modes from the strictest to the loosest, as the daemon orders them. */
-const MODE_ORDER: readonly PermissionMode[] = ["ask", "accept-edits", "auto", "full"];
+const MODE_ORDER: readonly PermissionMode[] = ["read-only", "ask", "accept-edits", "auto", "full"];
 
 /**
  * The modes a thread may be put in. A thread may not run looser than the thread

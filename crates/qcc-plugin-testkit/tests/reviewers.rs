@@ -5,11 +5,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use qcc_domain::ModelInfo;
 use qcc_domain::{
     CommentAuthor, CommentId, LineComment, PermissionMode, Role, ThreadId, ThreadState,
     TranscriptEntry, TurnStatus,
 };
+use qcc_domain::{ModelInfo, ProviderCapabilities, ProviderInfo};
 use qcc_plugin_host::{Grant, Outcome, PluginError, PluginRequest, SettledThread, UiRequest};
 use qcc_plugin_testkit::{Bench, ThreadSummary, ThreadsAnswer, ThreadsCall};
 use qcc_runtime::NewThread;
@@ -86,7 +86,10 @@ impl Fixture {
                             text: "make a() better".into(),
                         }])
                     }
-                    ThreadsCall::Providers => ThreadsAnswer::Providers(Vec::new()),
+                    ThreadsCall::Providers => ThreadsAnswer::Providers(vec![
+                        provider("echo", &[PermissionMode::ReadOnly, PermissionMode::Ask]),
+                        provider("plain", &[PermissionMode::Ask]),
+                    ]),
                     ThreadsCall::ListFiles { .. } => ThreadsAnswer::Names(Vec::new()),
                     ThreadsCall::ReadFile { .. } => ThreadsAnswer::File(None),
                     ThreadsCall::AddComment(new) => {
@@ -229,7 +232,7 @@ fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
         })
         .unwrap();
     assert_eq!(spawn.parent.as_ref().map(ThreadId::as_str), Some(SOURCE));
-    assert_eq!(spawn.permission_mode, Some(PermissionMode::Ask));
+    assert_eq!(spawn.permission_mode, Some(PermissionMode::ReadOnly), "echo runs read-only");
     assert_eq!(spawn.cwd.as_deref(), Some("/work"));
     let prompt = spawn.prompt.unwrap();
     assert!(prompt.contains("+    new();") && prompt.contains("make a() better"), "{prompt}");
@@ -556,4 +559,43 @@ fn the_panel_offers_the_models_of_the_agent_chosen_once_they_come() {
         matches!(call, ThreadsCall::Models { provider, refresh: true, .. } if provider.as_str() == "opencode")
     });
     assert!(refreshed);
+}
+
+fn provider(id: &str, modes: &[PermissionMode]) -> ProviderInfo {
+    ProviderInfo {
+        id: id.into(),
+        name: id.into(),
+        capabilities: ProviderCapabilities {
+            permission_modes: modes.to_vec(),
+            ..ProviderCapabilities::default()
+        },
+    }
+}
+
+#[test]
+fn an_agent_that_cannot_run_read_only_reviews_in_ask_mode_and_says_so() {
+    let fixture = Fixture::new(Grant::AllRequested);
+    fixture.command("configure", &[("provider", "plain"), ("trigger", "manual")]).unwrap();
+    // The panel warns before any round.
+    let panel = fixture.panel().to_string();
+    assert!(
+        panel.contains("plain cannot run read-only, so reviewer general runs in ask mode"),
+        "{panel}"
+    );
+    std::thread::scope(|scope| {
+        let asked = scope.spawn(|| fixture.command("request", &[]));
+        fixture.answer_diff(DIFF);
+        let message = asked.join().unwrap().unwrap();
+        assert!(message.contains("note: plain cannot run read-only"), "{message}");
+    });
+    let spawn = fixture
+        .bench
+        .calls()
+        .into_iter()
+        .find_map(|call| match call {
+            ThreadsCall::Spawn(spawn) => Some(spawn),
+            _ => None,
+        })
+        .expect("the reviewer started");
+    assert_eq!(spawn.permission_mode, Some(PermissionMode::Ask));
 }

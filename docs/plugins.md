@@ -104,6 +104,16 @@ permission is needed for this: a plugin sees only its own settings. Example: the
 `plugins/provider-echo` (how users change them is in
 [Plugin settings](agents.md#plugin-settings)).
 
+## Permission modes of a provider
+
+A provider lists the permission modes it can enforce in `ProviderCapabilities::permission_modes`;
+qcc never starts its agent in another one. `PermissionMode::ReadOnly`, the strictest, promises
+two things: nothing that changes a file runs, and the user is never asked. Declare it only if the
+agent itself can be held to that (its sandbox, its tool list, its permission rules), and refuse in
+the bridge whatever permission request still comes. How the bundled providers do it is in
+[Permission mode](agents.md#permission-mode). A plugin that starts threads can check the list
+(`threads::providers`) and fall back when an agent does not offer the mode, as `reviewers` does.
+
 ## Installing and permissions
 
 An installed plugin lives in `<data>/plugins/<id>/`. A third-party plugin is granted permissions by

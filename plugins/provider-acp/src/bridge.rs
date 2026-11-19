@@ -664,13 +664,31 @@ impl Bridge {
             }));
         }
 
+        // Read-only: the agent's own rules refuse what writes; whatever it asks
+        // about anyway is refused here, and nobody is asked.
+        if self.mode == Some(PermissionMode::ReadOnly) {
+            let reject = ["reject_once", "reject_always"].iter().find_map(|kind| {
+                params["options"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|offered| str_field(offered, "kind") == *kind)
+                    .map(|offered| str_field(offered, "optionId").to_owned())
+            });
+            let outcome = match reject {
+                Some(option) => json!({"outcome": {"outcome": "selected", "optionId": option}}),
+                None => json!({"outcome": {"outcome": "cancelled"}}),
+            };
+            output.writes.push(self.peer.respond(&id, outcome));
+            return;
+        }
         // The permission mode may answer for the user.
         let approved = match self.mode {
             Some(PermissionMode::Full | PermissionMode::Auto) => true,
             Some(PermissionMode::AcceptEdits) => {
                 matches!(tool.kind.as_str(), "edit" | "delete" | "move")
             }
-            Some(PermissionMode::Ask) | None => false,
+            Some(PermissionMode::Ask | PermissionMode::ReadOnly) | None => false,
         };
         let allow = ["allow_once", "allow_always"].iter().find_map(|kind| {
             params["options"]
@@ -999,6 +1017,11 @@ mod tests {
         assert!(asked(&edits.on_line(&ask("execute"))));
         assert!(asked(&with_mode(Some(PermissionMode::Ask)).on_line(&ask("edit"))));
         assert!(asked(&with_mode(None).on_line(&ask("edit"))));
+        // Read-only refuses, asking nobody.
+        let refused = with_mode(Some(PermissionMode::ReadOnly)).on_line(&ask("edit"));
+        assert_eq!(refused.writes.len(), 1);
+        assert!(refused.writes[0].contains("\"optionId\":\"no\""), "{refused:?}");
+        assert!(!refused.deltas.iter().any(|d| matches!(d, Delta::InteractionRequest(_))));
     }
 
     #[test]

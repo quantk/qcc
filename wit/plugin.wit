@@ -317,6 +317,10 @@ interface types {
 
   /// How much the agent may do without asking the user.
   enum permission-mode {
+    /// The agent only reads and looks around: nothing that changes a file or the
+    /// system runs, and the user is never asked. A provider declares it only if it
+    /// can enforce both, not just tell the agent.
+    read-only,
     /// Everything the agent wants approved is asked of the user.
     ask,
     /// File edits inside the working directory go through; the rest is asked.

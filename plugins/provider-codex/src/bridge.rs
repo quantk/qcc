@@ -440,6 +440,9 @@ impl Bridge {
         // sandbox, when to ask, and who is asked.
         let policy = match self.mode {
             None => None,
+            // Nothing is written, by the sandbox, and nobody is asked: a command the
+            // sandbox stops fails, and the agent hears so.
+            Some(PermissionMode::ReadOnly) => Some(("never", "read-only", None)),
             // Ask about everything that is not known to be harmless.
             Some(PermissionMode::Ask) => Some(("untrusted", "workspace-write", Some("user"))),
             // Work freely inside the working directory; ask the user to leave it.
@@ -988,6 +991,7 @@ mod tests {
             let text = |name: &str| params[name].as_str().unwrap_or("-").to_owned();
             [text("approvalPolicy"), text("sandbox"), text("approvalsReviewer")].join(" ")
         };
+        assert_eq!(knobs(PermissionMode::ReadOnly), "never read-only -");
         assert_eq!(knobs(PermissionMode::Ask), "untrusted workspace-write user");
         assert_eq!(knobs(PermissionMode::AcceptEdits), "on-request workspace-write user");
         // `auto` is the provider's own reviewer, not ours.

@@ -46,6 +46,24 @@ const PROJECT_DIR: &str = ".qcc/reviewers";
 const MAX_LOOSE_REPLY: usize = 4_000;
 
 /// Why a diff was asked for.
+/// Why a reviewer may ask for approval: its agent cannot run read-only.
+pub(crate) fn asks_note(profile: &str, provider: &str) -> String {
+    format!(
+        "{provider} cannot run read-only, so reviewer {profile} runs in ask mode and may ask \
+         you for approval"
+    )
+}
+
+/// The agents that can run a reviewer read-only.
+pub(crate) fn read_only_providers() -> Vec<String> {
+    threads::providers()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| p.capabilities.permission_modes.contains(&PermissionMode::ReadOnly))
+        .map(|p| p.id)
+        .collect()
+}
+
 enum DiffFor {
     /// To start a round; `token` answers the command that asked for it.
     Start { thread: String, token: Option<u64> },
@@ -302,6 +320,7 @@ impl Reviewers {
                 state.rounds
             ));
         }
+        let read_only = read_only_providers();
         let source = threads::get(thread)?;
         let task = threads::transcript(thread).ok().and_then(|messages| {
             messages.into_iter().find(|m| m.role == threads::Role::User).map(|m| m.text)
@@ -334,6 +353,14 @@ impl Reviewers {
                 earlier: &earlier,
             };
             let (provider, model, effort) = agent_for(&config, profile, &self.defaults, &source);
+            // Read-only where the agent can enforce it; otherwise the strictest mode
+            // there is, in which what it tries beyond reading is asked of the user.
+            let mode = if read_only.contains(&provider) {
+                PermissionMode::ReadOnly
+            } else {
+                problems.push(asks_note(name, &provider));
+                PermissionMode::Ask
+            };
             let spawned = threads::spawn(&SpawnOptions {
                 provider: provider.clone(),
                 cwd: Some(source.cwd.clone()),
@@ -343,8 +370,7 @@ impl Reviewers {
                 parent: Some(thread.to_owned()),
                 environment: None,
                 base: None,
-                // Reviewers look; anything else they want is asked of the user.
-                permission_mode: Some(PermissionMode::Ask),
+                permission_mode: Some(mode),
                 skills_enabled: Vec::new(),
                 skills_disabled: Vec::new(),
                 hidden: false,
@@ -376,7 +402,7 @@ impl Reviewers {
             problems.insert(0, "no reviewer had anything to look at".into());
             return Err(problems.join("; "));
         }
-        let message = format!(
+        let mut message = format!(
             "review round {number} started: {}",
             critics
                 .iter()
@@ -384,6 +410,9 @@ impl Reviewers {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
+        for problem in &problems {
+            message.push_str(&format!("\nnote: {problem}"));
+        }
         state.rounds = number;
         state.fingerprint = Some(fingerprint.clone());
         state.files = prints;

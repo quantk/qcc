@@ -32,6 +32,7 @@ impl Provider for Codex {
                 resume: true,
                 steer: true,
                 permission_modes: vec![
+                    PermissionMode::ReadOnly,
                     PermissionMode::Ask,
                     PermissionMode::AcceptEdits,
                     PermissionMode::Auto,

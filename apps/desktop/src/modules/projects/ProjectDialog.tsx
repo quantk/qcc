@@ -2,15 +2,16 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderPlusIcon, XIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { Project } from "../../api/protocol.gen";
+import type { Project, ProjectIcon } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import { tailPath } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { IconPicker } from "./IconPicker";
 
-/** Make a project, or change one: its name and its folders. */
+/** Make a project, or change one: its name, icon and folders. */
 export function ProjectDialog(props: {
   close: () => void;
   project?: Project;
@@ -19,6 +20,7 @@ export function ProjectDialog(props: {
 }) {
   const { project, close } = props;
   const [name, setName] = useState(project?.name ?? props.draft?.name ?? "");
+  const [icon, setIcon] = useState<ProjectIcon | null>(project?.icon ?? null);
   const [folders, setFolders] = useState<string[]>(project?.folders ?? props.draft?.folders ?? []);
   const [typed, setTyped] = useState("");
   const [saving, setSaving] = useState(false);
@@ -38,7 +40,7 @@ export function ProjectDialog(props: {
   const all = typed.trim() && !folders.includes(typed.trim()) ? [...folders, typed.trim()] : folders;
   const save = async () => {
     setSaving(true);
-    const saved = await store().saveProject(project?.id ?? null, name, all);
+    const saved = await store().saveProject(project?.id ?? null, name, all, icon);
     setSaving(false);
     if (saved) close();
   };
@@ -63,7 +65,10 @@ export function ProjectDialog(props: {
           <FieldGroup className="gap-4">
             <Field>
               <FieldLabel htmlFor="project-name">Name</FieldLabel>
-              <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Shop" />
+              <div className="flex gap-2">
+                <IconPicker value={icon} onChange={setIcon} />
+                <Input id="project-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Shop" />
+              </div>
             </Field>
             <Field>
               <FieldLabel htmlFor="project-folder">Repositories and folders</FieldLabel>

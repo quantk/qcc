@@ -1,6 +1,9 @@
+import type { ReactNode } from "react";
+
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-export type ChoiceOption = { value: string | null; label: string };
+/** `icon` is drawn before the label, in the list and in the closed select. */
+export type ChoiceOption = { value: string | null; label: string; icon?: ReactNode };
 
 /**
  * One of a few values, on shadcn's Select. `null` is a value like any other: the
@@ -19,7 +22,10 @@ export function Choice(props: {
 }) {
   return (
     <Select
-      items={props.options}
+      items={props.options.map((option) => ({
+        value: option.value,
+        label: option.icon ? <WithIcon option={option} /> : option.label,
+      }))}
       value={props.value}
       onValueChange={(value) => props.onChange((value as string | null) ?? null)}
       disabled={props.disabled}
@@ -37,11 +43,20 @@ export function Choice(props: {
         <SelectGroup>
           {props.options.map((option) => (
             <SelectItem key={option.value ?? ""} value={option.value}>
-              {option.label}
+              {option.icon ? <WithIcon option={option} /> : option.label}
             </SelectItem>
           ))}
         </SelectGroup>
       </SelectContent>
     </Select>
+  );
+}
+
+function WithIcon({ option }: { option: ChoiceOption }) {
+  return (
+    <span className="inline-flex min-w-0 items-center gap-2">
+      {option.icon}
+      <span className="truncate">{option.label}</span>
+    </span>
   );
 }

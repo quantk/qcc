@@ -182,7 +182,13 @@ first one otherwise).
 ### Projects
 
 In the sidebar threads are grouped by project. A project has the buttons "new thread in the
-project" and "name and folders". To create a project: "+ Project" or the palette; to move a thread:
+project" and "name and folders".
+
+A project can have an icon: the button left of its name in the project dialog opens a grid of
+about sixty icons, a palette to color them (the shades follow the light or dark theme) and a field
+for an emoji instead; "Default" goes back to the folder icon. The icon is shown in the sidebar,
+in the project lists of the new thread and "Move to project" dialogs, and, once one is chosen,
+next to the project's name on overview cards, Live tiles and in a thread's details. To create a project: "+ Project" or the palette; to move a thread:
 the palette, "Move this thread to a project…".
 
 A project, or a folder of threads outside projects, folds with a click on its heading (or `Enter`

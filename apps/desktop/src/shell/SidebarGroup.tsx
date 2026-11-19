@@ -1,11 +1,12 @@
 // One group of the thread list: a project, or a folder of threads in no project.
 // Its heading folds it; folded, the heading tells what the hidden threads need.
 
-import { ChevronRightIcon, FolderClosedIcon, FolderKanbanIcon, FolderOpenIcon } from "lucide-react";
+import { ChevronRightIcon, FolderClosedIcon, FolderOpenIcon } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import { type GroupSummary, summaryText } from "../state/groups";
 import type { ThreadGroup } from "../state/selectors";
+import { ProjectIconView } from "../ui/kit/ProjectIcon";
 import type { GroupAction } from "../ui/registry";
 import { baseName } from "../util/format";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,7 @@ export function GroupSection({
   children: ReactNode;
 }) {
   const name = group.kind === "project" ? group.project.name : baseName(group.folder);
-  const Icon = group.kind === "project" ? FolderKanbanIcon : folded ? FolderClosedIcon : FolderOpenIcon;
+  const FolderIcon = folded ? FolderClosedIcon : FolderOpenIcon;
 
   // Like a tree view: Left folds the group or leaves a row for its heading, Right
   // unfolds it or goes to its first row.
@@ -94,7 +95,11 @@ export function GroupSection({
                 !folded && "rotate-90",
               )}
             />
-            <Icon aria-hidden className="size-3.5 flex-none text-muted-foreground" />
+            {group.kind === "project" ? (
+              <ProjectIconView icon={group.project.icon} className="text-muted-foreground" />
+            ) : (
+              <FolderIcon aria-hidden className="size-3.5 flex-none text-muted-foreground" />
+            )}
             <span className="min-w-[4ch] truncate">{name}</span>
             {summary && <Summary summary={summary} />}
           </CollapsibleTrigger>

@@ -24,6 +24,7 @@ import type {
   PermissionMode,
   PluginInfo,
   Project,
+  ProjectIcon,
   ProjectId,
   ProviderId,
   ProviderLimits,
@@ -834,11 +835,12 @@ export class AppStore {
   }
 
   /** Resolves to the project, or null when the daemon refused (the error is shown). */
-  async saveProject(id: ProjectId | null, name: string, folders: string[]): Promise<Project | null> {
+  /** Make a project or change one; a `null` icon is the default, and clears one it had. */
+  async saveProject(id: ProjectId | null, name: string, folders: string[], icon: ProjectIcon | null): Promise<Project | null> {
     const result = await this.attempt(() =>
       id
-        ? this.api.call("project.update", { id, name, folders })
-        : this.api.call("project.create", { name, folders }),
+        ? this.api.call("project.update", { id, name, folders, icon })
+        : this.api.call("project.create", { name, folders, icon }),
     );
     if (!result) return null;
     const others = this.state.projects.filter((project) => project.id !== result.project.id);

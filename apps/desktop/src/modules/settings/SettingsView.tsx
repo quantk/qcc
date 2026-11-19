@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { CircleAlertIcon, CircleCheckIcon, FolderOpenIcon, MinusIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { ChevronRightIcon, CircleAlertIcon, CircleCheckIcon, FolderOpenIcon, MinusIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import type {
@@ -12,7 +12,15 @@ import type {
 } from "../../api/protocol.gen";
 import { defaultLabel, effectiveSetting, pluginSetting, withPluginSetting } from "../../state/pluginSettings";
 import { modeLabel, providersOf, visiblePlugins } from "../../state/selectors";
-import { envOf, envRows, providerSettings, withProgram, withProvider } from "../../state/settings";
+import {
+  agentSummary,
+  envOf,
+  envRows,
+  missingPrograms,
+  providerSettings,
+  withProgram,
+  withProvider,
+} from "../../state/settings";
 import { store, useApp } from "../../state/store";
 import { MAX_ZOOM, MIN_ZOOM, formatZoom, zoomIn, zoomOut } from "../../state/zoom";
 import { Choice, EffortPicker, EnvEditor, ModelPicker } from "../../ui/kit";
@@ -28,6 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -202,17 +211,29 @@ function AgentSettings(props: {
   const modes = provider.capabilities.permission_modes ?? [];
   const update = (patch: Parameters<typeof withProvider>[2]) => change(withProvider(settings, provider.id, patch));
 
+  const missing = missingPrograms(programs);
+
+  // Folded by default so the section stays short; the header keeps what must not hide:
+  // the pickers switch and a program that cannot run.
   return (
-    <article className="flex flex-col gap-3 rounded-lg border p-4">
-      <header className="flex items-center gap-2">
-        <h3 className="font-semibold">{provider.name}</h3>
-        {provider.id !== provider.name && (
-          <Badge variant="outline" className="font-mono">
-            {provider.id}
-          </Badge>
-        )}
-        <span className="flex-1" />
-        <label className="flex items-center gap-2 text-[13px] text-muted-foreground">
+    <Collapsible render={<article />} className="rounded-lg border">
+      <header className="flex items-center gap-2 px-4 py-2.5">
+        <CollapsibleTrigger className="group flex min-w-0 flex-1 items-center gap-2 text-left">
+          <ChevronRightIcon className="size-4 shrink-0 transition-transform group-data-[panel-open]:rotate-90" />
+          <span className="shrink-0 font-semibold">{provider.name}</span>
+          {provider.id !== provider.name && (
+            <Badge variant="outline" className="shrink-0 font-mono">
+              {provider.id}
+            </Badge>
+          )}
+          {missing.length > 0 && (
+            <Badge variant="destructive" className="shrink-0">
+              <CircleAlertIcon /> {missing.join(", ")} not found
+            </Badge>
+          )}
+          <span className="truncate text-[13px] text-muted-foreground">{agentSummary(own, (mode) => modeLabel[mode])}</span>
+        </CollapsibleTrigger>
+        <label className="flex shrink-0 items-center gap-2 text-[13px] text-muted-foreground">
           Offer in pickers
           <Switch
             aria-label={`Offer ${provider.name} in pickers`}
@@ -221,52 +242,54 @@ function AgentSettings(props: {
           />
         </label>
       </header>
-      {programs.map((program) => (
-        <ProgramRow
-          key={program.name}
-          program={program}
-          value={settings.programs?.[program.name] ?? ""}
-          change={(path) => change(withProgram(settings, program.name, path))}
-        />
-      ))}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <CollapsibleContent className="flex flex-col gap-3 border-t p-4">
+        {programs.map((program) => (
+          <ProgramRow
+            key={program.name}
+            program={program}
+            value={settings.programs?.[program.name] ?? ""}
+            change={(path) => change(withProgram(settings, program.name, path))}
+          />
+        ))}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Field>
+            <FieldLabel>Model of new threads</FieldLabel>
+            <ModelPicker provider={provider.id} value={own.model ?? null} onChange={(model) => update({ model })} />
+          </Field>
+          <Field>
+            <FieldLabel>Effort of new threads</FieldLabel>
+            <EffortPicker
+              provider={provider.id}
+              model={own.model ?? null}
+              value={own.effort ?? null}
+              onChange={(effort) => update({ effort })}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>Permissions</FieldLabel>
+            <Choice
+              aria-label="Default permissions"
+              className="w-full"
+              value={own.permission_mode ?? null}
+              disabled={modes.length === 0}
+              options={[
+                { value: null, label: "Agent's own configuration" },
+                ...modes.map((mode) => ({ value: mode, label: modeLabel[mode] })),
+              ]}
+              onChange={(mode) => update({ permission_mode: mode as PermissionMode | null })}
+            />
+          </Field>
+        </div>
         <Field>
-          <FieldLabel>Model of new threads</FieldLabel>
-          <ModelPicker provider={provider.id} value={own.model ?? null} onChange={(model) => update({ model })} />
-        </Field>
-        <Field>
-          <FieldLabel>Effort of new threads</FieldLabel>
-          <EffortPicker
-            provider={provider.id}
-            model={own.model ?? null}
-            value={own.effort ?? null}
-            onChange={(effort) => update({ effort })}
+          <FieldLabel>Environment of its sessions</FieldLabel>
+          <EnvEditor
+            rows={envRows(own.env)}
+            change={(rows) => update({ env: envOf(rows) })}
+            title="A variable every session of this agent sees: an API key, a config directory"
           />
         </Field>
-        <Field>
-          <FieldLabel>Permissions</FieldLabel>
-          <Choice
-          aria-label="Default permissions"
-          className="w-full"
-          value={own.permission_mode ?? null}
-          disabled={modes.length === 0}
-          options={[
-            { value: null, label: "Agent's own configuration" },
-            ...modes.map((mode) => ({ value: mode, label: modeLabel[mode] })),
-          ]}
-          onChange={(mode) => update({ permission_mode: mode as PermissionMode | null })}
-          />
-        </Field>
-      </div>
-      <Field>
-        <FieldLabel>Environment of its sessions</FieldLabel>
-        <EnvEditor
-          rows={envRows(own.env)}
-          change={(rows) => update({ env: envOf(rows) })}
-          title="A variable every session of this agent sees: an API key, a config directory"
-        />
-      </Field>
-    </article>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

@@ -204,8 +204,11 @@ the arrows in the sidebar header.
 
 ### Settings
 
-Agents: the program path, and the model, effort, permission mode and environment variables of new
-threads, and whether to show the agent in lists; the default agent; plugins with their version,
+Agents: one folded card per agent. Its header shows the name, a short summary of what its new
+threads start with (model, effort, permission mode, how many environment variables), a red mark
+when its program is not found, and the "Offer in pickers" switch (whether to show the agent in
+lists). A click on the header (or Enter/Space) unfolds the card: the program path, and the model,
+effort, permission mode and environment variables of new threads. The default agent; plugins with their version,
 description, contributions and permissions, each with a switch that turns it on or off at once
 (bundled plugins too); whether to show example plugins (echo). A plugin turned off stops: its
 agents, workspaces, commands, skills and screens disappear from the window, and its threads can be

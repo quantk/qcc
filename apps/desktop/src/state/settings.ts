@@ -1,6 +1,6 @@
 // Edits of the daemon's settings, made on a draft that is saved as a whole.
 
-import type { ProviderId, ProviderSettings, Settings } from "../api/protocol.gen";
+import type { PermissionMode, ProgramStatus, ProviderId, ProviderSettings, Settings } from "../api/protocol.gen";
 
 export function providerSettings(settings: Settings, provider: ProviderId): ProviderSettings {
   return settings.providers?.[provider] ?? {};
@@ -38,4 +38,24 @@ export function envRows(env: { [name: string]: string } | undefined): EnvRow[] {
 
 export function envOf(rows: readonly EnvRow[]): { [name: string]: string } {
   return Object.fromEntries(rows.filter((row) => row.name.trim()).map((row) => [row.name.trim(), row.value]));
+}
+
+/**
+ * What a folded agent card shows beside its name: the defaults set for its new threads,
+ * so a glance tells them apart without opening each one.
+ */
+export function agentSummary(own: ProviderSettings, modeLabel: (mode: PermissionMode) => string): string {
+  const env = Object.keys(own.env ?? {}).length;
+  const parts = [
+    own.model,
+    own.effort,
+    own.permission_mode && modeLabel(own.permission_mode),
+    env > 0 && (env === 1 ? "1 variable" : `${env} variables`),
+  ].filter((part): part is string => Boolean(part));
+  return parts.length > 0 ? parts.join(" · ") : "Agent's own defaults";
+}
+
+/** The programs of an agent that cannot be run: a folded card must still show them. */
+export function missingPrograms(programs: readonly ProgramStatus[]): string[] {
+  return programs.filter((program) => !program.path).map((program) => program.name);
 }

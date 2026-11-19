@@ -24,9 +24,11 @@ use qcc_store::Store;
 use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::oneshot;
 
 use crate::{Config, plugins, settings};
 
+mod archive;
 mod attachments;
 mod automations;
 mod comments;
@@ -41,28 +43,58 @@ mod threads;
 mod toggle;
 mod waits;
 
-/// Answers one request on the connection it came from.
-pub(crate) struct Responder {
-    out: UnboundedSender<String>,
-    /// Absent for notifications, which get no answer.
-    id: Option<Value>,
+/// Answers one request: on the connection it came from, or, for a step the daemon
+/// takes on its own behalf, to the task waiting for it.
+pub(crate) struct Responder(Reply);
+
+enum Reply {
+    Connection {
+        out: UnboundedSender<String>,
+        /// Absent for notifications, which get no answer.
+        id: Option<Value>,
+    },
+    Internal(oneshot::Sender<Result<Value, RpcError>>),
 }
 
 impl Responder {
     pub(crate) fn new(out: UnboundedSender<String>, id: Option<Value>) -> Self {
-        Self { out, id }
+        Self(Reply::Connection { out, id })
+    }
+
+    /// A responder whose answer arrives on the returned receiver instead of a
+    /// connection, so the daemon can run a method as one step of a larger one.
+    fn internal() -> (Self, oneshot::Receiver<Result<Value, RpcError>>) {
+        let (sender, receiver) = oneshot::channel();
+        (Self(Reply::Internal(sender)), receiver)
+    }
+
+    /// The connection the request came on, for a method that keeps sending to it.
+    /// None for a step the daemon takes on its own.
+    fn out(&self) -> Option<UnboundedSender<String>> {
+        match &self.0 {
+            Reply::Connection { out, .. } => Some(out.clone()),
+            Reply::Internal(_) => None,
+        }
     }
 
     fn reply<T: Serialize>(self, result: Result<T, RpcError>) {
-        let Some(id) = self.id else { return };
-        let response = match result.and_then(|value| {
+        let result = result.and_then(|value| {
             serde_json::to_value(value)
                 .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))
-        }) {
-            Ok(value) => Response::ok(id, value),
-            Err(error) => Response::err(id, error),
-        };
-        let _ = self.out.send(serde_json::to_string(&response).expect("responses serialize"));
+        });
+        match self.0 {
+            Reply::Connection { out, id } => {
+                let Some(id) = id else { return };
+                let response = match result {
+                    Ok(value) => Response::ok(id, value),
+                    Err(error) => Response::err(id, error),
+                };
+                let _ = out.send(serde_json::to_string(&response).expect("responses serialize"));
+            }
+            Reply::Internal(sender) => {
+                let _ = sender.send(result);
+            }
+        }
     }
 }
 
@@ -191,6 +223,21 @@ pub(crate) enum Command {
     LimitsRead {
         only: Option<ProviderId>,
         results: Vec<(ProviderId, Result<RateLimits, String>)>,
+        responder: Responder,
+    },
+    /// Archive one thread of a tree being archived: a step of `thread.archive`
+    /// with `descendants`.
+    ArchiveStep {
+        thread: ThreadId,
+        force: bool,
+        reply: oneshot::Sender<archive::StepOutcome>,
+    },
+    /// Every thread of a tree was archived, or refused, or kept for a refusal under it.
+    TreeArchived {
+        root: ThreadId,
+        /// Every thread the walk held.
+        members: Vec<ThreadId>,
+        report: archive::TreeReport,
         responder: Responder,
     },
     /// A `thread.wait` ran out of time.
@@ -508,6 +555,12 @@ impl Core {
             }
             Command::LimitsRead { only, results, responder } => {
                 self.limits_read(only, results, responder);
+            }
+            Command::ArchiveStep { thread, force, reply } => {
+                self.archive_step(thread, force, reply);
+            }
+            Command::TreeArchived { root, members, report, responder } => {
+                self.tree_archived(root, members, report, responder);
             }
             Command::WaitTimedOut { waiter } => {
                 if let Some(index) = self.waiters.iter().position(|w| w.id == waiter) {

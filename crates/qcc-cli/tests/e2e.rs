@@ -3204,3 +3204,141 @@ fn usage_limits_are_kept_per_provider_and_survive_a_restart() {
     let kept = daemon.qcc(&["provider", "limits", "--json"]).json();
     assert_eq!(kept["limits"][0]["windows"][0]["used_percent"], 85, "{kept}");
 }
+
+/// Spawn an echo thread under `parent`; returns its id.
+fn spawn_child(daemon: &Daemon, parent: &str, prompt: &str) -> String {
+    let args = ["thread", "spawn", "--provider", "echo", "--parent", parent, "--prompt", prompt];
+    let output = daemon.qcc(&[&args[..], &["--json"]].concat());
+    assert!(output.ok, "{}", output.stderr);
+    output.json()["thread"]["id"].as_str().unwrap().to_owned()
+}
+
+fn ids(list: &Value) -> Vec<&str> {
+    list.as_array()
+        .into_iter()
+        .flatten()
+        .map(|v| v.as_str().unwrap_or_else(|| v["id"].as_str().unwrap()))
+        .collect()
+}
+
+#[test]
+fn archiving_a_thread_takes_every_thread_under_it_and_stops_the_working_ones() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let root = daemon.spawn("root");
+    let child = spawn_child(&daemon, &root, "child");
+    let other = spawn_child(&daemon, &root, "other child");
+    let grandchild = spawn_child(&daemon, &child, &format!("/slow {}", words(3000)));
+    assert!(daemon.qcc(&["thread", "wait", &root, &child, &other]).ok);
+    daemon.wait_for(&grandchild, "item/text/delta");
+
+    let archived = daemon.qcc(&["thread", "archive", &root, "--json"]);
+    assert!(archived.ok, "{}", archived.stderr);
+    let report = archived.json();
+    assert_eq!(report["thread"]["archived"], true);
+    // Deepest first, so no archived thread ever has live threads under it.
+    let gone = ids(&report["archived"]);
+    assert_eq!(gone.len(), 3, "{report:#}");
+    assert_eq!(gone[0], grandchild);
+    assert!(gone.contains(&child.as_str()) && gone.contains(&other.as_str()), "{report:#}");
+    assert_eq!(ids(&report["stopped"]), [grandchild.as_str()]);
+    assert_eq!(report.get("refused"), None);
+    for id in [&root, &child, &other, &grandchild] {
+        assert_eq!(daemon.thread(id)["archived"], true, "{id}");
+    }
+    // The working one was stopped: its turn ended before it was archived.
+    let kinds = types(&daemon.events(&grandchild)).join(" ");
+    assert!(kinds.ends_with("session/ended thread/archived"), "{kinds}");
+    assert!(kinds.contains("turn/completed"), "{kinds}");
+
+    // Nothing new is started under an archived thread.
+    let late = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--parent", &root]);
+    assert!(!late.ok && late.stderr.contains("is archived"), "{}", late.stderr);
+
+    // In text, one line per archived thread, the one asked for last.
+    let root = daemon.spawn("again");
+    let child = spawn_child(&daemon, &root, "child");
+    assert!(daemon.qcc(&["thread", "wait", &root, &child]).ok);
+    let text = daemon.qcc(&["thread", "archive", &root]);
+    assert!(text.ok, "{}", text.stderr);
+    let lines: Vec<&str> = text.stdout.lines().collect();
+    assert_eq!(lines.len(), 2, "{}", text.stdout);
+    assert!(lines[0].starts_with(&child) && lines[1].starts_with(&root), "{}", text.stdout);
+}
+
+#[test]
+fn a_thread_alone_is_archived_without_the_threads_under_it_when_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let root = daemon.spawn("root");
+    let child = spawn_child(&daemon, &root, "child");
+    let grandchild = spawn_child(&daemon, &child, "grandchild");
+    assert!(daemon.qcc(&["thread", "wait", &root, &child, &grandchild]).ok);
+
+    // As before descendants were archived: the protocol's default.
+    let alone = daemon.qcc(&["thread", "archive", &child, "--no-descendants", "--json"]);
+    assert!(alone.ok, "{}", alone.stderr);
+    assert_eq!(alone.json().as_object().unwrap().keys().collect::<Vec<_>>(), ["thread"]);
+    assert_eq!(daemon.thread(&grandchild).get("archived"), None);
+
+    // The tree is looked through an archived thread: the grandchild still goes.
+    let archived = daemon.qcc(&["thread", "archive", &root, "--json"]);
+    assert!(archived.ok, "{}", archived.stderr);
+    assert_eq!(ids(&archived.json()["archived"]), [grandchild.as_str()]);
+    assert_eq!(daemon.thread(&grandchild)["archived"], true);
+}
+
+#[test]
+fn a_working_thread_is_not_archived_and_neither_is_anything_under_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let root = daemon.spawn(&format!("/slow {}", words(3000)));
+    let child = spawn_child(&daemon, &root, "child");
+    assert!(daemon.qcc(&["thread", "wait", &child]).ok);
+    daemon.wait_for(&root, "item/text/delta");
+
+    let refused = daemon.qcc(&["thread", "archive", &root]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("stop it before archiving it"), "{}", refused.stderr);
+    assert_eq!(daemon.thread(&child).get("archived"), None);
+    assert!(daemon.qcc(&["thread", "stop", &root]).ok);
+}
+
+#[test]
+fn a_refusal_under_a_thread_keeps_it_and_its_ancestors_and_lets_the_rest_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("README.md", "hello\n")]);
+    let daemon = Daemon::start(&data);
+    let root = daemon.spawn("root");
+    let middle = spawn_child(&daemon, &root, "middle");
+    let clean = spawn_child(&daemon, &root, "clean");
+    let output = spawn_in_worktree(&daemon, &repo, &["--parent", &middle, "--prompt", "dirty"]);
+    assert!(output.ok, "{}", output.stderr);
+    let dirty = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    assert!(daemon.qcc(&["thread", "wait", &root, &middle, &clean, &dirty]).ok);
+    let worktree = data.join("environments/git-worktree").join(&dirty).join("app");
+    write(worktree.join("README.md"), "hello\nworld\n");
+
+    let refused = daemon.qcc(&["thread", "archive", &root, "--json"]);
+    assert!(!refused.ok);
+    assert!(refused.stderr.contains("uncommitted change"), "{}", refused.stderr);
+    assert!(refused.stderr.contains("--force"), "{}", refused.stderr);
+    let report = refused.json();
+    assert_eq!(report["refused"][0]["thread_id"], dirty.as_str());
+    assert_eq!(ids(&report["archived"]), [clean.as_str()]);
+    // Above the refusal, from the bottom up.
+    assert_eq!(ids(&report["kept"]), [middle.as_str(), root.as_str()]);
+    assert_eq!(report["thread"].get("archived"), None);
+    assert!(worktree.is_dir());
+    assert_eq!(daemon.thread(&clean)["archived"], true);
+    // What was kept is let go: it takes messages again.
+    assert!(daemon.qcc(&["thread", "send", &middle, "still here"]).ok);
+    assert!(daemon.qcc(&["thread", "wait", &middle]).ok);
+
+    let forced = daemon.qcc(&["thread", "archive", &root, "--force", "--json"]);
+    assert!(forced.ok, "{}", forced.stderr);
+    assert_eq!(ids(&forced.json()["archived"]), [dirty.as_str(), middle.as_str()]);
+    assert!(!worktree.exists());
+    assert_eq!(daemon.thread(&root)["archived"], true);
+}

@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, bail};
 use clap::Subcommand;
+use qcc_client::protocol::jsonrpc::codes;
 use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
     ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact,
@@ -305,11 +306,18 @@ pub(crate) enum ThreadCommand {
     },
     /// Put a thread away: release its session and remove its environment. The
     /// timeline stays readable.
+    ///
+    /// The threads started under it go too, at any depth, deepest first; those
+    /// still working are stopped. One that refuses (uncommitted work without
+    /// --force) stays, and so do the threads above it; the rest go.
     Archive {
         thread: String,
-        /// Remove the environment even if uncommitted work is lost.
+        /// Remove the environments even if uncommitted work is lost.
         #[arg(long)]
         force: bool,
+        /// Archive only this thread and leave the threads under it as they are.
+        #[arg(long)]
+        no_descendants: bool,
     },
     /// Show a thread and its timeline.
     Show {
@@ -767,15 +775,32 @@ pub(crate) async fn run(
             }
         }
 
-        ThreadCommand::Archive { thread, force } => {
+        ThreadCommand::Archive { thread, force, no_descendants } => {
             let result = client
                 .call::<ThreadArchive>(ThreadArchiveParams {
                     thread_id: ThreadId::new(thread),
                     force,
+                    descendants: !no_descendants,
                 })
                 .await?;
             if json {
                 print_json(&result)?;
+            } else {
+                for line in render::archived(&result) {
+                    println!("{line}");
+                }
+            }
+            if !result.refused.is_empty() {
+                for line in render::not_archived(&result) {
+                    eprintln!("{line}");
+                }
+                let lost = result.refused.iter().any(|r| r.code == codes::ENVIRONMENT_ERROR);
+                let hint = if lost && !force { "; --force discards uncommitted work" } else { "" };
+                bail!(
+                    "{} of the threads {} not archived{hint}",
+                    result.refused.len() + result.kept.len(),
+                    if result.refused.len() + result.kept.len() == 1 { "was" } else { "were" },
+                );
             }
         }
 

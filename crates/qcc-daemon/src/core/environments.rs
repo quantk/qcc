@@ -1,17 +1,15 @@
-//! Thread environments: preparing, querying and removing them, and archiving threads.
+//! Thread environments: preparing, querying and removing them.
 
 use qcc_domain::{
     ChangeScope, EnvironmentState, EventPayload, ThreadEnvironment, ThreadId, UserInput,
 };
-use qcc_plugin_host::{EnvironmentRequest, Outcome, PluginError, PluginHandle, ProviderRequest};
+use qcc_plugin_host::{EnvironmentRequest, Outcome, PluginError, PluginHandle};
 use qcc_protocol::jsonrpc::{RpcError, codes};
-use qcc_protocol::methods::{
-    Empty, ThreadArchiveParams, ThreadChangesResult, ThreadDiffResult, ThreadResult,
-};
+use qcc_protocol::methods::{Empty, ThreadChangesResult, ThreadDiffResult};
 
 use super::{
-    Action, Command, Core, PREPARE_TIMEOUT, QUERY_TIMEOUT, REMOVE_TIMEOUT, Responder,
-    call_environment, environment_error, now_ms, thread_not_found,
+    Command, Core, PREPARE_TIMEOUT, QUERY_TIMEOUT, REMOVE_TIMEOUT, Responder, call_environment,
+    environment_error, now_ms, thread_not_found,
 };
 
 impl Core {
@@ -250,39 +248,6 @@ impl Core {
         });
     }
 
-    /// Release the session, then remove the environment, then mark the thread.
-    pub(super) fn thread_archive(&mut self, p: ThreadArchiveParams, responder: Responder) {
-        let ThreadArchiveParams { thread_id, force } = p;
-        let Some(thread) = self.supervisor.thread(&thread_id).cloned() else {
-            return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
-        };
-        if thread.archived {
-            return responder.reply(Ok(ThreadResult { thread }));
-        }
-        let held = self.in_transition(&thread_id);
-        let Ok(engine) = self.supervisor.engine(&thread_id) else {
-            return responder.reply::<Empty>(Err(thread_not_found(&thread_id)));
-        };
-        if engine.busy() || held || self.archiving.contains(&thread_id) {
-            return responder.reply::<Empty>(Err(RpcError::new(
-                codes::THREAD_BUSY,
-                "the thread is working; stop it before archiving it",
-            )));
-        }
-        let dropped = engine.drop_queued(now_ms());
-        let live = engine.session_live();
-        self.commit(dropped);
-        self.queued.remove(&thread_id);
-        self.archiving.insert(thread_id.clone());
-        if live {
-            self.call_provider(&thread_id, Action::Archive { force }, Some(responder), |thread| {
-                ProviderRequest::Stop { thread }
-            });
-        } else {
-            self.remove_environment(thread_id, force, responder);
-        }
-    }
-
     pub(super) fn remove_environment(&mut self, id: ThreadId, force: bool, responder: Responder) {
         let (plugin, environment, cwd) = match self.ready_environment(&id) {
             Ok(Some(found)) => found,
@@ -317,22 +282,5 @@ impl Core {
                 responder.reply::<Empty>(Err(environment_error(error.to_string())));
             }
         }
-    }
-
-    fn finish_archive(&mut self, id: &ThreadId, removed: bool, responder: Responder) {
-        self.archiving.remove(id);
-        self.sessions.remove(id);
-        let Ok(engine) = self.supervisor.engine(id) else {
-            return responder.reply::<Empty>(Err(thread_not_found(id)));
-        };
-        let now = now_ms();
-        let mut events = Vec::new();
-        if removed {
-            events.extend(engine.record(EventPayload::EnvironmentRemoved, now));
-        }
-        events.extend(engine.record(EventPayload::ThreadArchived, now));
-        let thread = engine.thread().clone();
-        self.commit(events);
-        responder.reply(Ok(ThreadResult { thread }));
     }
 }

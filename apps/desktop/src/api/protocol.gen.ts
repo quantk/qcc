@@ -13,6 +13,17 @@ export type AgentSkill = {
 	path?: string | null,
 };
 
+/**  Why one thread of an archived tree stays. */
+export type ArchiveRefusal = {
+	thread_id: ThreadId,
+	/**
+	 *  The error code archiving it alone would have answered with, such as
+	 *  `ENVIRONMENT_ERROR` for uncommitted work.
+	 */
+	code: number,
+	message: string,
+};
+
 /**
  *  A file attached to a user message. qcc keeps its own copy, so the message reads
  *  the same later whatever happens to the file it came from.
@@ -1203,6 +1214,34 @@ export type ThreadActivity = {
 export type ThreadArchiveParams = {
 	thread_id: ThreadId,
 	force?: boolean,
+	/**
+	 *  Archive the threads started under this one as well. Off by default, so a
+	 *  client that does not know about it archives the one thread, as before.
+	 */
+	descendants?: boolean,
+};
+
+/**
+ *  The archived thread, and with `descendants` what happened to the threads under
+ *  it. Without `descendants` this is just `{ thread }`, and a refusal is an error.
+ */
+export type ThreadArchiveResult = {
+	/**
+	 *  The thread asked for, as it is now: not archived if something under it, or
+	 *  it itself, refused.
+	 */
+	thread: Thread,
+	/**  Descendants archived by this call, deepest first. */
+	archived?: Thread[],
+	/**  Descendants that were working and were stopped to be archived. */
+	stopped?: ThreadId[],
+	/**
+	 *  Threads of the tree, the thread asked for included, that refused and stay
+	 *  as they were.
+	 */
+	refused?: ArchiveRefusal[],
+	/**  Threads left alone because a thread under them refused. */
+	kept?: ThreadId[],
 };
 
 export type ThreadAttachmentParams = {
@@ -1782,7 +1821,7 @@ export type Methods = {
 	"thread.list": { params: ThreadListParams; result: ThreadListResult },
 	"thread.watch": { params: ThreadWatchParams; result: ThreadListResult },
 	"thread.get": { params: ThreadGetParams; result: ThreadResult },
-	"thread.archive": { params: ThreadArchiveParams; result: ThreadResult },
+	"thread.archive": { params: ThreadArchiveParams; result: ThreadArchiveResult },
 	"thread.changes": { params: ThreadChangesParams; result: ThreadChangesResult },
 	"thread.diff": { params: ThreadDiffParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },

@@ -412,7 +412,13 @@ method!(
     /// Put a thread away: release its session, remove its environment and leave it
     /// out of listings. Its timeline stays readable. Refused while a turn runs, and
     /// when removing the environment would lose work unless `force` is set.
-    ThreadArchive, "thread.archive", ThreadArchiveParams => ThreadResult
+    ///
+    /// With `descendants`, the threads started under it at any depth go too, deepest
+    /// first, and the answer reports each of them. Working descendants are stopped
+    /// on the way; the thread itself must not be working. A descendant that refuses
+    /// keeps its ancestors (the thread included) out of the archive, so no archived
+    /// thread is left with live threads under it; the other branches go on.
+    ThreadArchive, "thread.archive", ThreadArchiveParams => ThreadArchiveResult
 );
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -420,6 +426,42 @@ pub struct ThreadArchiveParams {
     pub thread_id: ThreadId,
     #[serde(default)]
     pub force: bool,
+    /// Archive the threads started under this one as well. Off by default, so a
+    /// client that does not know about it archives the one thread, as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub descendants: bool,
+}
+
+/// The archived thread, and with `descendants` what happened to the threads under
+/// it. Without `descendants` this is just `{ thread }`, and a refusal is an error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadArchiveResult {
+    /// The thread asked for, as it is now: not archived if something under it, or
+    /// it itself, refused.
+    pub thread: Thread,
+    /// Descendants archived by this call, deepest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub archived: Vec<Thread>,
+    /// Descendants that were working and were stopped to be archived.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stopped: Vec<ThreadId>,
+    /// Threads of the tree, the thread asked for included, that refused and stay
+    /// as they were.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused: Vec<ArchiveRefusal>,
+    /// Threads left alone because a thread under them refused.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept: Vec<ThreadId>,
+}
+
+/// Why one thread of an archived tree stays.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ArchiveRefusal {
+    pub thread_id: ThreadId,
+    /// The error code archiving it alone would have answered with, such as
+    /// `ENVIRONMENT_ERROR` for uncommitted work.
+    pub code: i32,
+    pub message: String,
 }
 
 method!(

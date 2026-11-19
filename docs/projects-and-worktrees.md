@@ -46,6 +46,7 @@ qcc thread diff <thread-id> src/a.rs src/b.rs   # only these files (paths as in 
 qcc thread diff <thread-id> --uncommitted        # only what is not committed yet
 qcc thread diff <thread-id> --from <commit> --to <commit>   # a run of the thread's commits
 qcc thread archive <thread-id>     # release the session, delete the worktree, remove the thread from the list
+                                   # (and the threads started under it; --no-descendants: only this one)
 ```
 
 - Directory: `<data>/environments/git-worktree/<thread-id>/<repository-name>`. A thread started
@@ -89,7 +90,8 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
 - `thread archive` refuses if the worktree has uncommitted changes or they could not be checked
   (`git status` failed); `--force` deletes it anyway. The branch is deleted only if it has no
   commits that exist nowhere else. The timeline of an archived thread stays readable
-  (`qcc thread list --archived`).
+  (`qcc thread list --archived`). Archiving a thread archives its descendants too; see
+  [Archiving a tree of threads](orchestration.md#archiving-a-tree-of-threads).
 
 ### A worktree where you say, on a branch you name
 

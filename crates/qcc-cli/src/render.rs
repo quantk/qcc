@@ -1,6 +1,8 @@
 //! Plain-text rendering for people. Scripts and agents use `--json`.
 
-use qcc_client::protocol::methods::{CommandContribution, PluginInfo, WaitedThread};
+use qcc_client::protocol::methods::{
+    CommandContribution, PluginInfo, ThreadArchiveResult, WaitedThread,
+};
 use qcc_domain::{
     Attachment, ChangeKind, ContextKind, EnvironmentChanges, EnvironmentState, EventPayload,
     InteractionRequest, Item, ItemShape, ItemStatus, LimitStatus, McpState, ProviderLimits,
@@ -47,6 +49,30 @@ pub fn thread_tree(threads: &[Thread]) -> Vec<String> {
     let mut out = Vec::new();
     walk(threads, None, 0, &mut out);
     out
+}
+
+/// What `thread archive` archived, deepest first and the thread asked for last.
+pub fn archived(result: &ThreadArchiveResult) -> Vec<String> {
+    let mut lines: Vec<String> = result
+        .archived
+        .iter()
+        .map(|thread| {
+            let stopped = result.stopped.contains(&thread.id);
+            format!("{}{}", thread_line(thread), if stopped { "  (stopped)" } else { "" })
+        })
+        .collect();
+    if result.thread.archived {
+        lines.push(thread_line(&result.thread));
+    }
+    lines
+}
+
+/// What `thread archive` left, and why.
+pub fn not_archived(result: &ThreadArchiveResult) -> Vec<String> {
+    let refused = result.refused.iter().map(|r| format!("{}: {}", r.thread_id, r.message));
+    let kept =
+        result.kept.iter().map(|id| format!("{id}: kept, a thread under it was not archived"));
+    refused.chain(kept).collect()
 }
 
 pub fn state(state: ThreadState) -> &'static str {

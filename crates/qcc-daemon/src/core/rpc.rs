@@ -213,11 +213,13 @@ impl Core {
             }
             ThreadWatch::NAME => match params::<ThreadWatch>(raw) {
                 Ok(ThreadWatchParams { subscription }) => {
-                    let out = responder.out.clone();
+                    let out = responder.out();
                     let threads = oldest_first(self.supervisor.threads().cloned().collect());
                     responder.reply(Ok(ThreadListResult { threads }));
                     // Registered in the same step as the listing, so no change is missed.
-                    self.watchers.push(Subscriber { connection, subscription, out });
+                    if let Some(out) = out {
+                        self.watchers.push(Subscriber { connection, subscription, out });
+                    }
                 }
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },

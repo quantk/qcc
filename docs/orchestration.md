@@ -10,6 +10,7 @@ qcc thread spawn --prompt '…' --env git-worktree --env-dir tasks/T-1/app --bra
 qcc thread wait <id>… [--any] [--timeout 100]   # wait until the threads finish; prints their last answers
 qcc thread list --parent <id>                  # children; without --parent, everything as a tree
 qcc thread parent <id> <parent-id>             # move a thread under another one; none makes it standalone
+qcc thread archive <id> [--force] [--no-descendants]   # put the thread and everything under it away
 ```
 
 A child inherits from its parent whatever is not set explicitly at start: the provider, the
@@ -50,6 +51,30 @@ message (idle, failure, archive). A thread waiting for the user's answer does no
 finished: on timeout it is shown as `waiting for the user`. Exit code: 0 — all turns completed,
 1 — some failed or was interrupted, 124 — the timeout expired. Delegation depth is limited: no
 more than four levels below the thread a human started.
+
+## Archiving a tree of threads
+
+`qcc thread archive <id>` archives the thread and every thread started under it, at any depth
+(an archived thread in between is looked through: what is under it still goes). It works one thread
+at a time, deepest first, and prints a line per archived thread, the one asked for last.
+
+- **Working descendants are stopped.** Archiving releases a descendant's session, which ends its
+  turn the way `thread stop --release` does; the report marks it `(stopped)`. The thread you archive
+  must not be working itself: stop it first, as when archiving a single thread. A tree with a
+  session that is still starting or stopping is refused whole, before anything is touched.
+- **While it runs, the tree is held**: its threads take no messages, run nothing from their queues,
+  get no new children and cannot be moved under another parent.
+- **A refusal keeps what is above it.** A descendant that refuses (uncommitted work in its worktree
+  without `--force`, an environment error) stays as it was, and so do its ancestors, the thread
+  you archive included; the other branches are archived. No archived thread is left with live
+  threads under it. The command prints why each thread stayed and exits with 1; run it again with
+  `--force` to discard the uncommitted work, or commit it first.
+- `--no-descendants` archives only the thread and leaves its children as they are.
+
+Over the protocol this is `thread.archive` with `descendants: true`; without it the method archives
+one thread, as before, and answers just `{ thread }`. With it the answer also lists `archived`,
+`stopped`, `refused` (with the error code and message of each) and `kept`. A thread is never
+spawned under an archived thread or one being archived.
 
 ## The orchestration plugin
 

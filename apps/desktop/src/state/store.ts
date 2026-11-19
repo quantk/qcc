@@ -38,6 +38,7 @@ import type {
   ThreadSpawnParams,
   ThreadUnqueueResult,
 } from "../api/protocol.gen";
+import { type Stayed, stayedAfter } from "./archive";
 import { withAutomation } from "./automations";
 import { type Layout, parseLayout } from "./blocks";
 import { type History, type Place, startHistory, step, visit } from "./history";
@@ -934,21 +935,35 @@ export class AppStore {
   }
 
   /**
-   * Archive a thread. When its environment holds work that would be lost, nothing
-   * is archived and the reason comes back, for the user to confirm with `force`.
+   * Archive a thread with every thread under it. Threads that stayed (refused, or
+   * kept for a refusal under them) come back with the reason, for the user to see
+   * and confirm with `force`; null when everything went or the call failed.
    */
-  async archive(threadId: ThreadId, force: boolean): Promise<{ refused: string } | null> {
+  async archive(threadId: ThreadId, force: boolean): Promise<Stayed[] | null> {
     try {
-      const { thread } = await this.api.call("thread.archive", { thread_id: threadId, force });
-      this.mergeThreads([thread]);
-      return null;
+      const result = await this.api.call("thread.archive", { thread_id: threadId, force, descendants: true });
+      this.mergeThreads([result.thread, ...(result.archived ?? [])]);
+      return stayedAfter(result, this.state.threads);
     } catch (error) {
-      if (!force && error instanceof ApiError && error.code === codes.environmentError) {
-        return { refused: error.message };
-      }
       this.fail(error);
       return null;
     }
+  }
+
+  /**
+   * Which of `threads` have uncommitted work in their own directory. A thread whose
+   * work could not be checked is left out: archiving it refuses then, and says why.
+   */
+  async uncommitted(threads: readonly Thread[]): Promise<Set<ThreadId>> {
+    const found = await Promise.all(
+      threads.map((thread) =>
+        this.api
+          .call("thread.changes", { thread_id: thread.id, scope: { kind: "unsaved" } })
+          .then(({ changes }) => (changes.files.length > 0 ? thread.id : null))
+          .catch(() => null),
+      ),
+    );
+    return new Set(found.filter((id): id is ThreadId => id !== null));
   }
 }
 

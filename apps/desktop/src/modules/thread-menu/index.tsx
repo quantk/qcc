@@ -6,7 +6,7 @@ import { isUnread } from "../../state/reads";
 import { findProvider, folderOf } from "../../state/selectors";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
-import { ArchiveDialog } from "./ArchiveDialog";
+import { archiveThread } from "./ArchiveDialog";
 import { IsolateDialog } from "./IsolateDialog";
 import { RenameDialog } from "./RenameDialog";
 
@@ -98,15 +98,7 @@ export const threadMenuModule: UiModule = {
       group: "run",
       destructive: true,
       when: (thread) => !thread.archived && thread.status !== "active",
-      run: (thread) =>
-        void store()
-          .archive(thread.id, false)
-          .then((result) => {
-            if (result?.refused) {
-              const refused = result.refused;
-              ui.showDialog(({ close }) => <ArchiveDialog thread={thread} refused={refused} close={close} />);
-            }
-          }),
+      run: (thread) => void archiveThread(ui, thread),
     });
   },
 };

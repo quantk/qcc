@@ -49,6 +49,10 @@ All of them take `--json` for output meant for programs.
 - `qcc thread changes <id>` and `qcc thread diff <id>` show what a child with an
   environment changed, and on which branch.
 - `qcc thread stop <id>` interrupts a child's turn.
+- `qcc thread archive <id>` puts a child away once you are done with it, with
+  every thread under it; working ones are stopped. Uncommitted work in a
+  worktree makes it refuse that thread and keep the ones above it; `--force`
+  discards the work.
 
 ## Work on a schedule
 

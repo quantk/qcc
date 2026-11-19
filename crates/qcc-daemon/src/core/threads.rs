@@ -37,6 +37,8 @@ impl Core {
             Some(parent) => {
                 let thread =
                     self.supervisor.thread(parent).ok_or_else(|| thread_not_found(parent))?;
+                // A child of an archived thread would be left in the open under it.
+                self.check_open(parent)?;
                 if self.depth(parent) >= MAX_SPAWN_DEPTH {
                     return Err(RpcError::new(
                         codes::INVALID_PARAMS,
@@ -450,6 +452,15 @@ impl Core {
             .thread(&thread_id)
             .cloned()
             .ok_or_else(|| thread_not_found(&thread_id))?;
+        // A tree being archived holds its threads where they are.
+        for id in std::iter::once(&thread_id).chain(&parent) {
+            if self.archiving.contains(id) {
+                return Err(RpcError::new(
+                    codes::THREAD_BUSY,
+                    format!("thread {id} is being archived"),
+                ));
+            }
+        }
         if let Some(parent_id) = &parent {
             let parent = self
                 .supervisor
@@ -891,11 +902,11 @@ impl Core {
                     .reply::<Empty>(Err(RpcError::new(codes::INTERNAL_ERROR, error.to_string())));
             }
         };
-        let out = responder.out.clone();
+        let out = responder.out();
         responder.reply(Ok(ThreadEventsResult { events }));
         // Registered in the same step as the read: nothing can be appended in
         // between, so the backlog and the live stream meet without a gap.
-        if let Some(subscription) = p.subscription {
+        if let (Some(subscription), Some(out)) = (p.subscription, out) {
             self.subscribers.entry(p.thread_id).or_default().push(Subscriber {
                 connection,
                 subscription,

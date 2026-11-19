@@ -3,7 +3,8 @@
 The control panel for qcc: a Tauri window over the daemon's API.
 
 ```
-src-tauri/        the backend: one connection to qccd, requests and notifications passed through
+src-tauri/        the backend: one connection to qccd, requests and notifications passed through;
+                  system notifications (notifications.rs), which the webview cannot show
 src/api/          the typed door to the daemon; protocol.gen.ts is generated from qcc-protocol
 src/state/        the store (mirror of the daemon) and pure folds: timeline, diff, block layout,
                   delegated threads (children.ts: states, counts, filters of the Agents tab)

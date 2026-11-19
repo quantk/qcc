@@ -240,6 +240,17 @@ first; confirming cuts their turns short. See
 browser, or the buttons on the "Settings" screen; it can be reset to 100% there or from the
 palette.
 
+### Notifications
+
+When an agent finishes its turn, fails or waits for an answer, the app shows a system notification:
+the thread's title, what happened and the start of the agent's last message or question. A click
+on it brings the window up and opens the thread (on Linux desktops that report clicks; elsewhere the
+notification only informs). Nothing is shown about the thread you have open while the window has
+focus. The notifications come from the bundled `notify` plugin: what it tells about (finished turns,
+failures, questions, threads started by other agents) is set in its card on the "Settings" screen,
+and its switch there turns them off. Notifications reach you only while the app runs; the daemon does
+not keep them for later. See [Following every thread and notifying the user](plugins.md#following-every-thread-and-notifying-the-user).
+
 ### Automations
 
 The "Automations" screen (calendar-clock icon) and the palette ("Automations", "New automation"):
@@ -320,7 +331,9 @@ blocks (from a plugin that connected later) take their default places.
 ## Backend and protocol types
 
 The Tauri backend is a thin proxy: it keeps one connection to `qccd`, passes requests and
-notifications through as they are, and starts the daemon itself if it is not running. The daemon
+notifications through as they are, and starts the daemon itself if it is not running. The one
+thing it does on its own is show system notifications (`show_notification`), which the webview
+cannot. The daemon
 outlives the window: agents keep working when the app is closed. TypeScript types are generated
 from `qcc-protocol` (`apps/desktop/src/api/protocol.gen.ts`); a test fails if the file is out of
 date:

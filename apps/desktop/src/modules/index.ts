@@ -13,6 +13,7 @@ import { mcpModule } from "./mcp";
 import { metricsModule } from "./metrics";
 import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
+import { notificationsModule } from "./notifications";
 import { overviewModule } from "./overview";
 import { pluginCommandsModule } from "./plugin-commands";
 import { pluginUiModule } from "./plugin-ui";
@@ -43,5 +44,6 @@ export const builtinModules: UiModule[] = [
   insightsModule,
   metricsModule,
   limitsModule,
+  notificationsModule,
   settingsModule,
 ];

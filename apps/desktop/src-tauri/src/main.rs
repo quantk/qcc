@@ -6,6 +6,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod notifications;
+
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -97,6 +99,21 @@ async fn attachment_preview(path: String) -> Option<String> {
     });
     let data = read.await.ok()??;
     Some(base64::engine::general_purpose::STANDARD.encode(data))
+}
+
+/// Show one of the system's notifications, as a plugin asked through the daemon. A
+/// click on it, where the desktop reports clicks, opens `thread`.
+#[tauri::command]
+async fn show_notification(
+    app: AppHandle,
+    title: String,
+    body: String,
+    thread: Option<String>,
+) -> Result<(), String> {
+    // Handing it to the system is a blocking call over D-Bus or the OS's API.
+    tauri::async_runtime::spawn_blocking(move || notifications::show(app, &title, &body, thread))
+        .await
+        .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -262,7 +279,12 @@ fn main() {
             tauri::async_runtime::spawn(keep_connected(app.handle().clone(), daemon));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![rpc, daemon_state, attachment_preview])
+        .invoke_handler(tauri::generate_handler![
+            rpc,
+            daemon_state,
+            attachment_preview,
+            show_notification
+        ])
         .run(tauri::generate_context!())
         .expect("the qcc desktop app runs");
 }

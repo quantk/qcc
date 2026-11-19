@@ -13,6 +13,11 @@ const DELAYS: [u64; 6] = [5_000, 15_000, 30_000, 60_000, 120_000, 300_000];
 const ROUNDS: [u32; 6] = [1, 2, 3, 5, 10, 0];
 const EVERY: [u32; 4] = [2, 3, 5, 10];
 
+/// `1 comment`, `2 comments`.
+fn count(n: u32, what: &str) -> String {
+    if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") }
+}
+
 impl Reviewers {
     fn panel(&self, thread: &str) -> Node {
         let config = self.config_of(thread);
@@ -70,8 +75,8 @@ impl Reviewers {
         nodes.push(ui::select(
             "Findings",
             [
-                (Delivery::Collect.as_str(), "Leave as comments for me to send"),
-                (Delivery::Auto.as_str(), "Also send them to the agent"),
+                (Delivery::Collect.as_str(), "Comments for me to send"),
+                (Delivery::Auto.as_str(), "Comments, sent to the agent"),
             ],
             config.delivery.as_str(),
             "delivery",
@@ -142,9 +147,9 @@ impl Reviewers {
         }
         if !state.history.is_empty() {
             let rows = state.history.iter().rev().map(|record| {
-                let mut outcome = format!("{} comments", record.comments);
+                let mut outcome = count(record.comments, "comment");
                 if record.general > 0 {
-                    outcome.push_str(&format!(", {} general", record.general));
+                    outcome.push_str(&format!(", {}", count(record.general, "remark")));
                 }
                 if record.sent {
                     outcome.push_str(", sent");

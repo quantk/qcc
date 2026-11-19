@@ -56,8 +56,10 @@ pub fn scoped_diff(diff: &str, profile: &Profile, changed: Option<&[String]>) ->
 
 pub fn critic(review: &Review<'_>, scoped: &str) -> String {
     let Review { thread, cwd, task, profile, round, truncated, changed, earlier, .. } = review;
+    // The first line names the thread in lists.
     let mut prompt = format!(
-        "You are a code reviewer, \"{name}\", working for the user of qcc. Review the changes \
+        "Review round {round} by {name} of qcc thread {thread}\n\n\
+         You are a code reviewer, \"{name}\", working for the user of qcc. Review the changes \
          another agent made in qcc thread {thread}, in {cwd}. You may read any file there and \
          run commands that only look (git log, git show, grep). Do not change any file, do not \
          commit, and do not start other agents.\n\n",
@@ -208,6 +210,7 @@ mod tests {
             earlier: &earlier,
         };
         let prompt = critic(&review, "+b\n");
+        assert!(prompt.starts_with("Review round 2 by p of qcc thread thr_1\n\n"), "{prompt}");
         assert!(prompt.contains("qcc thread thr_1, in /w"));
         assert!(prompt.contains("<task>\nfix it\n</task>"));
         assert!(prompt.contains("review round 2") && prompt.contains("changed: src/a.rs"));

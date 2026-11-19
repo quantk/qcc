@@ -185,7 +185,9 @@ impl Fixture {
 const FINDING: &str = "Done. {\"findings\": [{\"file\": \"src/a.rs\", \"line\": 2, \
                        \"severity\": \"high\", \"text\": \"new() can fail\"}, \
                        {\"file\": \"src/a.rs\", \"line\": 1, \"severity\": \"info\", \
-                       \"text\": \"a nit below the bar\"}]}";
+                       \"text\": \"a nit below the bar\"}, \
+                       {\"file\": \"elsewhere.rs\", \"line\": 3, \"severity\": \"high\", \
+                       \"text\": \"not in the diff\"}]}";
 
 #[test]
 fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
@@ -235,7 +237,11 @@ fn a_review_waits_for_the_agent_to_stay_idle_and_leaves_comments() {
     fixture.answer_diff(DIFF);
     fixture.bench.wait_for_call("left a comment", |c| matches!(c, ThreadsCall::AddComment(_)));
     let comments = fixture.comments();
-    assert_eq!(comments.len(), 1, "the finding below the profile's bar is dropped: {comments:?}");
+    assert_eq!(
+        comments.len(),
+        1,
+        "below the profile's bar or outside the changes, no comment: {comments:?}"
+    );
     let comment = &comments[0];
     assert_eq!((comment.path.as_str(), comment.line), ("src/a.rs", 2));
     assert_eq!(comment.quote.as_deref(), Some("    new();"));
@@ -353,6 +359,11 @@ fn auto_delivery_sends_one_message_and_its_answer_is_not_reviewed_again() {
         "{message}"
     );
     assert!(message.contains("from security): I could not decide"), "{message}");
+    // A finding on a file the changes do not touch is no comment, only a remark.
+    assert!(
+        message.contains("(high, from general) at elsewhere.rs:3: not in the diff"),
+        "{message}"
+    );
     assert!(message.contains("may have moved"), "{message}");
     assert!(fixture.comments()[0].author.as_ref().unwrap().stale);
 

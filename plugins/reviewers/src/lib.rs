@@ -406,6 +406,10 @@ impl Reviewers {
             sent: false,
             problems: Vec::new(),
         };
+        // A finding on a file the changes do not touch cannot sit on a line of them:
+        // it goes along as a remark about the whole.
+        let mut changed: std::collections::BTreeSet<String> = state.files.keys().cloned().collect();
+        changed.extend(diff::files(current).into_iter().map(|file| file.path));
         let mut sent: Vec<(String, Finding, Option<String>)> = Vec::new();
         for critic in &round.critics {
             if let Some(problem) = &critic.problem {
@@ -413,7 +417,7 @@ impl Reviewers {
             }
             for finding in &critic.findings {
                 let comment = match (&finding.file, finding.line) {
-                    (Some(path), Some(line)) => {
+                    (Some(path), Some(line)) if changed.contains(path) => {
                         let comment = comments::NewComment {
                             thread: thread.to_owned(),
                             path: path.clone(),

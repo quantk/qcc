@@ -3779,6 +3779,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "reviewers"
+version = "0.1.0"
+dependencies = [
+ "qcc-plugin-sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "rfd"
 version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

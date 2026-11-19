@@ -26,6 +26,9 @@ fn permissions_info(permissions: &Permissions) -> PluginPermissions {
         timers: permissions.timers,
         threads: permissions.threads,
         skills: permissions.skills,
+        turn_events: permissions.turn_events,
+        comments: permissions.comments,
+        files: permissions.files,
         process: permissions.process.clone(),
     }
 }

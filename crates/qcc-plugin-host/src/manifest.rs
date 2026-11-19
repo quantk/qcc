@@ -108,6 +108,12 @@ mod tests {
         assert!(manifest.permissions.allows_process("claude"));
         assert!(!manifest.permissions.allows_process("/usr/bin/claude"));
         assert_eq!(Manifest::parse(BASE).unwrap().permissions, Permissions::default());
+        let reviewer = Manifest::parse(&format!(
+            "{BASE}\n[permissions]\nturn-events = true\ncomments = true\n"
+        ))
+        .unwrap();
+        assert!(reviewer.permissions.turn_events && reviewer.permissions.comments);
+        assert!(!reviewer.permissions.threads);
     }
 
     #[test]

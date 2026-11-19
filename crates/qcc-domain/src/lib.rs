@@ -30,7 +30,7 @@ pub use automation::{
     Automation, AutomationOutcome, AutomationOverlap, AutomationRun, AutomationSpec,
     AutomationThreadMode, AutomationTrigger,
 };
-pub use comment::{DiffSide, LineComment};
+pub use comment::{CommentAuthor, DiffSide, LineComment};
 pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};

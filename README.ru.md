@@ -132,12 +132,14 @@ flowchart LR
     acp["provider-acp"]
     wt["env-git-worktree"]
     orch["orchestration"]
+    rev["reviewers"]
   end
   qccd --> claude --> c1["claude -p"]
   qccd --> codex --> c2["codex app-server"]
   qccd --> acp --> c3["opencode acp"]
   qccd --> wt --> git["git"]
   qccd --> orch
+  qccd --> rev
 ```
 
 - **`qccd`** — демон: треды, журнал событий и хост плагинов. Агенты продолжают работать, когда
@@ -191,6 +193,7 @@ qcc thread deliver <thread-id>     # наложить работу из worktree
 | 🤖 [Agents and sessions](docs/agents.md) | модели, effort, смена агента, настройки, MCP-серверы, режимы разрешений, steer, сжатие, контекст, лимиты подписок, вложения, skills |
 | 🌿 [Projects and worktrees](docs/projects-and-worktrees.md) | проекты, изолированные worktree, возврат работы, комментарии к изменениям |
 | 🪆 [Orchestration](docs/orchestration.md) | агенты запускают агентов, наследование режима, `handoff` и `review` |
+| 🔍 [Reviewers](docs/reviewers.md) | критики, которые смотрят изменения треда, когда агент закончил: профили, триггеры, находки как комментарии к строкам |
 | ⏰ [Automations](docs/automations.md) | промпты агенту по расписанию: cron или интервалы, наложение и пропуск запусков, история |
 | 🖥️ [Desktop app](docs/desktop.md) | экраны, панели, горячие клавиши, раскладка |
 | 🧩 [Writing a plugin](docs/plugins.md) | контракт плагинов, UI, команды, skills, треды, права |

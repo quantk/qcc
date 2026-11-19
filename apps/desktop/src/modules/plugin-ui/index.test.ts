@@ -11,6 +11,7 @@ const contributions: UiContributionsResult = {
     { plugin: "provider-echo", id: "playground", title: "Echo", placement: "threadTab", scope: "ownThreads", providers: ["echo"] },
     { plugin: "notes", id: "thread", title: "Thread notes", placement: "threadTab", scope: "allThreads", providers: [] },
     { plugin: "notes", id: "board", title: "Board", placement: "app", scope: "allThreads", web: "index.html", providers: [] },
+    { plugin: "reviewers", id: "reviewers", title: "Reviewers", placement: "threadPanel", scope: "allThreads", providers: [] },
   ],
   items: [{ plugin: "provider-echo", kind: "provider-echo/card" }],
 };
@@ -26,6 +27,7 @@ describe("plugin contributions", () => {
     const tabs = blocksIn(blocks, {}, "thread.tabs");
     expect(views.map((view) => view.id)).toEqual(["notes/all", "notes/board"]);
     expect(tabs.map((tab) => tab.id)).toEqual(["provider-echo/playground", "notes/thread"]);
+    expect(blocksIn(blocks, {}, "thread.panel").map((panel) => panel.id)).toEqual(["reviewers/reviewers"]);
     expect([...items.keys()]).toEqual(["extension:provider-echo/card"]);
 
     const shown = (provider: string) =>

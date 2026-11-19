@@ -1,7 +1,7 @@
 //! Comments the user leaves on lines of a thread's changes, and how its agent
 //! learns of them.
 
-use qcc_domain::{CommentId, LineComment, ThreadId};
+use qcc_domain::{CommentAuthor, CommentId, LineComment, ThreadId};
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     COMMENTS_UPDATED, CommentAddParams, CommentDeleteParams, CommentListParams, CommentListResult,
@@ -25,6 +25,15 @@ impl Core {
     }
 
     pub(super) fn comment_add(&mut self, p: CommentAddParams) -> Result<CommentResult, RpcError> {
+        self.add_comment(p, None).map(|comment| CommentResult { comment })
+    }
+
+    /// Leave a comment: the user's, or a plugin's with `author` saying whose.
+    pub(super) fn add_comment(
+        &mut self,
+        p: CommentAddParams,
+        author: Option<CommentAuthor>,
+    ) -> Result<LineComment, RpcError> {
         self.supervisor.thread(&p.thread_id).ok_or_else(|| thread_not_found(&p.thread_id))?;
         let invalid = |message: &str| RpcError::new(codes::INVALID_PARAMS, message);
         let text = p.text.trim();
@@ -45,10 +54,21 @@ impl Core {
             created_at: now_ms(),
             resolved_at: None,
             resolution: None,
+            author,
         };
         self.store.save_comment(&comment).map_err(internal)?;
         self.comments_changed(&comment.thread_id);
-        Ok(CommentResult { comment })
+        Ok(comment)
+    }
+
+    /// The thread's comments, oldest first, for a plugin.
+    pub(super) fn comments_of(
+        &self,
+        thread: &ThreadId,
+        include_resolved: bool,
+    ) -> Result<Vec<LineComment>, RpcError> {
+        self.comment_list(CommentListParams { thread_id: thread.clone(), include_resolved })
+            .map(|result| result.comments)
     }
 
     pub(super) fn comment_resolve(
@@ -128,14 +148,30 @@ impl Core {
         if comments.is_empty() {
             return "The comments the user pointed to are already resolved or deleted.".to_owned();
         }
-        let mut note = String::from(
-            "The user left comments on lines of the changes. Deal with each one; when it is \
+        let reviewed = comments.iter().any(|comment| comment.author.is_some());
+        let mut note = String::from(if reviewed {
+            "Comments were left on lines of the changes, by the user or by reviewers working \
+             for the user (each says whose it is). "
+        } else {
+            "The user left comments on lines of the changes. "
+        });
+        note.push_str(
+            "Deal with each one; when it is \
              done, mark it resolved with `qcc comment resolve <id> --note \"<what you did>\"` \
              (if `qcc` is not found, use \"$QCC_BIN\"). `qcc comment list` shows the open ones \
              again.\n",
         );
         for comment in &comments {
             note.push_str(&format!("\n- {} at {}", comment.id, comment.location()));
+            if let Some(author) = &comment.author {
+                note.push_str(&format!(", from {}", author.name));
+                if let Some(severity) = &author.severity {
+                    note.push_str(&format!(" ({severity})"));
+                }
+                if author.stale {
+                    note.push_str(", made on an older version of the changes");
+                }
+            }
             if let Some(quote) = comment.quote.as_deref().filter(|quote| !quote.trim().is_empty()) {
                 note.push_str(&format!("\n  > {}", quote.trim_end()));
             }

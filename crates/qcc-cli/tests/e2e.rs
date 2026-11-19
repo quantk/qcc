@@ -867,7 +867,8 @@ fn plugins_and_daemon_are_listed() {
             "provider-acp",
             "provider-claude-code",
             "provider-codex",
-            "provider-echo"
+            "provider-echo",
+            "reviewers"
         ]
     );
     assert_eq!(plugins["plugins"][0]["environments"][0]["id"], "git-worktree");
@@ -2438,6 +2439,13 @@ fn a_plugin_draws_its_views_and_items_from_ui_nodes() {
                     "scope": "ownThreads",
                     "web": "index.html",
                     "providers": ["echo"],
+                }, {
+                    "plugin": "reviewers",
+                    "id": "reviewers",
+                    "title": "Reviewers",
+                    "placement": "threadPanel",
+                    "scope": "allThreads",
+                    "providers": [],
                 }],
                 "items": [{ "plugin": "provider-echo", "kind": "provider-echo/card" }],
             })
@@ -2709,7 +2717,7 @@ fn skills_are_switched_for_all_threads_and_for_one() {
     let listed = daemon.qcc(&["skill", "list", "--json"]).json();
     let names: Vec<&str> =
         listed.as_array().unwrap().iter().map(|skill| skill["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["echo-demo", "qcc-orchestration"]);
+    assert_eq!(names, ["echo-demo", "qcc-orchestration", "qcc-reviewers"]);
     assert_eq!(listed[0]["on_request"], true);
 
     // A skill offered on request reaches only a thread that asks for it, and one
@@ -2845,6 +2853,7 @@ fn agents_learn_the_orchestration_skill_and_plugins_hand_off_and_review() {
         .as_array()
         .unwrap()
         .iter()
+        .filter(|c| c["plugin"] == "orchestration")
         .map(|c| c["id"].as_str().unwrap())
         .collect();
     assert_eq!(ids, ["handoff", "review"]);
@@ -3412,4 +3421,255 @@ fn a_refusal_under_a_thread_keeps_it_and_its_ancestors_and_lets_the_rest_go() {
     assert_eq!(ids(&forced.json()["archived"]), [dirty.as_str(), middle.as_str()]);
     assert!(!worktree.exists());
     assert_eq!(daemon.thread(&root)["archived"], true);
+}
+
+// ----- reviewers --------------------------------------------------------------------
+
+/// A reviewer profile for the echo agent: echo answers with its prompt, which ends
+/// with the profile's words, so the findings object in them is what it reports.
+const FINDER: &str = "---\nname: finder\ndescription: Finds one thing\n---\nReport exactly this: \
+{\"findings\": [{\"file\": \"a.txt\", \"line\": 2, \"severity\": \"high\", \"text\": \"Name this better\"}]}\n";
+
+/// Poll until `check` gives something, for up to 20 seconds.
+fn eventually<T>(what: &str, check: impl Fn() -> Option<T>) -> T {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(found) = check() {
+            return found;
+        }
+        assert!(Instant::now() < deadline, "never {what}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+impl Daemon {
+    fn children(&self, thread: &str) -> Vec<Value> {
+        let listed = self.qcc(&["thread", "list", "--parent", thread, "--json"]).json();
+        listed["threads"].as_array().unwrap().clone()
+    }
+
+    fn comments(&self, thread: &str) -> Vec<Value> {
+        let listed = self.qcc_env(&["--json", "comment", "list"], &[("QCC_THREAD_ID", thread)]);
+        assert!(listed.ok, "{}", listed.stderr);
+        listed.json_lines()[0].as_array().unwrap().clone()
+    }
+
+    /// An echo thread working in `dir` that has finished its first turn.
+    fn spawn_in_dir(&self, dir: &Path, prompt: &str) -> String {
+        let cwd = dir.to_str().unwrap();
+        let output = self.qcc(&[
+            "thread",
+            "spawn",
+            "--provider",
+            "echo",
+            "--cwd",
+            cwd,
+            "--prompt",
+            prompt,
+            "--json",
+        ]);
+        assert!(output.ok, "{}", output.stderr);
+        let id = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+        assert!(self.qcc(&["thread", "wait", &id]).ok);
+        id
+    }
+
+    /// Send a message and wait until the turn it starts is over.
+    fn turn(&self, thread: &str, text: &str) {
+        let before = self.events(thread).iter().filter(|e| e["type"] == "turn/completed").count();
+        assert!(self.qcc(&["thread", "send", thread, text]).ok);
+        self.eventually(thread, "finished the turn", |events| {
+            events.iter().filter(|e| e["type"] == "turn/completed").count() > before
+        });
+    }
+}
+
+#[test]
+fn reviewers_review_a_thread_once_its_agent_is_done_and_leave_comments() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(dir.path(), &[("a.txt", "one\n"), (".qcc/reviewers/finder.md", FINDER)]);
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let id = daemon.spawn_in_dir(&repo, "first");
+
+    let profiles = daemon.qcc(&["reviewers", "profiles", "--thread", &id]);
+    assert!(profiles.ok, "{}", profiles.stderr);
+    assert!(profiles.stdout.contains("finder (project): Finds one thing"), "{}", profiles.stdout);
+    assert!(profiles.stdout.contains("general (built in)"), "{}", profiles.stdout);
+    let configured = daemon.qcc(&[
+        "reviewers",
+        "configure",
+        "--thread",
+        &id,
+        "--enabled",
+        "on",
+        "--profiles",
+        "finder",
+        "--delay",
+        "1s",
+    ]);
+    assert!(configured.ok, "{}", configured.stderr);
+    assert!(configured.stdout.contains("reviews on; profiles: finder"), "{}", configured.stdout);
+    // The agent is told how to ask for a review.
+    let skills = daemon.thread(&id)["skills_enabled"].clone();
+    assert_eq!(skills, serde_json::json!(["qcc-reviewers"]));
+
+    // The agent changes a file and stops, then starts again before the delay is over
+    // and works past it: no review while it works.
+    write(repo.join("a.txt"), "one\ntwo\n");
+    daemon.turn(&id, "hello");
+    daemon.turn(&id, &format!("/slow {}", words(150)));
+    assert!(daemon.children(&id).is_empty(), "a review started while the agent worked");
+    // Then it stays idle: one reviewer looks.
+    let critic = eventually("started a reviewer", || daemon.children(&id).first().cloned());
+    assert_eq!(critic["parent"], id.as_str());
+    assert_eq!(critic["permission_mode"], "ask");
+    let critic = critic["id"].as_str().unwrap().to_owned();
+    assert!(daemon.qcc(&["thread", "wait", &critic]).ok);
+
+    // Its finding becomes a comment on the line, marked as the reviewer's.
+    let comment = eventually("left a comment", || daemon.comments(&id).first().cloned());
+    assert_eq!(comment["path"], "a.txt");
+    assert_eq!(comment["line"], 2);
+    assert_eq!(comment["quote"], "two");
+    assert_eq!(comment["text"], "Name this better");
+    assert_eq!(comment["author"]["plugin"], "reviewers");
+    assert_eq!(comment["author"]["name"], "finder");
+    assert_eq!(comment["author"]["thread"], critic.as_str());
+    assert_eq!(comment["author"]["severity"], "high");
+    // Collect: the agent is not told; the user sends the comment when they want.
+    assert!(!messages(&daemon.events(&id)).iter().any(|m| m.contains("qcc reviewers finished")));
+
+    // Nothing changed since: another finished turn is not reviewed again.
+    daemon.turn(&id, "again");
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(daemon.children(&id).len(), 1);
+    let asked = daemon.qcc(&["reviewers", "request", "--thread", &id]);
+    assert!(
+        !asked.ok && asked.stderr.contains("nothing changed since review round 1"),
+        "{}",
+        asked.stderr
+    );
+
+    // Past the limit no round starts, even when asked.
+    let limited = daemon.qcc(&["reviewers", "configure", "--thread", &id, "--max-rounds", "1"]);
+    assert!(limited.ok, "{}", limited.stderr);
+    write(repo.join("a.txt"), "one\ntwo\nthree\n");
+    let asked = daemon.qcc(&["reviewers", "request", "--thread", &id]);
+    assert!(!asked.ok && asked.stderr.contains("limit of 1 review rounds"), "{}", asked.stderr);
+    // Counted again, the agent's own request starts one at once.
+    assert!(daemon.qcc(&["reviewers", "reset", "--thread", &id]).ok);
+    let asked = daemon.qcc_env(&["reviewers", "request"], &[("QCC_THREAD_ID", &id)]);
+    assert!(asked.ok, "{}", asked.stderr);
+    assert!(asked.stdout.contains("review round 1 started: finder"), "{}", asked.stdout);
+    assert_eq!(daemon.children(&id).len(), 2);
+}
+
+#[test]
+fn reviewers_send_their_findings_to_the_agent_in_one_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(dir.path(), &[("a.txt", "one\n"), (".qcc/reviewers/finder.md", FINDER)]);
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let id = daemon.spawn_in_dir(&repo, "first");
+    let configured = daemon.qcc(&[
+        "reviewers",
+        "configure",
+        "--thread",
+        &id,
+        "--enabled",
+        "on",
+        "--profiles",
+        "finder,general",
+        "--delivery",
+        "auto",
+        "--trigger",
+        "every-turn",
+    ]);
+    assert!(configured.ok, "{}", configured.stderr);
+
+    write(repo.join("a.txt"), "one\ntwo\n");
+    daemon.turn(&id, "changed it");
+    let reviewers = eventually("started both reviewers", || {
+        let children = daemon.children(&id);
+        (children.len() == 2).then_some(children)
+    });
+    for reviewer in &reviewers {
+        assert!(daemon.qcc(&["thread", "wait", reviewer["id"].as_str().unwrap()]).ok);
+    }
+
+    // One message for the round, queued to the agent, which answers it.
+    let events = daemon.eventually(&id, "was sent the findings", |events| {
+        inputs(events).iter().any(|text| text.starts_with("qcc reviewers finished review round 1"))
+    });
+    let sent: Vec<&str> = inputs(&events)
+        .into_iter()
+        .filter(|text| text.starts_with("qcc reviewers finished"))
+        .collect();
+    assert_eq!(sent.len(), 1);
+    let comment =
+        daemon.comments(&id).iter().find(|c| c["author"]["name"] == "finder").cloned().unwrap();
+    let id_of_comment = comment["id"].as_str().unwrap();
+    assert!(
+        sent[0].contains(&format!(
+            "(high, from finder) [{id_of_comment}] at a.txt:2: Name this better"
+        )),
+        "{}",
+        sent[0]
+    );
+    assert!(sent[0].contains("qcc comment resolve"), "{}", sent[0]);
+    // The echo reviewer of the general profile answered with no findings object:
+    // its words go along as one remark.
+    assert!(sent[0].contains("from general)"), "{}", sent[0]);
+    // The agent's answer to them is a turn of its own, which is not reviewed again.
+    assert!(daemon.qcc(&["thread", "wait", &id]).ok);
+    write(repo.join("a.txt"), "one\ntwo\nthree\n");
+    std::thread::sleep(Duration::from_millis(1000));
+    assert_eq!(daemon.children(&id).len(), 2);
+}
+
+#[test]
+fn reviewers_turned_off_leave_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = repo(dir.path(), &[("a.txt", "one\n"), (".qcc/reviewers/finder.md", FINDER)]);
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let id = daemon.spawn_in_dir(&repo, "first");
+    let configured = daemon.qcc(&[
+        "reviewers",
+        "configure",
+        "--thread",
+        &id,
+        "--enabled",
+        "on",
+        "--profiles",
+        "finder",
+        "--trigger",
+        "every-turn",
+    ]);
+    assert!(configured.ok, "{}", configured.stderr);
+
+    let off = daemon.qcc(&["plugin", "disable", "reviewers"]);
+    assert!(off.ok, "{}", off.stderr);
+    // No commands, no panel, no skill.
+    assert!(!daemon.qcc(&["reviewers", "configure", "--thread", &id]).ok);
+    let commands = daemon.qcc(&["command", "list", "--json"]).stdout;
+    assert!(!commands.contains("\"reviewers\""), "{commands}");
+    let skills = daemon.qcc(&["skill", "list", "--json"]).stdout;
+    assert!(!skills.contains("qcc-reviewers"), "{skills}");
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let views = runtime.block_on(async {
+        let client = qcc_client::Client::connect(&daemon.socket).await.unwrap();
+        client.call_raw("ui.contributions", serde_json::json!({})).await.unwrap()
+    });
+    assert!(!views.to_string().contains("reviewers"), "{views}");
+    // No trigger: a finished turn with changes starts no reviewer.
+    write(repo.join("a.txt"), "one\ntwo\n");
+    daemon.turn(&id, "changed it");
+    std::thread::sleep(Duration::from_millis(1000));
+    assert!(daemon.children(&id).is_empty());
+
+    // On again, the thread's set-up is still there and the next turn is reviewed.
+    assert!(daemon.qcc(&["plugin", "enable", "reviewers"]).ok);
+    let status = daemon.qcc(&["reviewers", "configure", "--thread", &id]);
+    assert!(status.stdout.contains("reviews on; profiles: finder"), "{}", status.stdout);
+    daemon.turn(&id, "once more");
+    eventually("started a reviewer", || daemon.children(&id).first().cloned());
 }

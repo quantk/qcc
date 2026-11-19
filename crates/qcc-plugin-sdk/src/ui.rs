@@ -70,7 +70,8 @@ impl Node {
         self.with("style", "danger")
     }
 
-    /// What a `button` sends along with its action.
+    /// What a `button` sends along with its action; the text an `input` starts with
+    /// (and keeps once submitted).
     pub fn value(self, value: impl Into<String>) -> Self {
         self.with("value", value.into())
     }
@@ -160,6 +161,34 @@ pub fn input(
     )
 }
 
+/// A choice among `options`, each `(value, label)`: `action` arrives with the
+/// value the user picks.
+pub fn select<V: Into<String>, L: Into<String>>(
+    label: impl Into<String>,
+    options: impl IntoIterator<Item = (V, L)>,
+    selected: impl Into<String>,
+    action: impl Into<String>,
+) -> Node {
+    let options: Vec<Value> = options
+        .into_iter()
+        .map(|(value, label)| json!({ "value": value.into(), "label": label.into() }))
+        .collect();
+    Node::new(
+        "select",
+        json!({
+            "label": label.into(),
+            "options": options,
+            "value": selected.into(),
+            "action": action.into(),
+        }),
+    )
+}
+
+/// An on/off switch: `action` arrives with `"true"` or `"false"`, what it is now.
+pub fn switch(label: impl Into<String>, on: bool, action: impl Into<String>) -> Node {
+    Node::new("switch", json!({ "label": label.into(), "checked": on, "action": action.into() }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +201,8 @@ mod tests {
             key_values([("a", "b")]),
             table(["x"], [vec!["1".to_owned()]]),
             input("note", "Save", "save"),
+            select("Agent", [("codex", "Codex")], "codex", "agent"),
+            switch("On", true, "on"),
         ]);
         assert_eq!(
             tree.to_value(),
@@ -186,6 +217,9 @@ mod tests {
                     { "type": "keyValues", "items": [{ "key": "a", "value": "b" }] },
                     { "type": "table", "columns": ["x"], "rows": [["1"]] },
                     { "type": "input", "placeholder": "note", "submit": "Save", "action": "save" },
+                    { "type": "select", "label": "Agent", "value": "codex", "action": "agent",
+                      "options": [{ "value": "codex", "label": "Codex" }] },
+                    { "type": "switch", "label": "On", "checked": true, "action": "on" },
                 ],
             })
         );

@@ -137,7 +137,9 @@ code moves. Those whose line is gone are shown above the file or above the diff.
 passes the open comments to the agent (see
 [Comments on changes](projects-and-worktrees.md#comments-on-changes)). Comments resolved by the
 agent are shown struck through, with its note. You can also resolve, reopen or delete a comment
-yourself.
+yourself. A comment a reviewer left (see [Reviewers](reviewers.md)) carries the reviewer's name and
+the severity it gave; **Outdated** means the changes moved on while it looked, so the line may be
+off. A click on the name opens the reviewer's thread.
 
 ### Right panel
 
@@ -157,6 +159,9 @@ yourself.
   and read files, tools, MCP calls by server, skills used and programs run (count, failures; the
   tooltip has the average and longest time).
 - "Details": agent, model, effort, permission mode, session id, directory and environment, dates.
+- "Reviewers" (the `reviewers` plugin): whether and how the thread is reviewed — profiles, agent,
+  delivery, trigger, delay, rounds at most — the rounds it had, and **Review now** (see
+  [Reviewers](reviewers.md)). Plugins can add tabs here the same way.
 
 In a narrow window the panel opens over the thread, and `Esc` closes it. This is the default
 layout: the panel's tabs are blocks like everything else (see [Block layout](#block-layout)).

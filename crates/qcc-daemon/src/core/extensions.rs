@@ -1,15 +1,16 @@
 //! What plugins offer besides sessions: models, the `threads` import, commands and UI.
 
-use qcc_domain::{AgentSkill, ModelInfo, ProviderId, ThreadId};
+use qcc_domain::{AgentSkill, ChangeScope, ModelInfo, ProviderId, ThreadId};
 use qcc_plugin_host::{
-    Contribution, Outcome, PluginRequest, ProviderRequest, ThreadsAnswer, ThreadsCall, UiRequest,
+    Contribution, NewComment, Outcome, PluginRequest, ProviderRequest, ThreadsAnswer, ThreadsCall,
+    UiRequest,
 };
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
-    CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, Empty,
-    ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
-    SendMode, ThreadSendParams, ThreadSpawnParams, UiContributionsResult, UiItemContribution,
-    UiTreeResult, UiViewContribution,
+    CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, CommentAddParams,
+    Empty, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
+    SendMode, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams, ThreadSpawnParams,
+    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
@@ -188,6 +189,88 @@ impl Core {
                 }
                 self.watches.push(Watch { plugin: plugin.to_owned(), thread });
                 Ok(ThreadsAnswer::Done)
+            }
+            ThreadsCall::Diff { thread, request } => {
+                self.plugin_diff(plugin, thread, request).map(|()| ThreadsAnswer::Done)
+            }
+            ThreadsCall::SetSkill { thread, skill, enabled } => {
+                // Only a skill of its own: a plugin does not switch other plugins' skills.
+                if !self.skills.iter().any(|s| s.reference.name == skill && s.plugin == plugin) {
+                    return Err(format!("plugin {plugin} offers no skill {skill:?}"));
+                }
+                self.thread_set_skill(ThreadSetSkillParams { thread_id: thread, skill, enabled })
+                    .map(|_| ThreadsAnswer::Done)
+                    .map_err(|error| error.message)
+            }
+            ThreadsCall::Providers => Ok(ThreadsAnswer::Providers(
+                self.host.providers().map(|(_, info)| info.clone()).collect(),
+            )),
+            ThreadsCall::AddComment(comment) => {
+                let NewComment { thread, path, line, side, quote, text, author } = comment;
+                self.add_comment(
+                    CommentAddParams { thread_id: thread, path, line, side, quote, text },
+                    Some(author),
+                )
+                .map(|comment| ThreadsAnswer::Comment(Box::new(comment)))
+                .map_err(|error| error.message)
+            }
+            ThreadsCall::ListComments { thread, include_resolved } => self
+                .comments_of(&thread, include_resolved)
+                .map(ThreadsAnswer::Comments)
+                .map_err(|error| error.message),
+            ThreadsCall::ReadFile { root, path } => {
+                self.plugin_read_file(plugin, &root, &path).map(ThreadsAnswer::File)
+            }
+            ThreadsCall::ListFiles { root, dir } => {
+                self.plugin_list_files(plugin, &root, &dir).map(ThreadsAnswer::Names)
+            }
+        }
+    }
+
+    /// Ask the environment for a thread's diff on behalf of a plugin, and post the
+    /// answer to it when it comes: the core never waits on a plugin.
+    fn plugin_diff(&mut self, plugin: &str, thread: ThreadId, request: u64) -> Result<(), String> {
+        let asker = self.host.plugin(plugin).cloned().ok_or("the plugin is not loaded")?;
+        let (responder, answer) = Responder::internal();
+        self.environment_query(&thread, ChangeScope::All, Some((Vec::new(), false)), responder);
+        tokio::spawn(async move {
+            let answer = match answer.await {
+                Ok(Ok(value)) => serde_json::from_value::<ThreadDiffResult>(value)
+                    .map(|result| (result.diff, result.truncated))
+                    .map_err(|error| error.to_string()),
+                Ok(Err(error)) => Err(error.message),
+                Err(_) => Err("the daemon dropped the request".to_owned()),
+            };
+            let _ = asker.post(PluginRequest::ThreadDiff { request, thread, answer });
+        });
+        Ok(())
+    }
+
+    /// Tell the plugins that asked for it that turns ended. Called once the queues
+    /// are drained, so a thread a waiting message keeps busy is seen as working.
+    pub(super) fn announce_turn_ends(&mut self) {
+        let ended = std::mem::take(&mut self.turn_ends);
+        if ended.is_empty() {
+            return;
+        }
+        let listeners: Vec<_> = self
+            .host
+            .plugins()
+            .iter()
+            .filter(|plugin| plugin.permissions().turn_events)
+            .cloned()
+            .collect();
+        if listeners.is_empty() {
+            return;
+        }
+        for (thread, status) in ended {
+            let Some(summary) = self.summary(&thread) else { continue };
+            for plugin in &listeners {
+                let request =
+                    PluginRequest::TurnEnded { summary: Box::new(summary.clone()), status };
+                if plugin.post(request).is_err() {
+                    tracing::warn!(plugin = plugin.id(), "a plugin that hears of turns is gone");
+                }
             }
         }
     }

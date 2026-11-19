@@ -91,6 +91,7 @@ The `orchestration` plugin is an ordinary plugin on the public API (permissions 
   same directory continues the task with the original thread's conversation.
 - **`qcc orchestration review --thread <id> [--by codex] [--focus '…']`** — a reviewer looks at
   what the thread did; when it finishes, its remarks go to the original thread as a message.
+  For reviews that start on their own and leave line comments, see [Reviewers](reviewers.md).
 
 From inside an agent `--thread` can be omitted: by default it is the agent's own thread.
 `qcc command list` shows the commands of all plugins.

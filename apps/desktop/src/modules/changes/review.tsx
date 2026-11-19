@@ -1,7 +1,7 @@
 // Comments on lines of the changes, as in a code review: left under a line of the
 // diff, handed to the agent, and marked resolved by it (`qcc comment resolve`).
 
-import { CheckIcon, RotateCcwIcon, SendIcon, Trash2Icon } from "lucide-react";
+import { BotIcon, CheckIcon, RotateCcwIcon, SendIcon, Trash2Icon } from "lucide-react";
 import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 
 import type { LineComment, Thread } from "../../api/protocol.gen";
@@ -164,6 +164,7 @@ function CommentCard({ thread, comment, label }: { thread: Thread; comment: Line
     <div className={`flex flex-col gap-1 rounded-md border bg-card px-2.5 py-1.5 text-sm ${resolved ? "opacity-70" : ""}`}>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         {resolved ? <Badge variant="secondary">Resolved</Badge> : <Badge variant="outline">Open</Badge>}
+        <CommentAuthorMark comment={comment} />
         {label && <span className="truncate font-mono">{label}</span>}
         {label && comment.quote && (
           <code className="min-w-0 truncate" title={comment.quote}>
@@ -208,6 +209,37 @@ function CommentCard({ thread, comment, label }: { thread: Thread; comment: Line
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Who left a comment that is not the user's: a reviewer of a plugin, how much it
+ * thinks the remark matters, whether the changes moved on while it looked, and a
+ * way to open its thread.
+ */
+export function CommentAuthorMark({ comment }: { comment: LineComment }) {
+  const author = comment.author;
+  if (!author) return null;
+  const by = `${author.name}, a reviewer of the ${author.plugin} plugin`;
+  const open = author.thread ? () => store().select(author.thread!) : undefined;
+  return (
+    <>
+      <Badge
+        variant="secondary"
+        className={open ? "cursor-pointer" : undefined}
+        title={open ? `${by}. Open its thread` : by}
+        onClick={open}
+      >
+        <BotIcon />
+        {author.name}
+      </Badge>
+      {author.severity && <Badge variant="outline">{author.severity}</Badge>}
+      {author.stale && (
+        <Badge variant="outline" title="The changes moved on while the reviewer looked: the line may be off">
+          Outdated
+        </Badge>
+      )}
+    </>
   );
 }
 

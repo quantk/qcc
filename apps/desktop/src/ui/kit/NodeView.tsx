@@ -4,9 +4,11 @@
 
 import { type ReactNode, useState } from "react";
 
+import { Choice } from "./Choice";
 import { Markdown } from "./Markdown";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 
 export type NodeAction = (action: string, value?: string) => void;
 
@@ -19,7 +21,9 @@ const str = (value: unknown): string | undefined => (typeof value === "string" ?
 const tone = (value: unknown): string => (typeof value === "string" && TONES.has(value) ? ` tone-${value}` : "");
 
 function InputNode({ node, act, busy }: { node: Fields; act: NodeAction; busy: boolean }) {
-  const [text, setText] = useState("");
+  // A field that starts with a value (a setting) keeps what was submitted.
+  const initial = str(node.value);
+  const [text, setText] = useState(initial ?? "");
   const action = str(node.action);
   if (!action) return null;
   return (
@@ -28,7 +32,7 @@ function InputNode({ node, act, busy }: { node: Fields; act: NodeAction; busy: b
       onSubmit={(event) => {
         event.preventDefault();
         act(action, text);
-        setText("");
+        if (initial === undefined) setText("");
       }}
     >
       <Input value={text} placeholder={str(node.placeholder)} onChange={(event) => setText(event.target.value)} />
@@ -133,6 +137,45 @@ function draw(value: unknown, act: NodeAction, busy: boolean, depth: number, key
     }
     case "input":
       return <InputNode key={key} node={node} act={act} busy={busy} />;
+    case "select": {
+      const action = str(node.action);
+      const options = (Array.isArray(node.options) ? node.options : []).flatMap((option: Fields | null) => {
+        const value = str(option?.value);
+        return value === undefined ? [] : [{ value, label: str(option?.label) ?? value }];
+      });
+      if (!action || options.length === 0) return null;
+      const label = str(node.label);
+      return (
+        <label key={key} className="flex flex-col gap-1 text-sm">
+          {label && <span className="text-muted-foreground">{label}</span>}
+          <Choice
+            size="sm"
+            className="w-full max-w-full"
+            aria-label={label}
+            value={str(node.value) ?? null}
+            options={options}
+            disabled={busy}
+            onChange={(value) => act(action, value ?? "")}
+          />
+        </label>
+      );
+    }
+    case "switch": {
+      const action = str(node.action);
+      if (!action) return null;
+      const label = str(node.label);
+      return (
+        <label key={key} className="flex items-center gap-2 text-sm">
+          <Switch
+            aria-label={label}
+            checked={node.checked === true}
+            disabled={busy}
+            onCheckedChange={(checked) => act(action, checked ? "true" : "false")}
+          />
+          {label && <span className="min-w-0 flex-1">{label}</span>}
+        </label>
+      );
+    }
     default:
       return null;
   }

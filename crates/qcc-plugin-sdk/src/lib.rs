@@ -84,7 +84,9 @@ pub mod ui;
 
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
-pub use bindings::qcc::plugin::{completions, deltas, kv, process, threads, timers};
+pub use bindings::qcc::plugin::{
+    comments, completions, deltas, files, kv, process, threads, timers,
+};
 
 use types::{
     AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution, Delta,
@@ -92,8 +94,8 @@ use types::{
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
     InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
     ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo,
-    SkillRef, ThreadInput, TokenUsage, TurnBoundary, TurnStatus, UiAction, UiItem, UiRender,
-    UiRequest, UiViewInfo,
+    SkillRef, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary, TurnEnded, TurnStatus, UiAction,
+    UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -101,8 +103,8 @@ pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
-        attachments_note, boundary, completions, deltas, kv, log, message, option, process,
-        session_context, skills_prompt, threads, timers, with_notes,
+        attachments_note, boundary, comments, completions, deltas, files, kv, log, message, option,
+        process, session_context, skills_prompt, threads, timers, with_notes,
     };
 }
 
@@ -491,6 +493,16 @@ pub trait Plugin: Default + 'static {
         let _ = settled;
     }
 
+    /// A turn of some thread ended. Needs the `turn-events` permission.
+    fn on_turn_ended(&mut self, ended: TurnEnded) {
+        let _ = ended;
+    }
+
+    /// The diff asked for with [`threads::diff`].
+    fn on_thread_diff(&mut self, diff: ThreadDiff) {
+        let _ = diff;
+    }
+
     fn on_process(&mut self, event: ProcessEvent) {
         let _ = event;
     }
@@ -640,6 +652,14 @@ pub mod __private {
             }
             Event::ThreadSettled(settled) => {
                 plugin.on_thread_settled(settled);
+                Ok(Outcome::Done)
+            }
+            Event::TurnEnded(ended) => {
+                plugin.on_turn_ended(ended);
+                Ok(Outcome::Done)
+            }
+            Event::ThreadDiff(diff) => {
+                plugin.on_thread_diff(diff);
                 Ok(Outcome::Done)
             }
             Event::ProcessStdout(output) => {

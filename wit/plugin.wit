@@ -381,9 +381,12 @@ interface types {
     app,
     /// A tab of the thread view.
     thread-tab,
+    /// A tab of the panel beside the thread view: for small views that go along
+    /// with the thread, such as its settings in the plugin.
+    thread-panel,
   }
 
-  /// Which threads a thread tab is offered for.
+  /// Which threads a thread tab or panel view is offered for.
   enum ui-scope {
     all-threads,
     /// Only threads of a provider this plugin contributes.
@@ -519,6 +522,23 @@ interface types {
     thread: thread-info,
     /// The text of the agent's latest message.
     last-message: option<string>,
+  }
+
+  /// A turn of a thread ended. Delivered to plugins with the `turn-events`
+  /// permission, for every thread.
+  record turn-ended {
+    /// The thread as it is once the turn is over. A message that waited for the
+    /// turn may already keep it working.
+    thread: thread-info,
+    status: turn-status,
+  }
+
+  /// The answer to `threads.diff`.
+  record thread-diff {
+    /// The id `threads.diff` returned.
+    request: u64,
+    thread: thread-id,
+    answer: result<environment-diff, string>,
   }
 
   // ----- events -----------------------------------------------------------------
@@ -881,6 +901,10 @@ interface types {
     command(command-call),
     /// A thread passed to `threads.watch` settled.
     thread-settled(settled-thread),
+    /// A turn of some thread ended (permission `turn-events`).
+    turn-ended(turn-ended),
+    /// The diff asked for with `threads.diff`.
+    thread-diff(thread-diff),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -995,7 +1019,7 @@ interface process {
 /// Permission `threads`. Create and drive threads like a client of the daemon:
 /// the base of orchestration. Not available during `init`.
 interface threads {
-  use types.{thread-id, thread-info, permission-mode};
+  use types.{thread-id, thread-info, permission-mode, provider-info};
 
   record spawn-options {
     /// A provider id, as `qcc plugin list` shows it.
@@ -1036,6 +1060,97 @@ interface threads {
   /// Deliver one `thread-settled` event when the thread is next idle, failed or
   /// archived; right away if it is already. Watches do not outlive the daemon.
   watch: func(thread: thread-id) -> result<_, string>;
+  /// Ask for one patch of everything the thread changed, as `qcc thread diff`
+  /// shows it. The environment that knows may take a while, so the answer comes
+  /// later as a `thread-diff` event with the returned id.
+  diff: func(thread: thread-id) -> result<u64, string>;
+  /// Turn one of the plugin's own skills on or off in a thread, as the user can.
+  set-skill: func(thread: thread-id, skill: string, enabled: bool) -> result<_, string>;
+  /// The agents the daemon can run now.
+  providers: func() -> result<list<provider-info>, string>;
+}
+
+/// Permission `comments`. Leave remarks on lines of a thread's changes and read
+/// them, like the user does in the app. A comment the plugin leaves carries its
+/// id as the author, which the host sets: a plugin cannot speak for the user or
+/// for another plugin.
+interface comments {
+  use types.{thread-id};
+
+  /// Which side of the diff a line number counts on.
+  enum diff-side {
+    /// The code before the change: a deleted line.
+    old,
+    /// The code after the change: an added or unchanged line.
+    new,
+  }
+
+  /// Who left a comment, beyond the plugin itself.
+  record comment-author {
+    /// Who in the plugin: a reviewer's name.
+    name: string,
+    /// The thread whose work the comment is, if any (a reviewer's).
+    thread: option<thread-id>,
+    /// How much it matters, in the plugin's own words (`high`, `low`).
+    severity: option<string>,
+    /// The changes moved on since the comment was made: the line may be off.
+    stale: bool,
+  }
+
+  record new-comment {
+    thread: thread-id,
+    /// The file, as the thread's diff names it.
+    path: string,
+    /// 1-based, counted on `side`.
+    line: u32,
+    side: diff-side,
+    /// The text of the line, to find it by when the code moves.
+    quote: option<string>,
+    text: string,
+    author: comment-author,
+  }
+
+  record line-comment {
+    id: string,
+    thread: thread-id,
+    path: string,
+    line: u32,
+    side: diff-side,
+    quote: option<string>,
+    text: string,
+    /// Milliseconds since the Unix epoch.
+    created-at: u64,
+    /// When it was dealt with; absent while it is open.
+    resolved-at: option<u64>,
+    resolution: option<string>,
+    /// The plugin that left it; absent for the user's own comments.
+    plugin: option<string>,
+    author: option<comment-author>,
+  }
+
+  add: func(comment: new-comment) -> result<line-comment, string>;
+  /// The thread's comments, oldest first; resolved ones only if asked for.
+  %list: func(thread: thread-id, include-resolved: bool) -> result<list<line-comment>, string>;
+}
+
+/// Permission `files`. Read text files where a thread works and in the plugin's
+/// own data folder; nothing else. For settings and instructions people keep next to
+/// their code, such as `.qcc/<something>/*.md`.
+interface files {
+  use types.{thread-id};
+
+  variant root {
+    /// The working directory of the thread.
+    thread(thread-id),
+    /// The plugin's own folder in qcc's data: `<data>/plugin-data/<plugin-id>`.
+    %own,
+  }
+
+  /// The text of a file, up to 1 MiB; none when there is no such file. `path` is
+  /// relative to the root and cannot leave it, through `..` or a link.
+  read: func(root: root, path: string) -> result<option<string>, string>;
+  /// The names in a folder, sorted; empty when there is no such folder.
+  %list: func(root: root, dir: string) -> result<list<string>, string>;
 }
 
 world plugin {
@@ -1046,6 +1161,8 @@ world plugin {
   import timers;
   import process;
   import threads;
+  import comments;
+  import files;
 
   use types.{contribution, event, outcome};
 

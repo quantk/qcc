@@ -84,7 +84,9 @@ pub mod ui;
 
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
-pub use bindings::qcc::plugin::{comments, completions, deltas, kv, process, threads, timers};
+pub use bindings::qcc::plugin::{
+    comments, completions, deltas, files, kv, process, threads, timers,
+};
 
 use types::{
     AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution, Delta,
@@ -101,7 +103,7 @@ pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
-        attachments_note, boundary, comments, completions, deltas, kv, log, message, option,
+        attachments_note, boundary, comments, completions, deltas, files, kv, log, message, option,
         process, session_context, skills_prompt, threads, timers, with_notes,
     };
 }

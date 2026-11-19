@@ -370,6 +370,7 @@ function PluginCard(props: {
     permissions.skills && "skills",
     permissions.turn_events && "turn events",
     permissions.comments && "comments",
+    permissions.files && "reads files",
     permissions.process.length > 0 && `runs ${permissions.process.join(", ")}`,
   ].filter(Boolean);
   const adds = [

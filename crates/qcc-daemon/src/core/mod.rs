@@ -36,6 +36,7 @@ mod comments;
 mod configuration;
 mod environments;
 mod extensions;
+mod files;
 mod limits;
 mod rpc;
 mod sessions;

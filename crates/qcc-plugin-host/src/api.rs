@@ -229,6 +229,25 @@ pub enum ThreadsCall {
         thread: ThreadId,
         include_resolved: bool,
     },
+    /// The `files` import, checked against the `files` permission: a file's text.
+    ReadFile {
+        root: FileRoot,
+        path: String,
+    },
+    /// The `files` import: the names in a folder.
+    ListFiles {
+        root: FileRoot,
+        dir: String,
+    },
+}
+
+/// Where a plugin's `files` call reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileRoot {
+    /// The thread's working directory.
+    Thread(ThreadId),
+    /// The plugin's own data folder.
+    Own,
 }
 
 /// A comment a plugin leaves. Its author's `plugin` is the caller, whatever the
@@ -269,6 +288,9 @@ pub enum ThreadsAnswer {
     Providers(Vec<ProviderInfo>),
     Comment(Box<LineComment>),
     Comments(Vec<LineComment>),
+    /// A file's text; `None` when there is no such file.
+    File(Option<String>),
+    Names(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

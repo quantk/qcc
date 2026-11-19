@@ -821,6 +821,8 @@ export type PluginPermissions = {
 	turn_events?: boolean,
 	/**  Leaves and reads comments on lines of threads' changes. */
 	comments?: boolean,
+	/**  Reads files in threads' working directories and its own folder. */
+	files?: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
 };

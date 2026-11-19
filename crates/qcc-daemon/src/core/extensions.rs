@@ -218,6 +218,12 @@ impl Core {
                 .comments_of(&thread, include_resolved)
                 .map(ThreadsAnswer::Comments)
                 .map_err(|error| error.message),
+            ThreadsCall::ReadFile { root, path } => {
+                self.plugin_read_file(plugin, &root, &path).map(ThreadsAnswer::File)
+            }
+            ThreadsCall::ListFiles { root, dir } => {
+                self.plugin_list_files(plugin, &root, &dir).map(ThreadsAnswer::Names)
+            }
         }
     }
 

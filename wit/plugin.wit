@@ -1133,6 +1133,26 @@ interface comments {
   %list: func(thread: thread-id, include-resolved: bool) -> result<list<line-comment>, string>;
 }
 
+/// Permission `files`. Read text files where a thread works and in the plugin's
+/// own data folder; nothing else. For settings and instructions people keep next to
+/// their code, such as `.qcc/<something>/*.md`.
+interface files {
+  use types.{thread-id};
+
+  variant root {
+    /// The working directory of the thread.
+    thread(thread-id),
+    /// The plugin's own folder in qcc's data: `<data>/plugin-data/<plugin-id>`.
+    %own,
+  }
+
+  /// The text of a file, up to 1 MiB; none when there is no such file. `path` is
+  /// relative to the root and cannot leave it, through `..` or a link.
+  read: func(root: root, path: string) -> result<option<string>, string>;
+  /// The names in a folder, sorted; empty when there is no such folder.
+  %list: func(root: root, dir: string) -> result<list<string>, string>;
+}
+
 world plugin {
   import log;
   import completions;
@@ -1142,6 +1162,7 @@ world plugin {
   import process;
   import threads;
   import comments;
+  import files;
 
   use types.{contribution, event, outcome};
 

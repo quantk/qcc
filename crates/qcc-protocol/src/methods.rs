@@ -1093,6 +1093,9 @@ pub struct PluginPermissions {
     /// Leaves and reads comments on lines of threads' changes.
     #[serde(default)]
     pub comments: bool,
+    /// Reads files in threads' working directories and its own folder.
+    #[serde(default)]
+    pub files: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
 }

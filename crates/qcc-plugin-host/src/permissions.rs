@@ -18,6 +18,8 @@ pub struct Permissions {
     pub turn_events: bool,
     /// Leave comments on lines of threads' changes and read them.
     pub comments: bool,
+    /// Read files in threads' working directories and in the plugin's own folder.
+    pub files: bool,
     /// Executables the plugin may run, matched exactly against `spawn`'s `program`.
     pub process: Vec<String>,
 }
@@ -32,6 +34,7 @@ impl Permissions {
             skills: self.skills && other.skills,
             turn_events: self.turn_events && other.turn_events,
             comments: self.comments && other.comments,
+            files: self.files && other.files,
             process: self.process.iter().filter(|p| other.process.contains(p)).cloned().collect(),
         }
     }

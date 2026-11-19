@@ -364,6 +364,7 @@ pub fn plugin(plugin: &PluginInfo) -> String {
         ("skills", permissions.skills),
         ("turn-events", permissions.turn_events),
         ("comments", permissions.comments),
+        ("files", permissions.files),
     ] {
         if on {
             granted.push(name.to_owned());

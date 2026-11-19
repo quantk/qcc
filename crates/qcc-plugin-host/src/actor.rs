@@ -10,7 +10,7 @@ use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Engine, ResourceLimiter, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
-use crate::api::{Contribution, Outcome, PluginRequest, ThreadsAnswer, ThreadsCall};
+use crate::api::{Contribution, FileRoot, Outcome, PluginRequest, ThreadsAnswer, ThreadsCall};
 use crate::bindings::qcc::plugin as imports;
 use crate::bindings::{Plugin, wit};
 use crate::convert;
@@ -752,6 +752,39 @@ impl State {
             return Err(self.denied("comments"));
         }
         (self.services.threads)(&self.plugin_id, call)
+    }
+}
+
+impl State {
+    /// A `files` call, which the core answers: it knows where threads work.
+    fn files(&self, call: ThreadsCall) -> Result<ThreadsAnswer, String> {
+        if !self.permissions.files {
+            return Err(self.denied("files"));
+        }
+        (self.services.threads)(&self.plugin_id, call)
+    }
+}
+
+fn file_root(root: imports::files::Root) -> FileRoot {
+    match root {
+        imports::files::Root::Thread(thread) => FileRoot::Thread(ThreadId(thread)),
+        imports::files::Root::Own => FileRoot::Own,
+    }
+}
+
+impl imports::files::Host for State {
+    fn read(&mut self, root: imports::files::Root, path: String) -> Result<Option<String>, String> {
+        match self.files(ThreadsCall::ReadFile { root: file_root(root), path })? {
+            ThreadsAnswer::File(text) => Ok(text),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
+    }
+
+    fn list(&mut self, root: imports::files::Root, dir: String) -> Result<Vec<String>, String> {
+        match self.files(ThreadsCall::ListFiles { root: file_root(root), dir })? {
+            ThreadsAnswer::Names(names) => Ok(names),
+            other => Err(format!("unexpected answer {other:?}")),
+        }
     }
 }
 

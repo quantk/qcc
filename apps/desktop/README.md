@@ -232,6 +232,9 @@ that plugin only and posts the answer back.
 Adding a node type means adding a case to `NodeView` and a builder to
 `crates/qcc-plugin-sdk/src/ui.rs`.
 
+A view is asked for again when its thread settles and when its plugin says it changed
+(`ui.changed`, counted per view and per thread in `state/uiChanges.ts`).
+
 Plugin commands (`command.list`) go the same way: `modules/plugin-commands` registers
 each as a palette command, offers the ones that act on a thread in the thread header,
 and asks for their parameters in a dialog before `command.run`.

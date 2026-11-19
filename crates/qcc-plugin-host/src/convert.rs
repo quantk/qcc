@@ -398,6 +398,17 @@ pub(crate) fn thread_info(summary: ThreadSummary) -> wit::ThreadInfo {
     }
 }
 
+fn model_info(model: ModelInfo) -> wit::ModelInfo {
+    wit::ModelInfo {
+        id: model.id,
+        name: model.name,
+        description: model.description,
+        is_default: model.is_default,
+        efforts: model.efforts,
+        default_effort: model.default_effort,
+    }
+}
+
 pub(crate) fn provider_info(info: ProviderInfo) -> wit::ProviderInfo {
     let c = info.capabilities;
     wit::ProviderInfo {
@@ -713,6 +724,13 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
             thread: thread_info(*summary),
             status: turn_status_to_wit(status),
         }),
+        PluginRequest::ProviderModels { request, provider, answer } => {
+            wit::Event::ProviderModels(wit::ProviderModels {
+                request,
+                provider: provider.0,
+                answer: answer.map(|models| models.into_iter().map(model_info).collect()),
+            })
+        }
         PluginRequest::ThreadDiff { request, thread, answer } => {
             wit::Event::ThreadDiff(wit::ThreadDiff {
                 request,

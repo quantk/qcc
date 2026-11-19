@@ -244,7 +244,7 @@ struct State {
     next_timer: u64,
     processes: HashMap<u64, Box<dyn ProcessHandle>>,
     next_process: u64,
-    /// The last id given out by `threads.diff`.
+    /// The last id given out by `threads.diff` or `threads.models`.
     next_request: u64,
     /// Callers waiting for an answer the plugin deferred, by the plugin's token.
     deferred: HashMap<u64, Reply>,
@@ -735,6 +735,13 @@ impl imports::threads::Host for State {
         self.threads(ThreadsCall::SetSkill { thread: ThreadId(thread), skill, enabled }).map(|_| ())
     }
 
+    fn models(&mut self, provider: String, refresh: bool) -> Result<u64, String> {
+        let request = self.next_request + 1;
+        self.threads(ThreadsCall::Models { provider: provider.into(), refresh, request })?;
+        self.next_request = request;
+        Ok(request)
+    }
+
     fn providers(&mut self) -> Result<Vec<wit::ProviderInfo>, String> {
         match self.threads(ThreadsCall::Providers)? {
             ThreadsAnswer::Providers(providers) => {
@@ -785,6 +792,14 @@ impl imports::files::Host for State {
             ThreadsAnswer::Names(names) => Ok(names),
             other => Err(format!("unexpected answer {other:?}")),
         }
+    }
+}
+
+impl imports::views::Host for State {
+    fn refresh(&mut self, view: String, thread: Option<String>) -> Result<(), String> {
+        // No permission: a plugin can only ask the app to redraw its own views.
+        let call = ThreadsCall::RefreshView { view, thread: thread.map(ThreadId) };
+        (self.services.threads)(&self.plugin_id, call).map(|_| ())
     }
 }
 

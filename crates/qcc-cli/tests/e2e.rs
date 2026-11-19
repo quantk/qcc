@@ -3673,3 +3673,61 @@ fn reviewers_turned_off_leave_nothing_behind() {
     daemon.turn(&id, "once more");
     eventually("started a reviewer", || daemon.children(&id).first().cloned());
 }
+
+#[test]
+fn the_reviewers_panel_offers_the_models_of_the_agent_and_is_redrawn_when_they_come() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("first");
+    daemon.wait_for(&id, "turn/completed");
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let (client, mut notifications) =
+            qcc_client::Client::connect_raw(&daemon.socket).await.unwrap();
+        client.call_raw("thread.watch", serde_json::json!({ "subscription": 7 })).await.unwrap();
+        let view = serde_json::json!({
+            "plugin": "reviewers", "view": "reviewers", "thread_id": id,
+            "action": "provider", "value": "echo",
+        });
+        let first = client.call_raw("ui.action", view).await.unwrap()["tree"].to_string();
+        // The models were not known yet: the panel waits for them and says so...
+        assert!(first.contains("Loading the models of echo"), "{first}");
+        // ...and the plugin tells the app to draw it again once they are in.
+        let changed = loop {
+            let notification = tokio::time::timeout(Duration::from_secs(20), notifications.recv())
+                .await
+                .expect("the panel is redrawn")
+                .expect("the connection stays open");
+            if notification.method == "ui.changed" {
+                break notification.params;
+            }
+        };
+        assert_eq!(changed["subscription"], 7);
+        assert_eq!(changed["plugin"], "reviewers");
+        assert_eq!(changed["thread_id"], id.as_str());
+        let render =
+            serde_json::json!({ "plugin": "reviewers", "view": "reviewers", "thread_id": id });
+        let tree = client.call_raw("ui.render", render).await.unwrap()["tree"].to_string();
+        assert!(tree.contains(r#""action":"model""#), "{tree}");
+        assert!(
+            tree.contains(r#""value":"echo-2""#) && tree.contains("Echo 1 (default)"),
+            "{tree}"
+        );
+        assert!(
+            tree.contains(r#""action":"effort""#) && tree.contains(r#""value":"high""#),
+            "{tree}"
+        );
+    });
+    // Chosen there, the model is the thread's reviewers' model.
+    let picked = runtime.block_on(async {
+        let client = qcc_client::Client::connect(&daemon.socket).await.unwrap();
+        let action = serde_json::json!({
+            "plugin": "reviewers", "view": "reviewers", "thread_id": id,
+            "action": "model", "value": "echo-2",
+        });
+        client.call_raw("ui.action", action).await
+    });
+    assert!(picked.is_ok(), "{picked:?}");
+    let status = daemon.qcc(&["reviewers", "configure", "--thread", &id]);
+    assert!(status.stdout.contains("agent: echo, model: echo-2"), "{}", status.stdout);
+}

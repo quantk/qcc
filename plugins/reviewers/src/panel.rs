@@ -1,5 +1,7 @@
 //! The thread's reviewer settings, in the panel beside it.
 
+use std::collections::BTreeSet;
+
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::ui::{self, Node, Tone};
 
@@ -18,8 +20,163 @@ fn count(n: u32, what: &str) -> String {
     if n == 1 { format!("1 {what}") } else { format!("{n} {what}s") }
 }
 
+/// What the panel knows of an agent's models.
+pub(crate) enum Models {
+    /// Asked for; these threads' panels are drawn again when they come.
+    Loading(BTreeSet<String>),
+    Ready(Vec<ModelInfo>),
+    Failed(String),
+}
+
+/// The model a choice of `model` stands for: that one, or the agent's default.
+fn chosen_model<'a>(models: &'a [ModelInfo], model: Option<&str>) -> Option<&'a ModelInfo> {
+    match model {
+        Some(id) => models.iter().find(|m| m.id == id),
+        None => models.iter().find(|m| m.is_default).or(models.first()),
+    }
+}
+
+/// `(value, label)` options with "as the profile says" first, and the current value
+/// kept even when the list does not have it.
+fn options(
+    choices: impl IntoIterator<Item = (String, String)>,
+    current: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut options = vec![(String::new(), "As the profile says".to_owned())];
+    options.extend(choices);
+    if let Some(current) = current
+        && !options.iter().any(|(value, _)| value == current)
+    {
+        options.push((current.to_owned(), current.to_owned()));
+    }
+    options
+}
+
+/// Model and effort as lines of text, for an agent that does not list its models.
+fn typed_agent(config: &ThreadConfig, nodes: &mut Vec<Node>) {
+    nodes.push(
+        ui::input("Model (empty: the profile's)", "Set model", "model")
+            .value(config.model.clone().unwrap_or_default()),
+    );
+    nodes.push(
+        ui::input("Effort (empty: the profile's)", "Set effort", "effort")
+            .value(config.effort.clone().unwrap_or_default()),
+    );
+}
+
 impl Reviewers {
-    fn panel(&self, thread: &str) -> Node {
+    /// The models of `provider` as far as known, asking the agent the first time;
+    /// the panel of `thread` is drawn again once they are in.
+    fn models_of(&mut self, provider: &str, thread: &str, refresh: bool) -> &Models {
+        let ask = refresh || !self.models.contains_key(provider);
+        if ask {
+            let state = match threads::models(provider, refresh) {
+                Ok(request) => {
+                    self.model_requests.insert(request, provider.to_owned());
+                    Models::Loading(BTreeSet::new())
+                }
+                Err(error) => Models::Failed(error),
+            };
+            self.models.insert(provider.to_owned(), state);
+        }
+        let models = self.models.get_mut(provider).expect("inserted above");
+        if let Models::Loading(waiting) = models {
+            waiting.insert(thread.to_owned());
+        }
+        models
+    }
+
+    /// The models of an agent came: keep them and draw the panels that wait.
+    pub(crate) fn models_came(&mut self, answer: ProviderModels) {
+        if self.model_requests.remove(&answer.request).is_none() {
+            return;
+        }
+        let state = match answer.answer {
+            Ok(models) => Models::Ready(models),
+            Err(error) => Models::Failed(error),
+        };
+        if let Some(Models::Loading(waiting)) = self.models.insert(answer.provider, state) {
+            for thread in waiting {
+                if let Err(error) = views::refresh(VIEW, Some(&thread)) {
+                    log::warn(format!("cannot redraw the panel of {thread}: {error}"));
+                }
+            }
+        }
+    }
+
+    /// The agent, model and effort of the thread's reviewers.
+    fn agent_fields(&mut self, thread: &str, config: &ThreadConfig, nodes: &mut Vec<Node>) {
+        let mut agents: Vec<(String, String)> = Vec::new();
+        if let Ok(providers) = threads::providers() {
+            agents.extend(providers.into_iter().map(|p| (p.id, p.name)));
+        }
+        nodes.push(ui::select(
+            "Agent",
+            options(agents, config.provider.as_deref()),
+            config.provider.clone().unwrap_or_default(),
+            "provider",
+        ));
+        let Some(provider) = config.provider.clone() else {
+            if config.model.is_some() || config.effort.is_some() {
+                typed_agent(config, nodes);
+            } else {
+                nodes.push(
+                    ui::text(
+                        "Each profile's agent, model and effort. Pick an agent to choose them.",
+                    )
+                    .tone(Tone::Muted),
+                );
+            }
+            return;
+        };
+        match self.models_of(&provider, thread, false) {
+            Models::Loading(_) => {
+                nodes
+                    .push(ui::text(format!("Loading the models of {provider}…")).tone(Tone::Muted));
+            }
+            Models::Ready(models) if !models.is_empty() => {
+                let choices = models.iter().map(|m| {
+                    let label =
+                        if m.is_default { format!("{} (default)", m.name) } else { m.name.clone() };
+                    (m.id.clone(), label)
+                });
+                nodes.push(ui::select(
+                    "Model",
+                    options(choices, config.model.as_deref()),
+                    config.model.clone().unwrap_or_default(),
+                    "model",
+                ));
+                let efforts = chosen_model(models, config.model.as_deref())
+                    .map(|model| model.efforts.clone())
+                    .unwrap_or_default();
+                if !efforts.is_empty() || config.effort.is_some() {
+                    nodes.push(ui::select(
+                        "Effort",
+                        options(
+                            efforts.into_iter().map(|e| (e.clone(), e)),
+                            config.effort.as_deref(),
+                        ),
+                        config.effort.clone().unwrap_or_default(),
+                        "effort",
+                    ));
+                }
+            }
+            Models::Ready(_) => {
+                nodes.push(
+                    ui::text(format!("{provider} does not list its models.")).tone(Tone::Muted),
+                );
+                typed_agent(config, nodes);
+            }
+            Models::Failed(error) => {
+                let note = format!("Cannot list the models of {provider}: {error}");
+                nodes.push(ui::text(note).tone(Tone::Warning));
+                typed_agent(config, nodes);
+                nodes.push(ui::button("Ask for the models again", "models-refresh"));
+            }
+        }
+    }
+
+    fn panel(&mut self, thread: &str) -> Node {
         let config = self.config_of(thread);
         let state = state_of(thread);
         let (profiles, problems) = profiles_for(thread);
@@ -48,29 +205,7 @@ impl Reviewers {
             nodes.push(ui::text(format!("Cannot read {problem}")).tone(Tone::Warning));
         }
 
-        let mut agents: Vec<(String, String)> = vec![(String::new(), "As the profile says".into())];
-        if let Ok(providers) = threads::providers() {
-            agents.extend(providers.into_iter().map(|p| (p.id, p.name)));
-        }
-        nodes.push(ui::select(
-            "Agent",
-            agents,
-            config.provider.clone().unwrap_or_default(),
-            "provider",
-        ));
-        nodes.push(ui::text(format!(
-            "Model: {} · Effort: {}",
-            config.model.as_deref().unwrap_or("as the profile says"),
-            config.effort.as_deref().unwrap_or("as the profile says"),
-        )));
-        nodes.push(
-            ui::input("Model (empty: the profile's)", "Set model", "model")
-                .value(config.model.clone().unwrap_or_default()),
-        );
-        nodes.push(
-            ui::input("Effort (empty: the profile's)", "Set effort", "effort")
-                .value(config.effort.clone().unwrap_or_default()),
-        );
+        self.agent_fields(thread, &config, &mut nodes);
 
         nodes.push(ui::select(
             "Findings",
@@ -182,6 +317,32 @@ impl Reviewers {
                 crate::reset(thread);
                 return Ok(None);
             }
+            "models-refresh" => {
+                if let Some(provider) = &config.provider {
+                    self.models_of(provider, thread, true);
+                }
+                return Ok(None);
+            }
+            // A model and an effort belong to an agent: another agent starts afresh.
+            "provider" => {
+                let before = config.provider.clone();
+                apply(&mut config, action, value)?;
+                if config.provider != before {
+                    config.model = None;
+                    config.effort = None;
+                }
+            }
+            // An effort the new model does not take (or none at all) goes back to the profile's.
+            "model" => {
+                apply(&mut config, action, value)?;
+                if let (Some(provider), Some(effort)) = (&config.provider, &config.effort)
+                    && let Some(Models::Ready(models)) = self.models.get(provider)
+                    && let Some(model) = chosen_model(models, config.model.as_deref())
+                    && !model.efforts.contains(effort)
+                {
+                    config.effort = None;
+                }
+            }
             "delay-ms" => {
                 config.delay_ms = value.parse().map_err(|_| format!("{value:?} is not a delay"))?;
             }
@@ -228,5 +389,41 @@ impl Ui for Reviewers {
             Some((note, tone)) => ui::stack([ui::text(note).tone(tone), panel]).to_json(),
             None => panel.to_json(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(id: &str, default: bool, efforts: &[&str]) -> ModelInfo {
+        ModelInfo {
+            id: id.into(),
+            name: id.to_uppercase(),
+            description: None,
+            is_default: default,
+            efforts: efforts.iter().map(|e| (*e).to_owned()).collect(),
+            default_effort: None,
+        }
+    }
+
+    #[test]
+    fn efforts_come_from_the_model_chosen_or_the_default_one() {
+        let models = [model("a", false, &["low"]), model("b", true, &["low", "high"])];
+        assert_eq!(chosen_model(&models, Some("a")).unwrap().id, "a");
+        assert_eq!(chosen_model(&models, None).unwrap().id, "b", "the agent's default");
+        assert!(chosen_model(&models, Some("gone")).is_none());
+        assert_eq!(chosen_model(&[model("x", false, &[])], None).unwrap().id, "x");
+    }
+
+    #[test]
+    fn options_start_with_the_profile_and_keep_the_current_value() {
+        let listed = || [("a".to_owned(), "A".to_owned())];
+        let values = |options: Vec<(String, String)>| -> Vec<String> {
+            options.into_iter().map(|(value, _)| value).collect()
+        };
+        assert_eq!(values(options(listed(), None)), ["", "a"]);
+        assert_eq!(values(options(listed(), Some("a"))), ["", "a"]);
+        assert_eq!(values(options(listed(), Some("custom"))), ["", "a", "custom"]);
     }
 }

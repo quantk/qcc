@@ -105,6 +105,7 @@ fn generate() -> String {
         .register::<CommentsUpdatedNotification>()
         .register::<PluginsUpdatedNotification>()
         .register::<LimitsUpdatedNotification>()
+        .register::<UiChangedNotification>()
         .register::<RpcError>();
     // Sequence numbers, timestamps and token counts stay far below 2^53.
     let types = Remapper::new().dangerous_bigints_as_number().remap_types(types);
@@ -127,6 +128,7 @@ fn generate() -> String {
     out.push_str(&format!("\t\"{COMMENTS_UPDATED}\": CommentsUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{PLUGINS_UPDATED}\": PluginsUpdatedNotification,\n"));
     out.push_str(&format!("\t\"{LIMITS_UPDATED}\": LimitsUpdatedNotification,\n"));
+    out.push_str(&format!("\t\"{UI_CHANGED}\": UiChangedNotification,\n"));
     out.push_str("};\n");
     out
 }

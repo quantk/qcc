@@ -5,11 +5,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use qcc_domain::ModelInfo;
 use qcc_domain::{
     CommentAuthor, CommentId, LineComment, PermissionMode, Role, ThreadId, ThreadState,
     TranscriptEntry, TurnStatus,
 };
-use qcc_plugin_host::{Grant, Outcome, PluginError, PluginRequest, SettledThread};
+use qcc_plugin_host::{Grant, Outcome, PluginError, PluginRequest, SettledThread, UiRequest};
 use qcc_plugin_testkit::{Bench, ThreadSummary, ThreadsAnswer, ThreadsCall};
 use qcc_runtime::NewThread;
 
@@ -110,6 +111,8 @@ impl Fixture {
                     }
                     ThreadsCall::Watch(_)
                     | ThreadsCall::Diff { .. }
+                    | ThreadsCall::Models { .. }
+                    | ThreadsCall::RefreshView { .. }
                     | ThreadsCall::SetSkill { .. }
                     | ThreadsCall::Send { .. } => ThreadsAnswer::Done,
                 })
@@ -406,4 +409,151 @@ fn without_the_comments_permission_findings_still_reach_the_agent() {
         "the host refused them"
     );
     assert!(fixture.comments().is_empty());
+}
+
+fn model(id: &str, default: bool, efforts: &[&str]) -> ModelInfo {
+    ModelInfo {
+        id: id.into(),
+        name: id.to_uppercase(),
+        description: None,
+        is_default: default,
+        efforts: efforts.iter().map(|e| (*e).to_owned()).collect(),
+        default_effort: None,
+    }
+}
+
+impl Fixture {
+    /// The panel of the reviewed thread, as the app asks for it.
+    fn panel(&self) -> serde_json::Value {
+        let request = PluginRequest::Ui(UiRequest::Render {
+            view: "reviewers".into(),
+            thread: Some(ThreadId::new(SOURCE)),
+        });
+        match self.bench.call(request).unwrap() {
+            Outcome::UiTree(tree) => serde_json::from_str(&tree).unwrap(),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    fn act(&self, action: &str, value: &str) {
+        let request = PluginRequest::Ui(UiRequest::Action {
+            view: "reviewers".into(),
+            thread: Some(ThreadId::new(SOURCE)),
+            action: action.into(),
+            value: Some(value.into()),
+        });
+        self.bench.call(request).unwrap();
+    }
+
+    /// The request id of the last `threads.models` call for `provider`.
+    fn models_request(&self, provider: &str) -> u64 {
+        self.bench
+            .calls()
+            .iter()
+            .rev()
+            .find_map(|call| match call {
+                ThreadsCall::Models { provider: asked, request, .. }
+                    if asked.as_str() == provider =>
+                {
+                    Some(*request)
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("never asked for the models of {provider}"))
+    }
+
+    fn models_come(&self, provider: &str, answer: Result<Vec<ModelInfo>, String>) {
+        let request = self.models_request(provider);
+        self.bench.post(PluginRequest::ProviderModels {
+            request,
+            provider: provider.into(),
+            answer,
+        });
+    }
+}
+
+/// Every node of a tree of the given type, depth first.
+fn nodes<'a>(tree: &'a serde_json::Value, kind: &str, out: &mut Vec<&'a serde_json::Value>) {
+    if tree["type"] == kind {
+        out.push(tree);
+    }
+    for child in tree["children"].as_array().into_iter().flatten() {
+        nodes(child, kind, out);
+    }
+}
+
+fn select<'a>(tree: &'a serde_json::Value, action: &str) -> Option<&'a serde_json::Value> {
+    let mut found = Vec::new();
+    nodes(tree, "select", &mut found);
+    found.into_iter().find(|node| node["action"] == action)
+}
+
+fn values(select: &serde_json::Value) -> Vec<&str> {
+    select["options"].as_array().unwrap().iter().map(|o| o["value"].as_str().unwrap()).collect()
+}
+
+fn text_of(tree: &serde_json::Value) -> String {
+    tree.to_string()
+}
+
+#[test]
+fn the_panel_offers_the_models_of_the_agent_chosen_once_they_come() {
+    let fixture = Fixture::new(Grant::AllRequested);
+    // No agent chosen: no models to pick from, and nobody is asked.
+    let panel = fixture.panel();
+    assert!(select(&panel, "model").is_none());
+    assert!(!fixture.bench.calls().iter().any(|c| matches!(c, ThreadsCall::Models { .. })));
+
+    // An agent: its models are asked for, and the panel says it waits for them.
+    fixture.act("provider", "codex");
+    let panel = fixture.panel();
+    assert!(text_of(&panel).contains("Loading the models of codex"), "{panel}");
+    let asked =
+        fixture.bench.calls().iter().filter(|c| matches!(c, ThreadsCall::Models { .. })).count();
+    assert_eq!(asked, 1, "asked once, however often the panel is drawn");
+
+    // They come: the panel of the thread is redrawn, with a select of them.
+    fixture.models_come(
+        "codex",
+        Ok(vec![model("mini", false, &[]), model("big", true, &["low", "high"])]),
+    );
+    assert!(fixture.bench.calls().iter().any(|call| matches!(call,
+        ThreadsCall::RefreshView { view, thread: Some(thread) }
+            if view == "reviewers" && thread.as_str() == SOURCE)));
+    let panel = fixture.panel();
+    let models = select(&panel, "model").expect("a select of models");
+    assert_eq!(values(models), ["", "mini", "big"], "the profile's choice first");
+    // The default model's efforts until a model is chosen.
+    assert_eq!(values(select(&panel, "effort").unwrap()), ["", "low", "high"]);
+
+    fixture.act("effort", "high");
+    fixture.act("model", "mini");
+    let status = fixture.command("configure", &[]).unwrap();
+    assert!(
+        status.contains("model: mini, effort: from the profile"),
+        "an effort mini does not take is dropped: {status}"
+    );
+    assert!(select(&fixture.panel(), "effort").is_none(), "mini takes no effort");
+
+    // Another agent starts afresh; one that lists no models gets text fields.
+    fixture.act("provider", "echo");
+    let status = fixture.command("configure", &[]).unwrap();
+    assert!(status.contains("agent: echo, model: from the profile"), "{status}");
+    fixture.models_come("echo", Ok(Vec::new()));
+    let panel = fixture.panel();
+    assert!(select(&panel, "model").is_none());
+    let mut inputs = Vec::new();
+    nodes(&panel, "input", &mut inputs);
+    assert!(inputs.iter().any(|input| input["action"] == "model"), "{panel}");
+
+    // One that cannot list them says why and may be asked again.
+    fixture.act("provider", "opencode");
+    fixture.models_come("opencode", Err("opencode is not installed".into()));
+    let panel = fixture.panel();
+    assert!(text_of(&panel).contains("opencode is not installed"), "{panel}");
+    fixture.act("models-refresh", "");
+    let refreshed = fixture.bench.calls().iter().any(|call| {
+        matches!(call, ThreadsCall::Models { provider, refresh: true, .. } if provider.as_str() == "opencode")
+    });
+    assert!(refreshed);
 }

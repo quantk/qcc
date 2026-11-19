@@ -183,6 +183,13 @@ pub enum PluginRequest {
         thread: ThreadId,
         answer: Result<(String, bool), String>,
     },
+    /// The answer to a [`ThreadsCall::Models`]. Posted like
+    /// [`PluginRequest::ThreadSettled`].
+    ProviderModels {
+        request: u64,
+        provider: ProviderId,
+        answer: Result<Vec<ModelInfo>, String>,
+    },
 }
 
 /// A thread as plugins see it: the projection and where it is.
@@ -222,6 +229,19 @@ pub enum ThreadsCall {
         enabled: bool,
     },
     Providers,
+    /// Ask for a provider's models; the answer is posted as
+    /// [`PluginRequest::ProviderModels`] with `request`, which the host picks.
+    Models {
+        provider: ProviderId,
+        refresh: bool,
+        request: u64,
+    },
+    /// The `views` import, which needs no permission: the plugin's own view shows
+    /// something else now.
+    RefreshView {
+        view: String,
+        thread: Option<ThreadId>,
+    },
     /// The `comments` import, checked against the `comments` permission instead.
     AddComment(NewComment),
     /// The `comments` import: the thread's comments, resolved ones if asked for.

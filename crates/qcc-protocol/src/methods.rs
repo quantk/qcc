@@ -1395,6 +1395,21 @@ pub struct UiTreeResult {
     pub tree: Value,
 }
 
+/// Notification to connections that watch threads: a plugin's view shows something
+/// else now and is worth asking for again (`ui.render`). For one thread's copy of
+/// a thread view, or every copy when `thread_id` is absent.
+pub const UI_CHANGED: &str = "ui.changed";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct UiChangedNotification {
+    /// The subscription of the `thread.watch` it is sent for.
+    pub subscription: u64,
+    pub plugin: String,
+    pub view: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+}
+
 method!(
     /// Ask a plugin to draw one of its views.
     UiRender, "ui.render", UiRenderParams => UiTreeResult

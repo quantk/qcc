@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
-import { store } from "../../state/store";
+import { store, useApp } from "../../state/store";
+import { uiChangeCount } from "../../state/uiChanges";
 import { NodeView } from "../../ui/kit";
 import { errorMessage } from "../../util/format";
 
@@ -14,6 +15,8 @@ export function PluginView({ plugin, view, thread }: { plugin: string; view: str
   const threadId = thread?.id;
   // The plugin is asked again when the thread settles: its state may have moved.
   const settled = thread ? `${thread.status}:${thread.last_turn_status ?? ""}` : "";
+  // And when the plugin says the view shows something else now.
+  const changed = useApp((state) => uiChangeCount(state.uiChanges, plugin, view, threadId));
 
   useEffect(() => {
     let stale = false;
@@ -30,7 +33,7 @@ export function PluginView({ plugin, view, thread }: { plugin: string; view: str
     return () => {
       stale = true;
     };
-  }, [plugin, view, threadId, settled]);
+  }, [plugin, view, threadId, settled, changed]);
 
   const act = useCallback(
     (action: string, value?: string) => {

@@ -80,7 +80,15 @@ is `plugins/reviewers`, see [Reviewers](reviewers.md)):
   diff` shows it; the environment that knows may take a while, so the answer comes later to
   `Plugin::on_thread_diff` with the id `diff` returned.
 - **Skills of a thread** (`threads`): `threads::set_skill` turns one of the plugin's own skills on or
-  off in a thread, the way the user can. **Agents** (`threads`): `threads::providers` lists them.
+  off in a thread, the way the user can. **Agents** (`threads`): `threads::providers` lists them,
+  and `threads::models(provider, refresh)` asks which models one offers, as `qcc provider models`
+  shows them (from the daemon's cache unless `refresh`; asking the agent may take a while). The
+  answer comes later to `Plugin::on_provider_models` with the id `models` returned; an empty list
+  means the agent does not say.
+- **Redrawing a view** (no permission: a plugin redraws only its own views): `views::refresh(view,
+  thread)` tells the app that a view shows something else now, for one thread's copy of a thread
+  view or for every copy without a thread. The daemon sends watching clients `ui.changed`, and the
+  app asks for the view again. Use it when something the view shows arrives after it was drawn.
 - **Comments** (permission `comments`): `comments::add` leaves a comment on a line of a thread's
   changes, and `comments::list` reads them. The daemon records the plugin as the comment's author
   (with the name, severity, reviewer thread and stale mark the plugin gives); the app shows it, and

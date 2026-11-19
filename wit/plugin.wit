@@ -7,8 +7,8 @@
 /// world. Long-running things (an agent process writing to stdout, a timer) come back
 /// as events, and a request that has to wait for one is answered later (`deferred`).
 ///
-/// Every import but `log` and `completions` is gated by a permission the plugin
-/// requests in its manifest.
+/// Every import but `log`, `completions` and `views` is gated by a permission the
+/// plugin requests in its manifest.
 package qcc:plugin@0.1.0;
 
 /// The vocabulary shared by imports and exports.
@@ -541,6 +541,14 @@ interface types {
     answer: result<environment-diff, string>,
   }
 
+  /// The answer to `threads.models`.
+  record provider-models {
+    /// The id `threads.models` returned.
+    request: u64,
+    provider: string,
+    answer: result<list<model-info>, string>,
+  }
+
   // ----- events -----------------------------------------------------------------
 
   /// A skill as an agent session gets it: a file it can read.
@@ -905,6 +913,8 @@ interface types {
     turn-ended(turn-ended),
     /// The diff asked for with `threads.diff`.
     thread-diff(thread-diff),
+    /// The models asked for with `threads.models`.
+    provider-models(provider-models),
     process-stdout(process-output),
     process-stderr(process-output),
     /// Delivered after all output of the process.
@@ -1068,6 +1078,19 @@ interface threads {
   set-skill: func(thread: thread-id, skill: string, enabled: bool) -> result<_, string>;
   /// The agents the daemon can run now.
   providers: func() -> result<list<provider-info>, string>;
+  /// Ask which models an agent offers, as `qcc provider models` shows them. The
+  /// daemon may have to ask the agent, so the answer comes later as a
+  /// `provider-models` event with the returned id; from the daemon's cache unless
+  /// `refresh`. An empty list: the agent does not say.
+  models: func(provider: string, refresh: bool) -> result<u64, string>;
+}
+
+/// Always available: a plugin redraws only its own views. Tell the app that a view
+/// of the plugin shows something else now, so that it asks for it again; for one
+/// thread's copy of a thread view, or every copy when `thread` is absent.
+interface views {
+  use types.{thread-id};
+  refresh: func(view: string, thread: option<thread-id>) -> result<_, string>;
 }
 
 /// Permission `comments`. Leave remarks on lines of a thread's changes and read
@@ -1163,6 +1186,7 @@ world plugin {
   import threads;
   import comments;
   import files;
+  import views;
 
   use types.{contribution, event, outcome};
 

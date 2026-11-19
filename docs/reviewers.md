@@ -21,6 +21,13 @@ qcc reviewers profiles --thread <id>                # the profiles it can use
 
 From inside an agent `--thread` can be left out: it is the agent's own thread.
 
+In the panel the agent is picked from those the daemon runs, then its model from the models that
+agent lists (the same list as the new-thread dialog), and the effort from the levels that model
+takes; each also has "As the profile says". Until the agent's models are in, the panel says it is
+loading them and is drawn again when they come. Another agent clears the model and effort; a model
+that does not take the chosen effort clears the effort. An agent that lists no models, or cannot be
+asked, gets text fields for the model and effort instead (and a button to ask again).
+
 | Setting | `configure` | Default | |
 | --- | --- | --- | --- |
 | Review on its own | `--enabled on/off` | off | Reviews start by the trigger. A review asked for by hand runs either way. |

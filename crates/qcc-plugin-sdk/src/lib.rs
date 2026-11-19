@@ -85,7 +85,7 @@ pub mod ui;
 pub use bindings::qcc::plugin::types;
 /// Host imports. Each is gated by a manifest permission; a call without it fails.
 pub use bindings::qcc::plugin::{
-    comments, completions, deltas, files, kv, process, threads, timers,
+    comments, completions, deltas, files, kv, process, threads, timers, views,
 };
 
 use types::{
@@ -93,9 +93,9 @@ use types::{
     EnvironmentChanges, EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
     EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
     InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
-    ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread, SkillInfo,
-    SkillRef, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary, TurnEnded, TurnStatus, UiAction,
-    UiItem, UiRender, UiRequest, UiViewInfo,
+    ProviderModels, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
+    SkillInfo, SkillRef, ThreadDiff, ThreadInput, TokenUsage, TurnBoundary, TurnEnded, TurnStatus,
+    UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -104,7 +104,7 @@ pub mod prelude {
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
         attachments_note, boundary, comments, completions, deltas, files, kv, log, message, option,
-        process, session_context, skills_prompt, threads, timers, with_notes,
+        process, session_context, skills_prompt, threads, timers, views, with_notes,
     };
 }
 
@@ -503,6 +503,11 @@ pub trait Plugin: Default + 'static {
         let _ = diff;
     }
 
+    /// The models asked for with [`threads::models`].
+    fn on_provider_models(&mut self, models: ProviderModels) {
+        let _ = models;
+    }
+
     fn on_process(&mut self, event: ProcessEvent) {
         let _ = event;
     }
@@ -660,6 +665,10 @@ pub mod __private {
             }
             Event::ThreadDiff(diff) => {
                 plugin.on_thread_diff(diff);
+                Ok(Outcome::Done)
+            }
+            Event::ProviderModels(models) => {
+                plugin.on_provider_models(models);
                 Ok(Outcome::Done)
             }
             Event::ProcessStdout(output) => {

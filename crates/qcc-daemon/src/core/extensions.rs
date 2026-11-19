@@ -10,12 +10,14 @@ use qcc_protocol::methods::{
     CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, CommentAddParams,
     Empty, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult,
     SendMode, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams, ThreadSpawnParams,
-    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
+    UI_CHANGED, UiChangedNotification, UiContributionsResult, UiItemContribution, UiTreeResult,
+    UiViewContribution,
 };
 use serde_json::Value;
 
 use super::{
-    Command, Core, MODELS_TIMEOUT, QUERY_TIMEOUT, Responder, Watch, owns_kind, thread_not_found,
+    Command, Core, MODELS_TIMEOUT, QUERY_TIMEOUT, Responder, Watch, notify, owns_kind,
+    thread_not_found,
 };
 
 impl Core {
@@ -202,6 +204,12 @@ impl Core {
                     .map(|_| ThreadsAnswer::Done)
                     .map_err(|error| error.message)
             }
+            ThreadsCall::Models { provider, refresh, request } => {
+                self.plugin_models(plugin, provider, refresh, request).map(|()| ThreadsAnswer::Done)
+            }
+            ThreadsCall::RefreshView { view, thread } => {
+                self.view_changed(plugin, view, thread).map(|()| ThreadsAnswer::Done)
+            }
             ThreadsCall::Providers => Ok(ThreadsAnswer::Providers(
                 self.host.providers().map(|(_, info)| info.clone()).collect(),
             )),
@@ -242,6 +250,62 @@ impl Core {
                 Err(_) => Err("the daemon dropped the request".to_owned()),
             };
             let _ = asker.post(PluginRequest::ThreadDiff { request, thread, answer });
+        });
+        Ok(())
+    }
+
+    /// List a provider's models for a plugin and post them to it when they come,
+    /// from the cache or from the agent.
+    fn plugin_models(
+        &mut self,
+        plugin: &str,
+        provider: ProviderId,
+        refresh: bool,
+        request: u64,
+    ) -> Result<(), String> {
+        let asker = self.host.plugin(plugin).cloned().ok_or("the plugin is not loaded")?;
+        let (responder, answer) = Responder::internal();
+        self.provider_models(
+            ProviderModelsParams { provider: provider.clone(), refresh },
+            responder,
+        );
+        tokio::spawn(async move {
+            let answer = match answer.await {
+                Ok(Ok(value)) => serde_json::from_value::<ProviderModelsResult>(value)
+                    .map(|result| result.models)
+                    .map_err(|error| error.to_string()),
+                Ok(Err(error)) => Err(error.message),
+                Err(_) => Err("the daemon dropped the request".to_owned()),
+            };
+            let _ = asker.post(PluginRequest::ProviderModels { request, provider, answer });
+        });
+        Ok(())
+    }
+
+    /// A plugin's view shows something else now: tell the clients to ask again.
+    fn view_changed(
+        &mut self,
+        plugin: &str,
+        view: String,
+        thread: Option<ThreadId>,
+    ) -> Result<(), String> {
+        let own = self.host.plugin(plugin).is_some_and(|handle| {
+            handle
+                .contributions()
+                .iter()
+                .any(|c| matches!(c, Contribution::UiView(info) if info.id == view))
+        });
+        if !own {
+            return Err(format!("plugin {plugin} has no view {view:?}"));
+        }
+        self.watchers.retain(|watcher| {
+            let params = UiChangedNotification {
+                subscription: watcher.subscription,
+                plugin: plugin.to_owned(),
+                view: view.clone(),
+                thread_id: thread.clone(),
+            };
+            notify(&watcher.out, UI_CHANGED, params)
         });
         Ok(())
     }

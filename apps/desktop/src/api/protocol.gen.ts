@@ -1736,6 +1736,14 @@ export type UiAssetResult = {
 	content_type: string,
 };
 
+export type UiChangedNotification = {
+	/**  The subscription of the `thread.watch` it is sent for. */
+	subscription: number,
+	plugin: string,
+	view: string,
+	thread_id?: ThreadId | null,
+};
+
 export type UiContributionsResult = {
 	views: UiViewContribution[],
 	items: UiItemContribution[],
@@ -1917,4 +1925,5 @@ export type Notifications = {
 	"comments.updated": CommentsUpdatedNotification,
 	"plugins.updated": PluginsUpdatedNotification,
 	"limits.updated": LimitsUpdatedNotification,
+	"ui.changed": UiChangedNotification,
 };

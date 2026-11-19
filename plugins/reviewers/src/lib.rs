@@ -64,6 +64,10 @@ pub struct Reviewers {
     waiting: HashMap<String, u64>,
     diffs: HashMap<u64, DiffFor>,
     next_token: u64,
+    /// Agents' models, for the panel.
+    models: HashMap<String, panel::Models>,
+    /// The agent each `threads.models` request is about.
+    model_requests: HashMap<u64, String>,
 }
 
 fn load<T: serde::de::DeserializeOwned>(key: &str) -> Option<T> {
@@ -857,6 +861,10 @@ impl Plugin for Reviewers {
         if let Err(error) = self.request(&thread, None) {
             Self::note(&thread, error);
         }
+    }
+
+    fn on_provider_models(&mut self, answer: ProviderModels) {
+        self.models_came(answer);
     }
 
     fn on_thread_diff(&mut self, answer: ThreadDiff) {

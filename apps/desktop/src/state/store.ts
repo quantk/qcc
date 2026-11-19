@@ -51,6 +51,7 @@ import { projectGroupKey, visiblePlugins, withPlugin } from "./selectors";
 import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
+import { noteUiChange, type UiChanges } from "./uiChanges";
 
 const SHOW_EXAMPLES = "qcc.show-example-plugins";
 const SEEN = "qcc.seen";
@@ -153,6 +154,8 @@ export type AppState = {
   /** Comments on each thread's changes, resolved ones too, oldest first. Read for a
    * thread when a view asks (`loadComments`), then kept current by the daemon. */
   comments: Readonly<Record<ThreadId, readonly LineComment[]>>;
+  /** How often plugins said their views changed; see `uiChanges.ts`. */
+  uiChanges: UiChanges;
   /** The latest usage limits each provider's account reported; see `limits.ts`. */
   limits: Readonly<Record<ProviderId, ProviderLimits>>;
   /** The agents are being asked for their limits now. */
@@ -200,6 +203,7 @@ export class AppStore {
     skills: [],
     agentSkills: {},
     comments: {},
+    uiChanges: {},
     limits: {},
     limitsRefreshing: false,
     limitErrors: [],
@@ -310,6 +314,10 @@ export class AppStore {
     } else if (notification.method === "limits.updated") {
       const { subscription, limits } = notification.params;
       if (subscription === this.watch) this.set({ limits: mergeLimits(this.state.limits, [limits]) });
+    } else if (notification.method === "ui.changed") {
+      if (notification.params.subscription === this.watch) {
+        this.set({ uiChanges: noteUiChange(this.state.uiChanges, notification.params) });
+      }
     } else if (notification.method === "comments.updated") {
       const { subscription, thread_id, comments } = notification.params;
       if (subscription === this.watch) this.setComments(thread_id, comments);

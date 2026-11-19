@@ -28,7 +28,7 @@ import {
 } from "../../state/live";
 import { attentionLabel, attentionOf, cardTime, folderOf, providerName, threadTitle } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
-import { InteractionPrompt, ThreadMenu } from "../../ui/kit";
+import { InteractionPrompt, ProjectIconView, ThreadMenu } from "../../ui/kit";
 import { baseName, compactNumber, relativePath, tailPath } from "../../util/format";
 import { readText, saveText } from "../../util/storage";
 import { useNow } from "../../util/useNow";
@@ -206,8 +206,9 @@ function Tile({ thread, now, density }: { thread: Thread; now: number; density: 
           compact ? "overflow-hidden whitespace-nowrap" : "flex-wrap",
         )}
       >
-        <span className="min-w-0 truncate" title={folderOf(thread)}>
-          {project ? project.name : baseName(folderOf(thread))}
+        <span className="inline-flex min-w-0 items-center gap-1" title={folderOf(thread)}>
+          {project?.icon && <ProjectIconView icon={project.icon} size={12} />}
+          <span className="truncate">{project ? project.name : baseName(folderOf(thread))}</span>
         </span>
         <span className="flex-none">{providerName(plugins, thread.provider)}</span>
         {thread.model && <span className={cn(compact ? "min-w-0 truncate" : "")}>{thread.model}</span>}

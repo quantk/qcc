@@ -145,6 +145,8 @@ impl Core {
             name,
             folders,
             created_at: now_ms(),
+            icon: projects::check_icon(p.icon)
+                .map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?,
         };
         self.save_project(project.clone())?;
         Ok(ProjectResult { project })
@@ -160,7 +162,12 @@ impl Core {
             p.folders.as_deref().unwrap_or(&current.folders),
         )
         .map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?;
-        let project = Project { name, folders, ..current };
+        let icon = match p.icon {
+            Some(icon) => projects::check_icon(icon)
+                .map_err(|message| RpcError::new(codes::INVALID_PARAMS, message))?,
+            None => current.icon.clone(),
+        };
+        let project = Project { name, folders, icon, ..current };
         self.save_project(project.clone())?;
         Ok(ProjectResult { project })
     }

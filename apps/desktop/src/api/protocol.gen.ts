@@ -531,6 +531,12 @@ queue_id?: string | null } |
  */
 { type: "thread/skills"; enabled?: string[]; disabled?: string[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
 
+/**
+ *  A color from the app's palette. The app picks the shade for its light or dark
+ *  theme, so a project looks right in both.
+ */
+export type IconColor = "brand" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "violet" | "pink" | "gray";
+
 /**  Minted by the delta assembler for every `interaction.request`. */
 export type InteractionId = string;
 
@@ -829,17 +835,34 @@ export type Project = {
 	folders: string[],
 	/**  Milliseconds since the Unix epoch. */
 	created_at: number,
+	/**  What the project is drawn with next to its name. Absent: the app's default. */
+	icon?: ProjectIcon | null,
 };
 
 export type ProjectCreateParams = {
 	name: string,
 	/**  Absolute paths of existing directories: repositories or plain folders. */
 	folders: string[],
+	/**  Absent: no icon, the app draws its default. */
+	icon?: ProjectIcon | null,
 };
 
 export type ProjectDeleteParams = {
 	id: ProjectId,
 };
+
+/**  The picture of a project: an icon of the app's icon set or an emoji. */
+export type ProjectIcon = 
+/**
+ *  An icon of the app's set by its kebab-case name (`"rocket"`, `"gamepad-2"`).
+ *  The daemon checks only the form of the name: the set belongs to the app, and an
+ *  app that does not know a name draws its default icon.
+ */
+{ kind: "lucide"; name: string; 
+/**  Absent: the color of the text around it. */
+color?: IconColor | null } | 
+/**  An emoji, which brings its own colors. */
+{ kind: "emoji"; emoji: string };
 
 /**  Minted by the daemon when the user creates a project. */
 export type ProjectId = string;
@@ -857,6 +880,8 @@ export type ProjectUpdateParams = {
 	name?: string | null,
 	/**  The whole new list. Absent: unchanged. */
 	folders?: string[] | null,
+	/**  Absent: unchanged; `null`: no icon any more. */
+	icon?: ProjectIcon | null,
 };
 
 export type ProjectsUpdatedNotification = {

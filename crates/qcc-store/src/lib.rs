@@ -640,7 +640,7 @@ fn save_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use qcc_domain::{Delta, ItemKey, TextChannel, ThreadStatus, TurnStatus};
+    use qcc_domain::{Delta, ItemKey, ProjectIcon, TextChannel, ThreadStatus, TurnStatus};
     use qcc_runtime::{NewThread, SequentialMint, Supervisor};
 
     use super::*;
@@ -653,9 +653,11 @@ mod tests {
             name: "App".into(),
             folders: vec!["/src/app".into()],
             created_at: 5,
+            icon: None,
         };
         store.save_project(&project).unwrap();
         project.folders.push("/src/api".into());
+        project.icon = Some(ProjectIcon::Emoji { emoji: "🛒".into() });
         store.save_project(&project).unwrap();
         assert_eq!(store.projects().unwrap(), [project.clone()]);
         store.delete_project(&project.id).unwrap();

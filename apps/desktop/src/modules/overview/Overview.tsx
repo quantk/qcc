@@ -14,7 +14,7 @@ import {
 } from "../../state/selectors";
 import { isUnread } from "../../state/reads";
 import { store, useApp } from "../../state/store";
-import { InteractionPrompt, ThreadMenu } from "../../ui/kit";
+import { InteractionPrompt, ProjectIconView, ThreadMenu } from "../../ui/kit";
 import { baseName, plural } from "../../util/format";
 import { useNow } from "../../util/useNow";
 
@@ -65,7 +65,10 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
         <span className="agent-time">{cardTime(thread, now)}</span>
       </header>
       <div className="agent-facts">
-        <span title={folderOf(thread)}>{project ? project.name : baseName(folderOf(thread))}</span>
+        <span className="inline-flex min-w-0 items-center gap-1" title={folderOf(thread)}>
+          {project?.icon && <ProjectIconView icon={project.icon} size={12} />}
+          {project ? project.name : baseName(folderOf(thread))}
+        </span>
         <span>{provider}</span>
         {thread.model && <span>{thread.model}</span>}
         {thread.environment && <span>worktree</span>}

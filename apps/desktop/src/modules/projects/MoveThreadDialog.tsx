@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import type { ThreadId } from "../../api/protocol.gen";
 import { store, useApp } from "../../state/store";
-import { Choice } from "../../ui/kit";
+import { Choice, ProjectIconView } from "../../ui/kit";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -34,7 +34,11 @@ export function MoveThreadDialog({ threadId, close }: { threadId: ThreadId; clos
               value={project}
               options={[
                 { value: null, label: "No project" },
-                ...projects.map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                ...projects.map((candidate) => ({
+                  value: candidate.id,
+                  label: candidate.name,
+                  icon: <ProjectIconView icon={candidate.icon} className="text-muted-foreground" />,
+                })),
               ]}
               onChange={setProject}
             />

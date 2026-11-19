@@ -6,7 +6,7 @@ import { environmentsOf, modeLabel, pickableProviders } from "../../state/select
 import { store, useApp } from "../../state/store";
 import { effortFor } from "../../state/models";
 import { newThreadStart, readNewThreadMemory, rememberNewThread } from "../../state/newThread";
-import { Choice, EffortPicker, ModelPicker } from "../../ui/kit";
+import { Choice, EffortPicker, ModelPicker, ProjectIconView } from "../../ui/kit";
 import { tailPath } from "../../util/format";
 import { readJson, saveJson } from "../../util/storage";
 import { Button } from "@/components/ui/button";
@@ -136,7 +136,11 @@ export function NewThreadDialog({ close: onClose, project: preset }: { close: ()
                   value={project?.id ?? null}
                   options={[
                     { value: null, label: "No project" },
-                    ...projects.map((candidate) => ({ value: candidate.id, label: candidate.name })),
+                    ...projects.map((candidate) => ({
+                      value: candidate.id,
+                      label: candidate.name,
+                      icon: <ProjectIconView icon={candidate.icon} className="text-muted-foreground" />,
+                    })),
                   ]}
                   onChange={(value) => {
                     setProjectId(value);

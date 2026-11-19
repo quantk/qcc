@@ -6,8 +6,8 @@ use qcc_domain::{
     AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, ChangeScope,
     CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
     InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
-    Project, ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField, Thread,
-    ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
+    Project, ProjectIcon, ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField,
+    Thread, ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -734,6 +734,9 @@ pub struct ProjectCreateParams {
     pub name: String,
     /// Absolute paths of existing directories: repositories or plain folders.
     pub folders: Vec<String>,
+    /// Absent: no icon, the app draws its default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<ProjectIcon>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -742,7 +745,7 @@ pub struct ProjectResult {
 }
 
 method!(
-    /// Rename a project or change its folders. Threads outside any project whose
+    /// Rename a project, change its folders or its icon. Threads outside any project whose
     /// directory is in a new folder join it; threads already in it stay.
     ProjectUpdate, "project.update", ProjectUpdateParams => ProjectResult
 );
@@ -755,6 +758,20 @@ pub struct ProjectUpdateParams {
     /// The whole new list. Absent: unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folders: Option<Vec<String>>,
+    /// Absent: unchanged; `null`: no icon any more.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[specta(type = Option<ProjectIcon>)]
+    pub icon: Option<Option<ProjectIcon>>,
+}
+
+/// A field that is there, `null` or not, as `Some`; with `#[serde(default)]` an
+/// absent one stays `None`. This tells "leave it" from "clear it".
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
 method!(
@@ -1431,4 +1448,31 @@ pub struct UiAssetResult {
     /// The file, base64-encoded.
     pub data: String,
     pub content_type: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_project_update_tells_an_absent_icon_from_a_cleared_one() {
+        let read =
+            |value: Value| serde_json::from_value::<ProjectUpdateParams>(value).unwrap().icon;
+        assert_eq!(read(json!({"id": "p"})), None);
+        assert_eq!(read(json!({"id": "p", "icon": null})), Some(None));
+        assert_eq!(
+            read(json!({"id": "p", "icon": {"kind": "emoji", "emoji": "🚀"}})),
+            Some(Some(ProjectIcon::Emoji { emoji: "🚀".into() }))
+        );
+
+        let write = |icon| {
+            let params =
+                ProjectUpdateParams { id: ProjectId::new("p"), name: None, folders: None, icon };
+            serde_json::to_value(params).unwrap()
+        };
+        assert_eq!(write(None), json!({"id": "p"}));
+        assert_eq!(write(Some(None)), json!({"id": "p", "icon": null}));
+    }
 }

@@ -21,6 +21,12 @@
   --red: #c0453f;
   --red-bg: #fbe6e4;
   --blue: #2f6fc4;
+  /* The rest of the palette a project icon can take, next to brand, red, green and blue. */
+  --orange: #c2591a;
+  --yellow: #9a7400;
+  --teal: #12857b;
+  --violet: #6a4fd0;
+  --pink: #c23f84;
   /* Chart series, in this order; checked for color-blind separation per scheme. */
   --series-1: #2a78d6;
   --series-2: #eb6834;
@@ -48,6 +54,11 @@
     --red: #e8776f;
     --red-bg: #3a1c1a;
     --blue: #74aaf2;
+    --orange: #f0965a;
+    --yellow: #e3c45a;
+    --teal: #4fc4b6;
+    --violet: #a594f0;
+    --pink: #ec86bd;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;

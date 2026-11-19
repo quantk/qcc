@@ -172,6 +172,12 @@ under a sent message, whose pictures are read back with `thread.attachment`. Whe
 the agent looks at images is its provider's `images` capability; the paperclip's hint
 says when it does not.
 
+A project's icon is drawn everywhere by `ProjectIconView` (`ui/kit/ProjectIcon.tsx`),
+which also holds the curated set of lucide icons the picker offers and the palette: its
+colors are the `--brand`, `--red`, `--orange`, … variables of `styles.css`, so a project
+follows the light or dark theme. A name outside the set draws the default icon. What a
+pick in the picker (`modules/projects/IconPicker.tsx`) does is in `state/projectIcon.ts`.
+
 Both sides of the window can be resized by dragging their edge (`ui/kit/ResizeHandle`,
 arrow keys when it has focus, a double click resets it). The widths live in the store
 and are bounded by `state/layout.ts`, which also keeps room for the thread.

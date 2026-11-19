@@ -1,7 +1,9 @@
 import { CopyIcon } from "lucide-react";
 
+import type { Project } from "../../api/protocol.gen";
 import { threadTitle } from "../../state/selectors";
 import { store, useApp } from "../../state/store";
+import { ProjectIconView } from "../../ui/kit";
 import type { ThreadContext } from "../../ui/registry";
 import { relativeTime, tailPath } from "../../util/format";
 import { useNow } from "../../util/useNow";
@@ -14,7 +16,7 @@ const date = (ts: number) =>
 export function DetailsPanel({ thread, provider, parent, children }: ThreadContext) {
   const now = useNow(60_000);
   const mcp = thread.mcp_servers ?? [];
-  const project = useProjectName(thread.project ?? null);
+  const project = useProject(thread.project ?? null);
   return (
     <>
       <Section title="Agent">
@@ -53,7 +55,14 @@ export function DetailsPanel({ thread, provider, parent, children }: ThreadConte
             </Fact>
           </>
         )}
-        {project && <Fact label="Project">{project}</Fact>}
+        {project && (
+          <Fact label="Project">
+            <span className="inline-flex min-w-0 items-center gap-1">
+              {project.icon && <ProjectIconView icon={project.icon} size={12} />}
+              {project.name}
+            </span>
+          </Fact>
+        )}
       </Section>
       <Section title="Thread">
         <Fact label="Created" title={date(thread.created_at)}>
@@ -81,8 +90,8 @@ function ago(ts: number, now: number): string {
   return /^\d+[mhd]$/.test(when) ? `${when} ago` : when;
 }
 
-function useProjectName(id: string | null): string | null {
-  return useApp((state) => (id ? (state.projects.find((project) => project.id === id)?.name ?? null) : null));
+function useProject(id: string | null): Project | null {
+  return useApp((state) => (id ? (state.projects.find((project) => project.id === id) ?? null) : null));
 }
 
 async function copy(text: string) {

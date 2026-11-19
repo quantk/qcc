@@ -12,7 +12,6 @@ import {
   providerName,
   threadTitle,
 } from "../../state/selectors";
-import { mcpTrouble } from "../../state/mcp";
 import { isUnread } from "../../state/reads";
 import { store, useApp } from "../../state/store";
 import { InteractionPrompt, ThreadMenu } from "../../ui/kit";
@@ -42,7 +41,6 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
   const project = useApp((state) => state.projects.find((candidate) => candidate.id === thread.project));
   const unread = useApp((state) => isUnread(thread, state.seen));
   const activity = activityText(thread);
-  const mcp = mcpTrouble(thread);
   const technical = thread.activity && !["agentMessage", "reasoning", "plan"].includes(thread.activity.kind);
   const open = () => store().select(thread.id);
 
@@ -77,14 +75,6 @@ function AgentCard({ thread, now }: { thread: Thread; now: number }) {
           </span>
         )}
         {(thread.queued_inputs ?? 0) > 0 && <span>{plural(thread.queued_inputs ?? 0, "message")} queued</span>}
-        {mcp.length > 0 && (
-          <span
-            className="text-destructive"
-            title={mcp.map((server) => `${server.name}: ${server.error ?? server.state}`).join("\n")}
-          >
-            MCP: {mcp.map((server) => server.name).join(", ")} {mcp.some((s) => s.state === "failed") ? "failed" : "needs sign-in"}
-          </span>
-        )}
       </div>
       {unread && attention === "idle" && <div className="text-xs font-semibold text-(--blue)">New reply</div>}
       {attention === "failed" && <div className="agent-failed">{failureText(thread)} — open the thread to see why</div>}

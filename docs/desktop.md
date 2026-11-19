@@ -249,7 +249,7 @@ from their own configs. Changes are written to the daemon immediately and reach 
 too: Claude Code takes them at once, Codex and opencode after the current turn (see
 [Changes reach running sessions](agents.md#changes-reach-running-sessions)). A thread has an "MCP" tab
 with the status of each server of its session and switches next to the qcc servers that turn them
-off in this thread only. A failed server is also visible on the card in the overview.
+off in this thread only.
 
 ### Skills
 

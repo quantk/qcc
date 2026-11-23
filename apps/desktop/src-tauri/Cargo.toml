@@ -6,6 +6,10 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+# Released as an app bundle by the desktop job of the release workflow, not by dist.
+[package.metadata.dist]
+dist = false
+
 [lints]
 workspace = true
 

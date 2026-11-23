@@ -156,7 +156,12 @@ branches on which agent it talks to, and the built-in plugins use the same publi
 
 ## Getting started
 
-qcc is developed on Linux. Everything builds inside a Nix flake, and `./dev` enters it by itself.
+Releases for Linux and macOS are on the [releases page](https://github.com/quantk/qcc/releases):
+a desktop app (`.deb`, AppImage, `.dmg`) with the daemon inside, and shell installers for the CLI
+and the daemon. See [Releases](docs/releasing.md) for how to install them.
+
+To build from source: qcc is developed on Linux. Everything builds inside a Nix flake, and `./dev`
+enters it by itself.
 
 ```sh
 git clone https://github.com/quantk/qcc.git && cd qcc

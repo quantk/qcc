@@ -156,7 +156,12 @@ flowchart LR
 
 ## Начало работы
 
-qcc разрабатывается на Linux. Всё собирается внутри Nix flake, и `./dev` заходит в него сам.
+Релизы для Linux и macOS — на [странице релизов](https://github.com/quantk/qcc/releases):
+десктоп-приложение (`.deb`, AppImage, `.dmg`) со встроенным демоном и shell-инсталлеры CLI и
+демона. Как их поставить — в [Releases](docs/releasing.md).
+
+Сборка из исходников: qcc разрабатывается на Linux. Всё собирается внутри Nix flake, и `./dev`
+заходит в него сам.
 
 ```sh
 git clone https://github.com/quantk/qcc.git && cd qcc

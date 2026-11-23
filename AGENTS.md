@@ -55,6 +55,7 @@ WASM-плагинами.
 | `plugins/notify` | уведомления на рабочем столе: агент закончил ход, упал или ждёт ответа |
 | `wit/plugin.wit` | контракт плагинов |
 | `apps/desktop` | фронтенд (`src/`) и Tauri-оболочка (`src-tauri/`) |
+| `dist-workspace.toml`, `.github/` | релизы: конфиг `dist` и сгенерированный им `workflows/release.yml` (руками не править — `dist generate`), сборка десктопа `workflows/desktop.yml`; см. `docs/releasing.md` |
 | `scripts/` | проверки; `fixtures/` — запись и редактирование фикстур реальных агентов |
 | `docs/` | пользовательская документация (английский); `docs/images/` — скриншоты для README |
 

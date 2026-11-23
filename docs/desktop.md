@@ -19,6 +19,9 @@ everything is up to date and the window is open, it touches nothing. To open the
 building, run `~/.local/lib/qcc/qcc-app` (a wrapper with the GTK environment from the desktop
 shell, suitable for a launcher). The CLI of the working daemon is `~/.local/lib/qcc/qcc`.
 
+Released builds (`.deb`, AppImage, `.dmg` with `qccd` and `qcc` inside) are described in
+[Releases](releasing.md).
+
 By default WebKitGTK starts without the DMA-BUF renderer: with some drivers (NVIDIA) the window
 stays blank with it. If scrolling is slow, try turning it on:
 `WEBKIT_DISABLE_DMABUF_RENDERER=0 ./dev desktop`.

@@ -14,6 +14,8 @@
   intervals): new thread or one thread per automation, overlapping and missed runs, history.
 - [desktop.md](desktop.md) — running the desktop app (`./dev desktop`, `./dev app`) and what each
   screen, panel and shortcut does.
+- [releasing.md](releasing.md) — installing a release (shell installers, `.deb`, AppImage, `.dmg`)
+  and making one: the version, the tag, what the release workflow builds.
 - [development.md](development.md) — dev commands, repository architecture, and recorded agent
   traffic for bridge tests.
 - [plugins.md](plugins.md) — writing a plugin: host limits, plugin UI, commands, skills, threads,

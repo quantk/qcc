@@ -6,6 +6,7 @@ import { useSyncExternalStore } from "react";
 import { type Api, ApiError, type DaemonState, type Notification, codes } from "../api/api";
 import type {
   AgentSkill,
+  ArchiveProgress,
   AutomationEntry,
   AutomationId,
   AutomationRun,
@@ -166,6 +167,9 @@ export type AppState = {
   limitsRefreshing: boolean;
   /** Why the last time they were asked some could not tell. */
   limitErrors: readonly ProviderLimitsError[];
+  /** Archives under way from this window, by the thread asked for: where each
+   * thread of it is, as the daemon last said. Empty until it first says. */
+  archives: Readonly<Record<ThreadId, readonly ArchiveProgress[]>>;
 };
 
 type Live = { id: number; threadId: ThreadId; ready: boolean; buffer: ThreadEvent[] };
@@ -212,6 +216,7 @@ export class AppStore {
     limits: {},
     limitsRefreshing: false,
     limitErrors: [],
+    archives: {},
   };
   /** No record existed when the app started: the first listing counts as seen. */
   private firstRun = readSeen() === null;
@@ -221,6 +226,8 @@ export class AppStore {
   private watch: number | null = null;
   /** Threads whose timelines are kept current: the selected one and whatever a view holds. */
   private followed = new Map<ThreadId, Followed>();
+  /** The thread each archive under way was asked for, by its `progress` id. */
+  private archiveRuns = new Map<number, ThreadId>();
   /** Attachments read to be shown, by path: they never change. */
   private attachmentUrls = new Map<string, Promise<string | null>>();
 
@@ -326,6 +333,9 @@ export class AppStore {
     } else if (notification.method === "comments.updated") {
       const { subscription, thread_id, comments } = notification.params;
       if (subscription === this.watch) this.setComments(thread_id, comments);
+    } else if (notification.method === "thread.archive_progress") {
+      const root = this.archiveRuns.get(notification.params.progress);
+      if (root) this.set({ archives: { ...this.state.archives, [root]: notification.params.threads } });
     } else if (notification.method === "thread.event") {
       const { subscription } = notification.params;
       const live = [...this.followed.values()].find((entry) => entry.live?.id === subscription)?.live;
@@ -1002,13 +1012,21 @@ export class AppStore {
    * and confirm with `force`; null when everything went or the call failed.
    */
   async archive(threadId: ThreadId, force: boolean): Promise<Stayed[] | null> {
+    const progress = this.nextSubscription++;
+    this.archiveRuns.set(progress, threadId);
+    this.set({ archives: { ...this.state.archives, [threadId]: [] } });
     try {
-      const result = await this.api.call("thread.archive", { thread_id: threadId, force, descendants: true });
+      const result = await this.api.call("thread.archive", { thread_id: threadId, force, descendants: true, progress });
       this.mergeThreads([result.thread, ...(result.archived ?? [])]);
       return stayedAfter(result, this.state.threads);
     } catch (error) {
       this.fail(error);
       return null;
+    } finally {
+      this.archiveRuns.delete(progress);
+      const archives = { ...this.state.archives };
+      delete archives[threadId];
+      this.set({ archives });
     }
   }
 

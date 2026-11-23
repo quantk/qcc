@@ -3,7 +3,7 @@
 // user before and after: which threads go, which of them are working and will be
 // stopped, which hold uncommitted work that will be discarded, and what stayed.
 
-import type { ArchiveRefusal, Thread, ThreadArchiveResult, ThreadId } from "../api/protocol.gen";
+import type { ArchiveProgress, ArchiveRefusal, ArchiveStep, Thread, ThreadArchiveResult, ThreadId } from "../api/protocol.gen";
 import { threadTitle } from "./selectors";
 
 /** A guard against a cycle of parents, not a limit anyone reaches. */
@@ -106,4 +106,93 @@ export function stayedAfter(
     ...refused.map((refusal) => ({ id: refusal.thread_id, title: title(refusal.thread_id), reason: refusal.message })),
     ...kept.map((id) => ({ id, title: title(id), reason: "a thread under it stayed" })),
   ];
+}
+
+/** How long an archive runs before its progress is shown: most are over sooner. */
+export const PROGRESS_DELAY_MS = 300;
+
+/** Whether nothing more happens to a thread in this archive. */
+export function isFinal(step: ArchiveStep): boolean {
+  return step.kind === "archived" || step.kind === "refused" || step.kind === "kept";
+}
+
+/** What is happening to a thread of an archive, in a few words. */
+export function stepLabel(step: ArchiveStep): string {
+  switch (step.kind) {
+    case "waiting":
+      return "Waiting";
+    case "stopping_session":
+      return step.working ? "Stopping the agent" : "Closing the session";
+    case "removing_environment":
+      return `Removing its ${step.environment}`;
+    case "archived":
+      return "Archived";
+    case "refused":
+      return step.message;
+    case "kept":
+      return "Kept: a thread under it stays";
+  }
+}
+
+/** Where an archive is, as the progress view shows it. */
+export type ArchiveSummary = {
+  total: number;
+  done: number;
+  /** 0 to 100. A thread under way counts half, so the bar moves while it is. */
+  percent: number;
+  /** The thread being worked on now, if one is. */
+  current: ArchiveProgress | null;
+  /** What the view says in its title. */
+  headline: string;
+};
+
+export function archiveSummary(threads: readonly ArchiveProgress[]): ArchiveSummary {
+  const total = threads.length;
+  const done = threads.filter((thread) => isFinal(thread.step)).length;
+  const current = threads.find((thread) => !isFinal(thread.step) && thread.step.kind !== "waiting") ?? null;
+  const percent = total === 0 ? 0 : Math.round(((done + (current ? 0.5 : 0)) / total) * 100);
+  const only = total === 1 ? threads[0] : undefined;
+  const headline = only
+    ? `Archiving "${only.title ?? only.thread_id}"`
+    : `Archiving ${total} threads`;
+  return { total, done, percent, current, headline };
+}
+
+/**
+ * The threads of an archive as a tree, for showing: each parent before the threads
+ * under it, with how deep it is. The daemon reports them deepest first, the order
+ * it archives them in, siblings in no particular order. Siblings are shown in the
+ * order they were started, as `startedAt` tells (unknown ones last). A thread whose
+ * parent is not in the archive (an archived one in between) stands under the
+ * thread asked for.
+ */
+export function treeOrder(
+  threads: readonly ArchiveProgress[],
+  startedAt: (id: ThreadId) => number | undefined = () => undefined,
+): { thread: ArchiveProgress; depth: number }[] {
+  const ids = new Set(threads.map((thread) => thread.thread_id));
+  const root = threads.find((thread) => !thread.parent);
+  const children = new Map<string, ArchiveProgress[]>();
+  const orphans: ArchiveProgress[] = [];
+  const when = (thread: ArchiveProgress) => startedAt(thread.thread_id) ?? Number.MAX_SAFE_INTEGER;
+  const sorted = [...threads].sort((a, b) => when(a) - when(b));
+  for (const thread of sorted) {
+    if (thread === root) continue;
+    if (thread.parent && ids.has(thread.parent)) {
+      const siblings = children.get(thread.parent) ?? [];
+      siblings.push(thread);
+      children.set(thread.parent, siblings);
+    } else {
+      orphans.push(thread);
+    }
+  }
+  const out: { thread: ArchiveProgress; depth: number }[] = [];
+  const visit = (thread: ArchiveProgress, depth: number) => {
+    if (depth > MAX_DEPTH) return;
+    out.push({ thread, depth });
+    for (const child of children.get(thread.thread_id) ?? []) visit(child, depth + 1);
+  };
+  if (root) visit(root, 0);
+  for (const orphan of orphans) visit(orphan, root ? 1 : 0);
+  return out;
 }

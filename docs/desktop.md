@@ -101,8 +101,11 @@ with the queue, steer and attachments (files and images: the paperclip, `Ctrl+V`
 switching agent, model, effort and permission mode; archiving with a confirmation if the worktree
 has uncommitted work. Archiving a thread with threads under it asks first: the dialog lists every
 descendant that will be archived with it, marks the working ones (they are stopped) and the ones
-whose worktree has uncommitted work (it is discarded). If a thread still refuses, the app says
-which ones stayed and offers to archive them anyway.
+whose worktree has uncommitted work (it is discarded). An archive that takes longer than 300 ms
+shows its progress in the dialog: a bar, every thread of the tree with its step (stopping the
+agent, removing its worktree, archived, not archived, kept) and how many are done; hiding the
+dialog lets the archive go on. A quick archive shows nothing extra. If a thread still refuses, the
+app says which ones stayed and offers to archive them anyway.
 
 A command's or tool's output unfolds to its first 12 lines with "Show all N lines" under them;
 it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close

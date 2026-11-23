@@ -71,11 +71,25 @@ at a time, deepest first, and prints a line per archived thread, the one asked f
   threads under it. The command prints why each thread stayed and exits with 1; run it again with
   `--force` to discard the uncommitted work, or commit it first.
 - `--no-descendants` archives only the thread and leaves its children as they are.
+- **Progress.** An archive that takes longer than 300 ms (removing large worktrees, agents slow to
+  let go of their sessions) shows a live list on a terminal: each thread with its step (waiting,
+  stopping the agent, closing the session, removing its Git worktree, archived, not archived, kept)
+  and how many of the tree are done. It goes to stderr and is erased when the archive ends, so the
+  printed result is the same as without a terminal; piped, nothing extra is printed.
 
 Over the protocol this is `thread.archive` with `descendants: true`; without it the method archives
 one thread, as before, and answers just `{ thread }`. With it the answer also lists `archived`,
 `stopped`, `refused` (with the error code and message of each) and `kept`. A thread is never
 spawned under an archived thread or one being archived.
+
+A client that wants to show progress passes `progress`, an id of its choosing. While the call runs,
+the daemon sends `thread.archive_progress` notifications with that id to the connection that asked
+(not to other clients). Each carries every thread of the call in the order they are archived,
+deepest first, with its title, its parent in the tree and its `step`: `waiting`,
+`stopping_session` (`working`: a turn is being stopped), `removing_environment` (`environment`: the
+environment's name), then one of the final `archived`, `refused` (`code`, `message`) or `kept`. A
+refusal turns its ancestors to `kept` at once. The last notification, sent before the answer, has
+every thread in a final step.
 
 ## The orchestration plugin
 

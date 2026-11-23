@@ -1,10 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Thread } from "../../api/protocol.gen";
-import { type Stayed, type TreeMember, hasWorkdir, isWorking, liveDescendants, treeWarning } from "../../state/archive";
+import {
+  PROGRESS_DELAY_MS,
+  type Stayed,
+  type TreeMember,
+  archiveSummary,
+  hasWorkdir,
+  isWorking,
+  liveDescendants,
+  treeWarning,
+} from "../../state/archive";
 import { threadTitle } from "../../state/selectors";
-import { store } from "../../state/store";
-import type { UiRegistry } from "../../ui/registry";
+import { store, useApp } from "../../state/store";
+import type { DialogRenderer, UiRegistry } from "../../ui/registry";
+import { ArchiveProgressView, useDelayed } from "./ArchiveProgress";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,13 +32,24 @@ import { Badge } from "@/components/ui/badge";
  * first sees what goes along; whatever stays afterwards is shown with the reason.
  * Resolves once archiving is done or a dialog has taken over.
  */
-export async function archiveThread(ui: Pick<UiRegistry, "showDialog">, thread: Thread): Promise<void> {
+export async function archiveThread(
+  ui: Pick<UiRegistry, "showDialog" | "closeDialog" | "getSnapshot">,
+  thread: Thread,
+): Promise<void> {
   const afterwards = (stayed: Stayed[] | null) => {
     if (stayed) ui.showDialog(({ close }) => <StayedDialog thread={thread} stayed={stayed} close={close} />);
   };
   const members = liveDescendants(Object.values(store().getState().threads), thread.id);
   if (members.length === 0) {
-    afterwards(await store().archive(thread.id, false));
+    // Most archives of one thread are over at once; a slow one (a large worktree,
+    // an agent slow to let go) shows how it goes.
+    const progress: DialogRenderer = ({ close }) => <ProgressDialog thread={thread} close={close} />;
+    const timer = setTimeout(() => ui.showDialog(progress), PROGRESS_DELAY_MS);
+    const stayed = await store().archive(thread.id, false);
+    clearTimeout(timer);
+    // Only if it is still up: the user may have hidden it and opened another.
+    if (ui.getSnapshot().dialog === progress) ui.closeDialog();
+    afterwards(stayed);
     return;
   }
   ui.showDialog(({ close }) => <TreeDialog thread={thread} members={members} close={close} afterwards={afterwards} />);
@@ -44,6 +65,14 @@ function TreeDialog(props: {
   const { thread, members } = props;
   const [uncommitted, setUncommitted] = useState<Set<string> | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const progress = useApp((state) => state.archives[thread.id]);
+  // Past the delay the confirmation turns into the progress, which may be hidden.
+  const showing = useDelayed(archiving) && progress !== undefined && progress.length > 0;
+  const hidden = useRef(false);
+  const hide = () => {
+    hidden.current = true;
+    props.close();
+  };
   useEffect(() => {
     let live = true;
     const withDirs = [thread, ...members.map((member) => member.thread)].filter(hasWorkdir);
@@ -59,9 +88,11 @@ function TreeDialog(props: {
   const confirm = async () => {
     setArchiving(true);
     const stayed = await store().archive(thread.id, warning.force);
-    props.close();
+    if (!hidden.current) props.close();
     props.afterwards(stayed);
   };
+
+  if (showing) return <ProgressDialog thread={thread} close={hide} />;
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && !archiving && props.close()}>
@@ -105,14 +136,57 @@ function TreeDialog(props: {
   );
 }
 
+/** An archive that takes a while: what it is doing, thread by thread. */
+function ProgressDialog(props: { thread: Thread; close: () => void }) {
+  const progress = useApp((state) => state.archives[props.thread.id]);
+  const threads = progress && progress.length > 0 ? progress : null;
+  const title = threads && threads.length > 1 ? archiveSummary(threads).headline : `Archiving "${threadTitle(props.thread)}"`;
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && props.close()}>
+      <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {threads && threads.length > 1
+              ? "Deepest first, so no archived thread is left with live threads under it. "
+              : ""}
+            Archiving goes on if you hide this.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {threads && <ArchiveProgressView threads={threads} />}
+        <AlertDialogFooter>
+          <AlertDialogCancel>Hide</AlertDialogCancel>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 /** Shown when threads stayed: most often a worktree with uncommitted work. */
 function StayedDialog(props: { thread: Thread; stayed: Stayed[]; close: () => void }) {
   const { stayed } = props;
+  const [archiving, setArchiving] = useState(false);
+  const progress = useApp((state) => state.archives[props.thread.id]);
+  const showing = useDelayed(archiving) && progress !== undefined && progress.length > 0;
+  const hidden = useRef(false);
+  const force = async () => {
+    setArchiving(true);
+    const still = await store().archive(props.thread.id, true);
+    if (!hidden.current) props.close();
+    if (still) store().notify(`${still.length} of the threads could still not be archived`);
+  };
+  if (showing) {
+    const hide = () => {
+      hidden.current = true;
+      props.close();
+    };
+    return <ProgressDialog thread={props.thread} close={hide} />;
+  }
   // Only the thread asked for stayed: say its reason as the old dialog did.
   const only = stayed.length === 1 && stayed[0]?.id === props.thread.id ? stayed[0] : null;
   const one = only !== null;
   return (
-    <AlertDialog open onOpenChange={(open) => !open && props.close()}>
+    <AlertDialog open onOpenChange={(open) => !open && !archiving && props.close()}>
       <AlertDialogContent className="data-[size=default]:sm:max-w-lg">
         <AlertDialogHeader>
           <AlertDialogTitle>Archive and discard the changes?</AlertDialogTitle>
@@ -134,19 +208,9 @@ function StayedDialog(props: { thread: Thread; stayed: Stayed[]; close: () => vo
           </ul>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel>Keep {one ? "the thread" : "them"}</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            onClick={() =>
-              void store()
-                .archive(props.thread.id, true)
-                .then((still) => {
-                  props.close();
-                  if (still) store().notify(`${still.length} of the threads could still not be archived`);
-                })
-            }
-          >
-            Archive anyway
+          <AlertDialogCancel disabled={archiving}>Keep {one ? "the thread" : "them"}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={archiving} onClick={() => void force()}>
+            {archiving ? "Archiving…" : "Archive anyway"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -96,6 +96,31 @@ pub struct ProviderCapabilities {
     /// can be asked for them without a session.
     #[serde(default)]
     pub rate_limits: bool,
+    /// From which points of a session the provider can start a new session that
+    /// holds the conversation up to there, leaving the first one as it was.
+    #[serde(default, skip_serializing_if = "ForkSupport::is_none")]
+    pub fork: ForkSupport,
+}
+
+/// From which points of its sessions a provider forks them: starts a new session
+/// whose conversation is the old one's up to that point. The old session is left
+/// as it was.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ForkSupport {
+    /// It cannot fork a session.
+    #[default]
+    None,
+    /// Only the whole session, as it is now: from its latest turn.
+    Latest,
+    /// From the end of any turn that reported a point.
+    Any,
+}
+
+impl ForkSupport {
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

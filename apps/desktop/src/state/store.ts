@@ -35,6 +35,7 @@ import type {
   SkillStatus,
   Thread,
   ThreadEvent,
+  ThreadForkParams,
   ThreadId,
   ThreadSpawnParams,
   ThreadUnqueueResult,
@@ -688,6 +689,35 @@ export class AppStore {
     this.mergeThreads([result.thread]);
     this.select(result.thread.id);
     return result.thread;
+  }
+
+  /**
+   * Fork a thread from the end of one of its turns, in the thread's directory or,
+   * with `environment`, in one of its own; opens the fork.
+   */
+  async fork(params: ThreadForkParams): Promise<Thread | null> {
+    const result = await this.attempt(() => this.api.call("thread.fork", params));
+    if (!result) return null;
+    this.mergeThreads([result.thread]);
+    this.select(result.thread.id);
+    return result.thread;
+  }
+
+  /**
+   * The thread a fork came from and its timeline up to the turn it was forked
+   * from: what the fork's agent knows from before it. Read once; it cannot change.
+   */
+  async forkOrigin(fork: Thread): Promise<{ source: Thread; timeline: Timeline } | null> {
+    const origin = fork.forked_from;
+    if (!origin) return null;
+    return this.attempt(async () => {
+      const [{ thread }, { events }] = await Promise.all([
+        this.api.call("thread.get", { thread_id: origin.thread }),
+        this.api.call("thread.events", { thread_id: origin.thread, after: 0 }),
+      ]);
+      const until = events.filter((event) => event.seq <= origin.seq);
+      return { source: thread, timeline: applyEvents(emptyTimeline, until) };
+    });
   }
 
   /** Resolves to whether the daemon took the message. */

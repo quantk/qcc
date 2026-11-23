@@ -246,7 +246,7 @@ impl Timeline {
             item.status = settled_item_status(&item, status);
             events.push(EventPayload::ItemCompleted { turn_id: turn_id.clone(), item });
         }
-        events.push(EventPayload::TurnCompleted { turn_id, status, error });
+        events.push(EventPayload::TurnCompleted { turn_id, status, error, point: None });
         events
     }
 

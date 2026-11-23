@@ -1,6 +1,6 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
-use qcc_domain::{AgentSkill, Attachment, Compaction, SettingField, SettingKind};
+use qcc_domain::{AgentSkill, Attachment, Compaction, ForkSupport, SettingField, SettingKind};
 use qcc_domain::{
     ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta,
     EnvironmentChanges, EnvironmentInfo, InteractionOption, InteractionRequest,
@@ -141,6 +141,7 @@ pub(crate) fn delta(delta: wit::Delta) -> Result<Delta, String> {
             status: turn_status(b.status),
             error: b.error,
             claim_if_idle: b.claim_if_idle,
+            point: b.point,
         },
         wit::Delta::ItemOpen(o) => Delta::ItemOpen { key: key(o.key), shape: shape(o.shape)? },
         wit::Delta::ItemClose(c) => Delta::ItemClose {
@@ -271,6 +272,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 context_usage: p.capabilities.context_usage,
                 images: p.capabilities.images,
                 rate_limits: p.capabilities.rate_limits,
+                fork: fork_from_wit(p.capabilities.fork),
                 permission_modes: p
                     .capabilities
                     .permission_modes
@@ -469,7 +471,20 @@ pub(crate) fn provider_info(info: ProviderInfo) -> wit::ProviderInfo {
             context_usage: c.context_usage,
             images: c.images,
             rate_limits: c.rate_limits,
+            fork: match c.fork {
+                ForkSupport::None => wit::ForkSupport::None,
+                ForkSupport::Latest => wit::ForkSupport::Latest,
+                ForkSupport::Any => wit::ForkSupport::Any,
+            },
         },
+    }
+}
+
+fn fork_from_wit(fork: wit::ForkSupport) -> ForkSupport {
+    match fork {
+        wit::ForkSupport::None => ForkSupport::None,
+        wit::ForkSupport::Latest => ForkSupport::Latest,
+        wit::ForkSupport::Any => ForkSupport::Any,
     }
 }
 
@@ -669,6 +684,7 @@ fn session_start(start: SessionStart, images: bool) -> wit::SessionStart {
         model: start.model,
         effort: start.effort,
         resume: start.resume,
+        fork_at: start.fork_at,
         prompt,
         prompt_notes,
         prompt_attachments,

@@ -111,6 +111,7 @@ impl HarnessBuilder {
             started_by: None,
             hidden: false,
             automation: None,
+            fork: None,
         }
         .into_thread(0);
         let (engine, events) = ThreadEngine::create(thread, Box::new(SequentialMint::default()), 0);
@@ -222,10 +223,42 @@ impl Harness {
         self.start_with(prompt, handle)
     }
 
+    /// Start a session that forks `session` from `point` (a turn boundary's), the
+    /// way the daemon starts a forked thread's first session.
+    pub fn fork(
+        &mut self,
+        session: &str,
+        point: &str,
+        prompt: Option<&str>,
+    ) -> Result<(), PluginError> {
+        self.start_from(prompt, Some(session.to_owned()), Some(point.to_owned()))
+    }
+
+    /// The points the turns so far ended at, oldest first; `None` for a turn whose
+    /// boundary carried none.
+    pub fn points(&self) -> Vec<Option<String>> {
+        self.events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                EventPayload::TurnCompleted { point, .. } => Some(point.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn start_with(
         &mut self,
         prompt: Option<&str>,
         resume: Option<String>,
+    ) -> Result<(), PluginError> {
+        self.start_from(prompt, resume, None)
+    }
+
+    fn start_from(
+        &mut self,
+        prompt: Option<&str>,
+        resume: Option<String>,
+        fork_at: Option<String>,
     ) -> Result<(), PluginError> {
         if let Some(prompt) = prompt {
             let events = self.engine.submit_input(prompt.into(), 0);
@@ -238,6 +271,7 @@ impl Harness {
             model: self.model.clone(),
             effort: self.effort.clone(),
             resume,
+            fork_at,
             prompt: prompt.map(UserInput::from),
             permission_mode: self.permission_mode,
             env: vec![("QCC_THREAD_ID".into(), self.thread_id.to_string())],

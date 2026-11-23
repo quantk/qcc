@@ -88,6 +88,7 @@ works as a screen, a tab or a panel tab.
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
+| An entry of the "…" menu under a reply, disabled with a reason when it cannot run | `ui.itemMenuItem` | `modules/fork` |
 | A command (palette, shortcut, sidebar buttons) | `ui.command` | `modules/new-thread`, `modules/projects`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
 

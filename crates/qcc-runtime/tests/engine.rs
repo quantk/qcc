@@ -24,6 +24,7 @@ fn new_thread(id: &str) -> NewThread {
         started_by: None,
         hidden: false,
         automation: None,
+        fork: None,
     }
 }
 
@@ -86,7 +87,12 @@ fn a_turn_drives_status_and_projection() {
     journal.extend(events);
 
     let events = engine.apply_deltas(
-        [Delta::TurnBoundary { status: TurnStatus::Completed, error: None, claim_if_idle: false }],
+        [Delta::TurnBoundary {
+            status: TurnStatus::Completed,
+            error: None,
+            claim_if_idle: false,
+            point: None,
+        }],
         140,
     );
     assert_eq!(types(&events), ["item/completed", "turn/completed", "thread/status"]);
@@ -304,7 +310,12 @@ fn unknown_thread() {
 }
 
 fn boundary() -> Delta {
-    Delta::TurnBoundary { status: TurnStatus::Completed, error: None, claim_if_idle: false }
+    Delta::TurnBoundary {
+        status: TurnStatus::Completed,
+        error: None,
+        claim_if_idle: false,
+        point: None,
+    }
 }
 
 #[test]

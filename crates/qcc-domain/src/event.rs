@@ -178,6 +178,11 @@ pub enum EventPayload {
         status: TurnStatus,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        /// Where the provider session stands after the turn, in the provider's
+        /// terms: a fork from this turn starts there. Absent: the turn cannot be
+        /// forked from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        point: Option<String>,
     },
 
     /// Every item's first event.

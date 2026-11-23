@@ -9,5 +9,5 @@
 {"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"context_used":22665}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"pong"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":22663},"model_context_window":1000000,"context_used":22665}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"9bc47055-2ab0-4682-a887-10290911fd5f"}
 {"type":"thread/status","status":"idle"}

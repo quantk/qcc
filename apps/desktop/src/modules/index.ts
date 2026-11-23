@@ -5,6 +5,7 @@ import type { UiModule } from "../ui/registry";
 import { automationsModule } from "./automations";
 import { changesModule } from "./changes";
 import { contextModule } from "./context";
+import { forkModule } from "./fork";
 import { insightsModule } from "./insights";
 import { lineageModule } from "./lineage";
 import { limitsModule } from "./limits";
@@ -31,6 +32,7 @@ export const builtinModules: UiModule[] = [
   timelineModule,
   changesModule,
   lineageModule,
+  forkModule,
   threadControlsModule,
   threadMenuModule,
   openInEditorModule,

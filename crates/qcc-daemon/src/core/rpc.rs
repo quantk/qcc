@@ -11,10 +11,10 @@ use qcc_protocol::methods::{
     PluginDisable, PluginEnable, PluginList, ProjectCreate, ProjectDelete, ProjectList,
     ProjectListResult, ProjectUpdate, ProviderModels, ProviderRateLimits, ProviderSkills,
     SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges,
-    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadGet, ThreadGetParams,
+    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadFork, ThreadGet, ThreadGetParams,
     ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename, ThreadReset,
     ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject,
-    ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadUnqueue, ThreadUnsubscribe,
+    ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadTurns, ThreadUnqueue, ThreadUnsubscribe,
     ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
     UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
     UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
@@ -44,6 +44,14 @@ impl Core {
                 Ok(p) => self.thread_attachment(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
+            ThreadTurns::NAME => {
+                let result = params::<ThreadTurns>(raw).and_then(|p| self.thread_turns(p));
+                responder.reply(result);
+            }
+            ThreadFork::NAME => {
+                let result = params::<ThreadFork>(raw).and_then(|p| self.thread_fork(p));
+                responder.reply(result);
+            }
             ThreadSend::NAME => {
                 let result = params::<ThreadSend>(raw).and_then(|p| self.thread_send(p));
                 responder.reply(result);

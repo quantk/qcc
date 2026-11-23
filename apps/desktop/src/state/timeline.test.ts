@@ -7,6 +7,7 @@ import {
   conversationStart,
   earlierConversations,
   emptyTimeline,
+  forkedEntries,
   queuedMessages,
 } from "./timeline";
 
@@ -24,6 +25,16 @@ const message = (text: string, status: Item["status"] = "pending"): Item => ({
 });
 
 describe("timeline", () => {
+  it("gives a fork the latest conversation of the thread it came from, queue left out", () => {
+    const origin = fold(
+      { type: "input/submitted", text: "before" },
+      { type: "thread/reset" },
+      { type: "input/submitted", text: "kept" },
+      { type: "input/queued", queue_id: "q", text: "waiting" },
+    );
+    expect(forkedEntries(origin).map((entry) => entry.kind === "user" && entry.text)).toEqual(["kept"]);
+  });
+
   it("marks where a new conversation starts and says when the context was compacted", () => {
     const timeline = fold(
       { type: "input/submitted", text: "one" },

@@ -15,6 +15,7 @@ pub mod comment;
 pub mod context;
 pub mod delta;
 pub mod event;
+pub mod fork;
 pub mod ids;
 pub mod interaction;
 pub mod item;
@@ -34,6 +35,7 @@ pub use comment::{CommentAuthor, DiffSide, LineComment};
 pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};
+pub use fork::{TurnRecord, fork_blocker, turns};
 pub use ids::{
     AutomationId, CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId,
 };
@@ -43,13 +45,13 @@ pub use limits::{LimitStatus, LimitWindow, ProviderLimits, RateLimits};
 pub use project::{ICON_EMOJI_MAX, ICON_NAME_MAX, IconColor, Project, ProjectIcon, project_of};
 pub use provider::{
     AgentSkill, ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode,
-    EnvironmentChanges, EnvironmentInfo, McpServer, McpServerStatus, McpState, McpTransport,
-    ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, Revision, SettingField,
-    SettingKind, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
+    EnvironmentChanges, EnvironmentInfo, ForkSupport, McpServer, McpServerStatus, McpState,
+    McpTransport, ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, Revision,
+    SettingField, SettingKind, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
 };
 pub use stats::{ToolBucket, ToolKind, ToolUse};
 pub use thread::{
-    ActivityKind, EnvironmentState, PendingInteraction, Role, Thread, ThreadActivity,
+    ActivityKind, EnvironmentState, ForkOrigin, PendingInteraction, Role, Thread, ThreadActivity,
     ThreadEnvironment, ThreadState, ThreadStatus, TranscriptEntry, TurnStatus,
 };
 pub use usage::{ThreadUsage, TokenUsage, UsageBucket, UsageSnapshot};

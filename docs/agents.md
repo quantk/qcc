@@ -259,6 +259,41 @@ by itself when the context is full is marked the same way. A thread without a li
 resumes it. In the app these are the "Compact the context" and "Start a new conversation" items in
 the thread menu.
 
+## Forking a thread
+
+```sh
+qcc thread turns <thread-id>                            # the ended turns, numbered, and which can be forked from
+qcc thread fork <thread-id> [<turn>] [--prompt '…']     # a new thread that goes on from that turn [default: the latest]
+qcc thread fork <thread-id> 2 --env git-worktree        # …in a worktree of its own
+qcc thread fork <thread-id> 2 --same-dir                # …in the thread's own directory
+```
+
+A fork is a new thread whose agent goes on from the end of a turn: it knows the conversation up
+to there and nothing after. The thread it came from is left as it is, its agent session too. The
+agent makes the fork itself, from its own session, so the fork has everything the agent had at
+that point (tool calls and their output included), not a retelling:
+
+| Agent       | Forks from              | How                                                              |
+| ----------- | ----------------------- | ---------------------------------------------------------------- |
+| Claude Code | any turn                | `--resume <session> --resume-session-at <message> --fork-session` |
+| Codex       | any turn                | `thread/fork` with `lastTurnId`                                  |
+| opencode    | only its latest turn    | ACP `session/fork`, which copies the whole session               |
+
+Only the conversation is forked: the files are as they are now. A fork works in the thread's own
+directory, or in a new worktree from the current commit there (`--env git-worktree`); a thread
+that has a worktree of its own gets one for its fork by default, since two agents in one
+directory step on each other's files. What is not committed in the thread's directory yet does
+not go into the new worktree. The fork keeps the thread's agent, model, effort, permission mode,
+skills and project, and stands beside it (under the same parent, if any), not under it. Its
+`thread show` says `forked from thread … at turn …`, and its transcript (`thread wait`, handoff,
+another agent taking over) starts with the conversation it was forked from.
+
+`thread turns` says why a turn cannot be forked from: an agent that cannot fork, opencode's
+earlier turns, or a turn without a point to fork from — turns made before qcc could fork, or a
+turn in which the agent said nothing. Claude Code's `--resume-session-at` is not in its `--help`;
+should a later version drop it, the fork fails with Claude's error rather than starting without
+the conversation.
+
 ## What the context is made of
 
 ```sh

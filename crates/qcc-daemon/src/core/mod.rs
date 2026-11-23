@@ -37,6 +37,7 @@ mod configuration;
 mod environments;
 mod extensions;
 mod files;
+mod fork;
 mod limits;
 mod rpc;
 mod sessions;

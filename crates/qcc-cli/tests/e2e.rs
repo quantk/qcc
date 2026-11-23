@@ -3939,3 +3939,84 @@ fn reviewers_findings_are_listed_sent_and_dismissed_from_the_cli() {
     let unknown = daemon.qcc(&["reviewers", "dismiss", "f99", "--thread", &id]);
     assert!(!unknown.ok && unknown.stderr.contains("no finding f99"), "{}", unknown.stderr);
 }
+
+#[test]
+fn a_thread_is_forked_from_a_turn_and_both_go_on_their_own_way() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(dir.path());
+    let id = daemon.spawn("one");
+    daemon.wait_for(&id, "turn/completed");
+    daemon.turn(&id, "two");
+
+    let listed = daemon.qcc(&["thread", "turns", &id]);
+    assert!(listed.ok, "{}", listed.stderr);
+    assert!(listed.stdout.contains("1  completed    one"), "{}", listed.stdout);
+    assert!(listed.stdout.contains("2  completed    two"), "{}", listed.stdout);
+    assert!(!listed.stdout.contains("cannot fork"), "{}", listed.stdout);
+    let turns = daemon.qcc(&["thread", "turns", &id, "--json"]).json();
+    let first = turns["turns"][0]["turn_id"].as_str().unwrap().to_owned();
+
+    // A fork from the first turn knows only that turn.
+    let forked = daemon.qcc(&["thread", "fork", &id, "1", "--prompt", "/history", "--json"]);
+    assert!(forked.ok, "{}", forked.stderr);
+    let fork = forked.json()["thread"].clone();
+    let fork_id = fork["id"].as_str().unwrap().to_owned();
+    assert_eq!(fork["forked_from"]["thread"], id.as_str(), "{fork}");
+    assert_eq!(fork["forked_from"]["turn"], first.as_str(), "{fork}");
+    assert!(fork.get("parent").is_none(), "a fork is not a child: {fork}");
+    assert_eq!(fork["cwd"], daemon.thread(&id)["cwd"], "the same directory: {fork}");
+    let events = daemon.wait_for(&fork_id, "turn/completed");
+    assert_eq!(events["status"], "completed");
+    // The fork's session is made from the other one, not resumed.
+    assert_eq!(daemon.wait_for(&fork_id, "session/started")["resumed"], false);
+    assert_eq!(messages(&daemon.events(&fork_id)), ["1. one"]);
+    let fork_now = daemon.thread(&fork_id);
+    assert!(fork_now.get("fork_at").is_none(), "the fork is made: {fork_now}");
+    assert_ne!(fork_now["provider_session"], daemon.thread(&id)["provider_session"]);
+    // Its transcript starts with the conversation it was forked from.
+    let shown = daemon.qcc(&["thread", "show", &fork_id]).stdout;
+    assert!(shown.contains(&format!("forked    from thread {id} at turn {first}")), "{shown}");
+
+    // The thread it came from goes on with everything it had.
+    daemon.turn(&id, "/history");
+    assert_eq!(messages(&daemon.events(&id)).last().unwrap(), &"1. one\n2. two");
+    // And so does the fork, in its own session.
+    daemon.turn(&fork_id, "/history");
+    assert_eq!(messages(&daemon.events(&fork_id)).last().unwrap(), &"1. one\n2. /history");
+
+    // Without a turn named, the latest; a turn that is not there is refused.
+    let latest = daemon.qcc(&["thread", "fork", &id, "--json"]).json();
+    let latest_id = latest["thread"]["id"].as_str().unwrap().to_owned();
+    daemon.turn(&latest_id, "/history");
+    assert_eq!(messages(&daemon.events(&latest_id)), ["1. one\n2. two\n3. /history"]);
+    let refused = daemon.qcc(&["thread", "fork", &id, "9"]);
+    assert!(!refused.ok && refused.stderr.contains("no ended turn 9"), "{}", refused.stderr);
+}
+
+#[test]
+fn a_fork_of_a_thread_in_a_worktree_gets_a_worktree_of_its_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("a.txt", "one\n")]);
+    let daemon = Daemon::start(&data);
+    let output = spawn_in_worktree(&daemon, &repo, &["--prompt", "hi"]);
+    assert!(output.ok, "{}", output.stderr);
+    let id = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    daemon.wait_for(&id, "turn/completed");
+    let source_cwd = daemon.thread(&id)["cwd"].as_str().unwrap().to_owned();
+
+    let forked = daemon.qcc(&["thread", "fork", &id, "--prompt", "/history", "--json"]);
+    assert!(forked.ok, "{}", forked.stderr);
+    let fork_id = forked.json()["thread"]["id"].as_str().unwrap().to_owned();
+    daemon.wait_for(&fork_id, "turn/completed");
+    let fork = daemon.thread(&fork_id);
+    assert_eq!(fork["environment"]["id"], "git-worktree", "{fork}");
+    assert_eq!(fork["environment"]["source_dir"], source_cwd.as_str(), "{fork}");
+    assert_ne!(fork["cwd"], source_cwd.as_str(), "{fork}");
+    assert_eq!(messages(&daemon.events(&fork_id)), ["1. hi"]);
+
+    // Asked to, it stays in the thread's directory.
+    let same = daemon.qcc(&["thread", "fork", &id, "--same-dir", "--json"]).json();
+    assert_eq!(same["thread"]["cwd"], source_cwd.as_str(), "{same}");
+    assert!(same["thread"].get("environment").is_none(), "{same}");
+}

@@ -2,7 +2,17 @@ import { FilePenIcon, FileTextIcon, ListTodoIcon, SearchIcon, WrenchIcon } from 
 
 import { parseDiff } from "../../state/diff";
 import { relativePath } from "../../util/format";
-import { CommandTrace, CopyButton, DiffView, ItemTrace, Markdown, ReasoningTrace, StatusMark, ToolTrace } from "../../ui/kit";
+import {
+  CommandTrace,
+  CopyButton,
+  DiffView,
+  ItemMenu,
+  ItemTrace,
+  Markdown,
+  ReasoningTrace,
+  StatusMark,
+  ToolTrace,
+} from "../../ui/kit";
 import type { ItemRendererProps } from "../../ui/registry";
 
 export const CORE_ITEM_TYPES = [
@@ -38,6 +48,11 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
                 text={item.text}
                 label="Copy the reply"
                 className="-ml-1.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
+              />
+              <ItemMenu
+                item={item}
+                thread={thread}
+                className="opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
               />
             </div>
           )}

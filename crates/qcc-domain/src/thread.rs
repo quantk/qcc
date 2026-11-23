@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::context::ContextUsage;
 use crate::event::{EventPayload, ThreadEvent};
-use crate::ids::{AutomationId, InteractionId, ProjectId, ProviderId, ThreadId};
+use crate::ids::{AutomationId, InteractionId, ProjectId, ProviderId, ThreadId, TurnId};
 use crate::interaction::InteractionRequest;
 use crate::item::{Item, ItemShape, ItemStatus};
 use crate::provider::{McpServerStatus, PermissionMode};
@@ -68,6 +68,17 @@ pub struct ThreadEnvironment {
     /// `branch` may exist already: the environment continues on it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reuse_branch: bool,
+}
+
+/// Where a forked thread's conversation comes from: a turn of another thread. The
+/// fork goes on from the end of that turn; the thread it came from is left as it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ForkOrigin {
+    pub thread: ThreadId,
+    pub turn: TurnId,
+    /// The sequence number of the turn's `turn/completed` in that thread: its
+    /// events up to this one are the fork's conversation before its own.
+    pub seq: u64,
 }
 
 /// Where a thread is, as far as someone waiting on it cares. Derived by the core
@@ -274,6 +285,14 @@ pub struct Thread {
     /// the conversation so far instead.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub handover: bool,
+    /// The thread was forked from a turn of another one. It is not that thread's
+    /// child: it stands where that thread stands (under the same parent, if any).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
+    /// The point in `provider_session` the next session forks from, in the
+    /// provider's terms. Cleared once the provider names the new session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_at: Option<String>,
 }
 
 fn is_zero(count: &u32) -> bool {
@@ -310,8 +329,8 @@ impl Thread {
         match &event.payload {
             EventPayload::ThreadStatusChanged { status } => self.status = *status,
             EventPayload::SessionStarted { provider_session, .. } => {
-                if provider_session.is_some() {
-                    self.provider_session.clone_from(provider_session);
+                if let Some(session) = provider_session {
+                    self.name_session(session);
                 }
                 self.handover = false;
             }
@@ -322,13 +341,14 @@ impl Thread {
                 if *provider != self.provider {
                     self.provider = provider.clone();
                     self.provider_session = None;
+                    self.fork_at = None;
                     self.handover = true;
                 }
                 self.model.clone_from(model);
                 self.effort.clone_from(effort);
             }
             EventPayload::SessionIdentified { provider_session } => {
-                self.provider_session = Some(provider_session.clone());
+                self.name_session(provider_session);
             }
             EventPayload::InputQueued { .. } => self.queued_inputs += 1,
             EventPayload::InputSubmitted { queue_id: Some(_), .. }
@@ -366,6 +386,7 @@ impl Thread {
                 if self.provider_session.take().is_some() {
                     self.handover = true;
                 }
+                self.fork_at = None;
             }
             EventPayload::EnvironmentDetached { .. } => self.environment = None,
             EventPayload::EnvironmentPreparing => self.set_environment(EnvironmentState::Pending),
@@ -393,12 +414,22 @@ impl Thread {
                 self.usage.reset();
                 self.context = None;
                 self.provider_session = None;
+                self.fork_at = None;
                 self.handover = false;
                 self.conversations += 1;
             }
             EventPayload::ThreadArchived => self.archived = true,
             _ => {}
         }
+    }
+
+    /// The provider named the session the thread has now. A session forked from
+    /// another one has a name of its own: once it is named, the fork is done.
+    fn name_session(&mut self, session: &str) {
+        if self.provider_session.as_deref() != Some(session) {
+            self.fork_at = None;
+        }
+        self.provider_session = Some(session.to_owned());
     }
 
     fn set_environment(&mut self, state: EnvironmentState) {
@@ -460,6 +491,8 @@ mod tests {
             context: None,
             archived: false,
             handover: false,
+            forked_from: None,
+            fork_at: None,
         }
     }
 
@@ -535,6 +568,7 @@ mod tests {
                     turn_id: turn,
                     status: TurnStatus::Failed,
                     error: None,
+                    point: None,
                 },
             ],
         );
@@ -583,6 +617,37 @@ mod tests {
             vec![EventPayload::SessionStarted { provider_session: None, resumed: false }],
         );
         assert!(!thread.handover);
+    }
+
+    #[test]
+    fn a_fork_waits_for_the_provider_to_name_its_own_session() {
+        let mut thread = thread();
+        thread.provider_session = Some("source".into());
+        thread.fork_at = Some("point".into());
+        // A bridge that knows the new name only later starts without one, or with
+        // the session it forks from: the fork is still to be made.
+        apply(
+            &mut thread,
+            vec![
+                EventPayload::SessionStarted { provider_session: None, resumed: true },
+                EventPayload::SessionStarted {
+                    provider_session: Some("source".into()),
+                    resumed: true,
+                },
+            ],
+        );
+        assert_eq!(thread.fork_at.as_deref(), Some("point"));
+        apply(
+            &mut thread,
+            vec![EventPayload::SessionIdentified { provider_session: "forked".into() }],
+        );
+        assert_eq!(thread.provider_session.as_deref(), Some("forked"));
+        assert_eq!(thread.fork_at, None);
+
+        // Starting the conversation afresh forgets a fork not made yet.
+        thread.fork_at = Some("point".into());
+        apply(&mut thread, vec![EventPayload::ConversationReset]);
+        assert_eq!((thread.provider_session.as_deref(), thread.fork_at.as_deref()), (None, None));
     }
 
     #[test]

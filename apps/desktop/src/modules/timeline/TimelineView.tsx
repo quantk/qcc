@@ -1,10 +1,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDownIcon } from "lucide-react";
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ArrowDownIcon, GitForkIcon } from "lucide-react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Item, Thread } from "../../api/protocol.gen";
 import { estimateEntryHeight, newTurnKey, turnRoom } from "../../state/scroll";
-import { type Entry, type Timeline, conversationStart, earlierConversations } from "../../state/timeline";
+import { store, useApp } from "../../state/store";
+import { type Entry, type Timeline, conversationStart, earlierConversations, forkedEntries } from "../../state/timeline";
 import {
   DataTrace,
   InteractionOutcome,
@@ -84,8 +85,67 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
   }
 });
 
-/** One row of the list: an entry, or the button that shows earlier conversations. */
-type Row = { key: string; entry: Entry } | { key: "earlier"; entry: null };
+/**
+ * One row of the list: an entry (of the thread a fork came from, for the
+ * conversation before the fork), the button that shows earlier conversations, or
+ * the line that says where a fork came from.
+ */
+type Row =
+  | { key: string; entry: Entry; source?: Thread }
+  | { key: "earlier"; entry: null }
+  | { key: "forked"; entry: null };
+
+/** What a fork came from, read once its conversation from there is asked for. */
+type Origin = { source: Thread; timeline: Timeline };
+
+/** The thread a fork came from and its conversation up to the fork; read when `wanted`. */
+function useForkOrigin(thread: Thread, wanted: boolean): Origin | null {
+  const [origin, setOrigin] = useState<{ fork: string; origin: Origin } | null>(null);
+  const read = wanted && thread.forked_from !== undefined && thread.forked_from !== null && origin?.fork !== thread.id;
+  useEffect(() => {
+    if (!read) return;
+    let current = true;
+    void store()
+      .forkOrigin(thread)
+      .then((found) => current && found && setOrigin({ fork: thread.id, origin: found }));
+    return () => {
+      current = false;
+    };
+  }, [read, thread]);
+  // Its timeline is kept current while shown, for the menus under its replies.
+  const source = origin?.fork === thread.id ? origin.origin.source.id : null;
+  useEffect(() => (wanted && source ? store().hold(source) : undefined), [wanted, source]);
+  return origin?.fork === thread.id ? origin.origin : null;
+}
+
+/** The line at the top of a fork: where it came from, and its conversation from there on request. */
+function ForkedFrom(props: { thread: Thread; origin: Origin | null; shown: boolean; toggle: () => void }) {
+  const { thread, origin, shown } = props;
+  const from = thread.forked_from;
+  const listed = useApp((state) => (from ? state.threads[from.thread] : undefined));
+  const title = origin?.source.title ?? listed?.title ?? "another thread";
+  return (
+    <div className="flex min-w-0 items-center gap-2 py-1 text-xs text-muted-foreground" role="separator">
+      <span className="h-px min-w-6 flex-1 bg-border" />
+      <GitForkIcon className="size-3.5 shrink-0" />
+      <span className="shrink-0">Forked from</span>
+      <Button
+        variant="link"
+        size="xs"
+        className="h-auto min-w-0 shrink px-0 text-xs text-muted-foreground hover:text-foreground"
+        title={title}
+        onClick={() => from && store().select(from.thread)}
+      >
+        <span className="truncate">{title}</span>
+      </Button>
+      <span aria-hidden>·</span>
+      <Button variant="ghost" size="xs" className="shrink-0" onClick={props.toggle}>
+        {shown ? "Hide the conversation before" : "Show the conversation before"}
+      </Button>
+      <span className="h-px min-w-6 flex-1 bg-border" />
+    </div>
+  );
+}
 
 /** Space above the first row, between rows and below the last one. */
 const PADDING_START = 20;
@@ -117,10 +177,20 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
     () => timeline.entries.slice(start).filter((entry) => !(entry.kind === "user" && entry.queued)),
     [timeline.entries, start],
   );
+  // A fork's conversation from before it is the thread's it came from, shown on request.
+  const [originFor, setOriginFor] = useState<string | null>(null);
+  const originShown = originFor === thread.id;
+  const origin = useForkOrigin(thread, originShown);
   const rows = useMemo<Row[]>(() => {
     const list: Row[] = entries.map((entry) => ({ key: entry.key, entry }));
-    return start > 0 ? [{ key: "earlier", entry: null }, ...list] : list;
-  }, [entries, start]);
+    const own: Row[] = start > 0 ? [{ key: "earlier", entry: null }, ...list] : list;
+    if (!thread.forked_from) return own;
+    const before: Row[] =
+      originShown && origin
+        ? forkedEntries(origin.timeline).map((entry) => ({ key: `origin:${entry.key}`, entry, source: origin.source }))
+        : [];
+    return [{ key: "forked", entry: null }, ...before, ...own];
+  }, [entries, start, thread.forked_from, originShown, origin]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -240,9 +310,10 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
   // Showing earlier conversations puts them above what is in view; the entry that
   // was first stays where it was on the screen.
   const showEarlier = () => {
-    const first = rows[1];
+    const after = rows.findIndex((row) => row.key === "earlier") + 1;
+    const first = rows[after];
     const viewport = viewportRef.current;
-    const firstStart = virtualizer.measurementsCache[1]?.start;
+    const firstStart = virtualizer.measurementsCache[after]?.start;
     hold.current =
       first && viewport && firstStart !== undefined ? { key: first.key, offset: firstStart - viewport.scrollTop } : null;
     setShownFor(thread.id);
@@ -328,9 +399,18 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
                     {row.entry ? (
                       <Remembered memory={memory} entryKey={row.key}>
                         <KeepInPlace place={place}>
-                          <EntryView thread={thread} entry={row.entry} />
+                          <div className={cn("flex min-w-0 flex-col", row.source && "opacity-75")}>
+                            <EntryView thread={row.source ?? thread} entry={row.entry} />
+                          </div>
                         </KeepInPlace>
                       </Remembered>
+                    ) : row.key === "forked" ? (
+                      <ForkedFrom
+                        thread={thread}
+                        origin={origin}
+                        shown={originShown}
+                        toggle={() => setOriginFor(originShown ? null : thread.id)}
+                      />
                     ) : (
                       <Button variant="ghost" size="sm" className="self-center" onClick={showEarlier}>
                         Show {earlier === 1 ? "the earlier conversation" : `${earlier} earlier conversations`}

@@ -4,7 +4,8 @@
 //! are what that version actually sent. What the bridge relies on:
 //!
 //! * `initialize`, then `session/new` (or `session/resume`, or `session/load`, to
-//!   continue one), then one `session/prompt` per turn, answered when the turn ends;
+//!   continue one, or `session/fork` to fork one), then one `session/prompt` per
+//!   turn, answered when the turn ends;
 //! * everything in between arrives as `session/update` notifications;
 //! * the agent asks for permission with a `session/request_permission` request —
 //!   whether it asks at all is the agent's own configuration; the bridge answers for
@@ -19,7 +20,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{add_usage, base64, boundary};
+use qcc_plugin_sdk::{add_usage, base64, boundary_at};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -29,6 +30,8 @@ enum Call {
     NewSession,
     /// `session/resume` or `session/load`.
     Continue,
+    /// `session/fork`.
+    Fork,
     SetModel,
     Prompt,
 }
@@ -86,6 +89,9 @@ pub struct Config {
     pub model: Option<String>,
     /// The session to continue, if any.
     pub resume: Option<String>,
+    /// Fork `resume` instead of continuing it: a new session with all of its
+    /// conversation.
+    pub fork: bool,
     pub mode: Option<PermissionMode>,
     /// What qcc tells the agent at the start of a session (see [`Bridge`]'s
     /// `context`).
@@ -111,6 +117,10 @@ pub struct Bridge {
     mode: Option<PermissionMode>,
     /// The session being continued, until the agent accepted or refused it.
     resume: Option<String>,
+    /// `resume` is to be forked, not continued.
+    fork: bool,
+    /// The agent forks sessions: each turn ends at a point to fork from.
+    can_fork: bool,
     /// The agent's session, once it is ready for prompts.
     session: Option<String>,
     /// `session/load` replays the old conversation as updates; they are not news.
@@ -232,7 +242,7 @@ fn is_empty(value: &Value) -> bool {
 impl Bridge {
     /// A bridge for a new agent process, and the handshake to send it.
     pub fn new(config: Config) -> (Self, Output) {
-        let Config { agent, cwd, model, resume, mode, context, mcp_servers } = config;
+        let Config { agent, cwd, model, resume, fork, mode, context, mcp_servers } = config;
         let mut bridge = Self {
             agent,
             peer: Peer::default(),
@@ -240,6 +250,8 @@ impl Bridge {
             model,
             mode,
             resume,
+            fork,
+            can_fork: false,
             session: None,
             replaying: false,
             waiting: VecDeque::new(),
@@ -372,11 +384,23 @@ impl Bridge {
                 let capabilities = &result["agentCapabilities"];
                 let can_resume = capabilities["sessionCapabilities"].get("resume").is_some();
                 let can_load = capabilities["loadSession"].as_bool().unwrap_or(false);
+                self.can_fork = capabilities["sessionCapabilities"].get("fork").is_some();
                 let http = capabilities["mcpCapabilities"]["http"].as_bool().unwrap_or(false);
                 self.images =
                     capabilities["promptCapabilities"]["image"].as_bool().unwrap_or(false);
                 self.mcp_param = self.session_mcp_servers(http, &mut output.deltas);
                 let request = match &self.resume {
+                    Some(session) if self.fork => {
+                        if !self.can_fork {
+                            let reason = format!("{} cannot fork a session", self.agent);
+                            output.deltas.push(Delta::ProviderError(reason.clone()));
+                            output.deltas.push(Delta::SessionEnded(Some(reason)));
+                            output.fatal = true;
+                            return;
+                        }
+                        let params = json!({"sessionId": session, "cwd": self.cwd, "mcpServers": self.mcp_param});
+                        self.peer.request("session/fork", params, Call::Fork)
+                    }
                     Some(session) if can_resume || can_load => {
                         // `resume` picks the session up silently; `load` replays it.
                         self.replaying = !can_resume;
@@ -404,6 +428,15 @@ impl Bridge {
                 let session = self.resume.take().unwrap_or_default();
                 self.session_ready(session, output);
             }
+            (Call::Fork, Ok(result)) => {
+                // The fork has the conversation already: what qcc tells a fresh
+                // session went with it.
+                self.context = None;
+                self.resume = None;
+                let session = str_field(&result, "sessionId").to_owned();
+                output.deltas.push(Delta::SessionIdentity(session.clone()));
+                self.session_ready(session, output);
+            }
             (Call::Continue, Err(error)) => {
                 // The old session is gone on the agent's side. A fresh one loses the
                 // context, which the user has to know.
@@ -415,7 +448,8 @@ impl Bridge {
                 )));
                 output.writes.push(self.new_session());
             }
-            (Call::Initialize | Call::NewSession, Err(error)) => {
+            // A fork that failed must not quietly become a conversation of its own.
+            (Call::Initialize | Call::NewSession | Call::Fork, Err(error)) => {
                 let reason = format!("the agent refused to start a session: {}", error.message);
                 output.deltas.push(Delta::ProviderError(reason.clone()));
                 output.deltas.push(Delta::SessionEnded(Some(reason)));
@@ -538,7 +572,9 @@ impl Bridge {
         self.approvals.clear();
         self.refused.clear();
         if std::mem::take(&mut self.turn_open) {
-            deltas.push(boundary(status, error));
+            // A fork takes the whole session, so the point is the session itself.
+            let point = self.session.clone().filter(|_| self.can_fork);
+            deltas.push(boundary_at(status, error, point));
         }
     }
 
@@ -803,6 +839,41 @@ mod tests {
         bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#);
         assert_eq!(bridge.prompt("go").deltas, [Delta::TurnOpen]);
         bridge
+    }
+
+    #[test]
+    fn an_agent_that_forks_ends_each_turn_at_its_session_and_forks_it_whole() {
+        const INIT_FORK: &str = r#"{"jsonrpc":"2.0","id":1,"result":{"agentCapabilities":{"sessionCapabilities":{"resume":{},"fork":{}}}}}"#;
+        let point = |deltas: &[Delta]| {
+            deltas.iter().find_map(|delta| match delta {
+                Delta::TurnBoundary(boundary) => Some(boundary.point.clone()),
+                _ => None,
+            })
+        };
+        // Without `fork`, a turn has no point.
+        let mut bridge = running();
+        let done = bridge.on_line(r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#);
+        assert_eq!(point(&done.deltas), Some(None));
+
+        let fork = || Config { resume: Some("old".into()), fork: true, ..config() };
+        let (mut bridge, _) = Bridge::new(fork());
+        let asked = bridge.on_line(INIT_FORK);
+        assert_eq!(methods(&asked), ["session/fork"]);
+        assert!(asked.writes[0].contains(r#""sessionId":"old""#), "{:?}", asked.writes);
+        let forked = bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"new"}}"#);
+        assert_eq!(forked.deltas, [Delta::SessionIdentity("new".into())]);
+        bridge.prompt("go");
+        let done = bridge.on_line(r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn"}}"#);
+        assert_eq!(point(&done.deltas), Some(Some("new".into())));
+
+        // An agent that cannot, or a fork it refuses, ends the session.
+        let (mut bridge, _) = Bridge::new(fork());
+        assert!(bridge.on_line(INIT).fatal);
+        let (mut bridge, _) = Bridge::new(fork());
+        bridge.on_line(INIT_FORK);
+        let refused =
+            bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32603,"message":"no"}}"#);
+        assert!(refused.fatal && refused.writes.is_empty(), "{refused:?}");
     }
 
     #[test]

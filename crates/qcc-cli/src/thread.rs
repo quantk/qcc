@@ -11,18 +11,19 @@ use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
     ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact,
     ThreadCompactParams, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams,
-    ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
-    ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
-    ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode,
-    ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
-    ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
+    ThreadFork, ThreadForkParams, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams,
+    ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams,
+    ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp,
+    ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams,
+    ThreadSetProject, ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn,
+    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadTurns, ThreadTurnsParams, ThreadUnqueue,
+    ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
 use qcc_domain::{
     ChangeScope, CommentId, DeliverMode, EventPayload, PermissionMode, ProviderId, ThreadEvent,
-    ThreadId, ThreadState, ThreadStatus, TurnStatus,
+    ThreadId, ThreadState, ThreadStatus, TurnId, TurnStatus,
 };
 use serde::Serialize;
 
@@ -204,6 +205,31 @@ pub(crate) enum ThreadCommand {
     /// Start the conversation afresh in the same thread: the next message starts a
     /// new session. What came before stays in the timeline as an earlier conversation.
     Reset { thread: String },
+    /// List the turns of a thread that ended, numbered, and whether the thread can be
+    /// forked from each one.
+    Turns { thread: String },
+    /// Fork a thread from the end of one of its turns: a new thread whose agent goes on
+    /// from there with the conversation up to it. The thread itself is left as it is.
+    /// Only the conversation is forked; the files are as they are now.
+    Fork {
+        thread: String,
+        /// The turn to fork from: its number in `qcc thread turns`, or its id
+        /// [default: the latest one it can be forked from].
+        turn: Option<String>,
+        /// Make the fork a working directory of its own from the thread's
+        /// [default: the thread's own environment, if it has one].
+        #[arg(long, value_name = "ENVIRONMENT", conflicts_with = "same_dir")]
+        env: Option<String>,
+        /// Work in the thread's own directory, even if it has an environment.
+        #[arg(long)]
+        same_dir: bool,
+        /// The fork's first message.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Stream the fork's events until its first turn settles.
+        #[arg(long, requires = "prompt")]
+        follow: bool,
+    },
     /// Show what the agent's context window holds, part by part, as it last said;
     /// for agents that do not break it down, only how full it is.
     Context { thread: String },
@@ -647,6 +673,61 @@ pub(crate) async fn run(
             }
         }
 
+        ThreadCommand::Turns { thread } => {
+            let params = ThreadTurnsParams { thread_id: ThreadId::new(thread) };
+            let result = client.call::<ThreadTurns>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for turn in &result.turns {
+                    out(render_turn(turn));
+                }
+            }
+        }
+
+        ThreadCommand::Fork { thread, turn, env, same_dir, prompt, follow } => {
+            let thread_id = ThreadId::new(thread);
+            let turn_id = match turn {
+                None => None,
+                Some(turn) if turn.parse::<u32>().is_ok() => {
+                    let number: u32 = turn.parse()?;
+                    let params = ThreadTurnsParams { thread_id: thread_id.clone() };
+                    let turns = client.call::<ThreadTurns>(params).await?.turns;
+                    match turns.into_iter().find(|summary| summary.number == number) {
+                        Some(summary) => Some(summary.turn_id),
+                        None => bail!("thread {thread_id} has no ended turn {number}"),
+                    }
+                }
+                Some(turn) => Some(TurnId::new(turn)),
+            };
+            let environment = match (env, same_dir) {
+                (Some(env), _) => Some(env),
+                (None, true) => None,
+                // Two agents in one directory step on each other: a fork of a thread
+                // with a directory of its own gets one too.
+                (None, false) => client
+                    .call::<ThreadGet>(ThreadGetParams { thread_id: thread_id.clone() })
+                    .await?
+                    .thread
+                    .environment
+                    .map(|environment| environment.id),
+            };
+            let params = ThreadForkParams { thread_id, turn_id, environment, prompt };
+            let result = client.call::<ThreadFork>(params).await?;
+            if follow {
+                if !json {
+                    eprintln!("thread {}", result.thread.id);
+                }
+                let stream = client.events(result.thread.id, 0, true).await?;
+                return follow_turn(stream, json, None).await;
+            }
+            if json {
+                print_json(&result)?;
+            } else {
+                out(result.thread.id.as_str());
+            }
+        }
+
         ThreadCommand::Reset { thread } => {
             let params = ThreadResetParams { thread_id: ThreadId::new(thread) };
             let result = client.call::<ThreadReset>(params).await?;
@@ -976,6 +1057,25 @@ fn parse_state(text: &str) -> anyhow::Result<ThreadState> {
         "archived" => ThreadState::Archived,
         other => bail!("unknown state {other:?}; use working, waiting, idle, failed or archived"),
     })
+}
+
+/// One line of `qcc thread turns`: the number, how the turn ended, what was asked
+/// and answered, and why it cannot be forked from, if it cannot.
+fn render_turn(turn: &qcc_client::protocol::methods::TurnSummary) -> String {
+    let status = match turn.status {
+        TurnStatus::Completed => "completed",
+        TurnStatus::Failed => "failed",
+        TurnStatus::Interrupted => "interrupted",
+    };
+    let mut line =
+        format!("{:>3}  {status:<11}  {}", turn.number, turn.prompt.as_deref().unwrap_or("—"));
+    if let Some(reply) = &turn.reply {
+        line.push_str(&format!("\n     → {reply}"));
+    }
+    if let Some(why) = &turn.fork_blocker {
+        line.push_str(&format!("\n     cannot fork: {why}"));
+    }
+    line
 }
 
 #[cfg(test)]

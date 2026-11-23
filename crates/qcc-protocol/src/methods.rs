@@ -7,7 +7,8 @@ use qcc_domain::{
     CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
     InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
     Project, ProjectIcon, ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField,
-    Thread, ThreadEvent, ThreadId, ThreadState, ToolBucket, UiViewInfo, UsageBucket,
+    Thread, ThreadEvent, ThreadId, ThreadState, ToolBucket, TurnId, TurnStatus, UiViewInfo,
+    UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -288,6 +289,64 @@ method!(
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 pub struct ThreadResetParams {
     pub thread_id: ThreadId,
+}
+
+method!(
+    /// The turns of a thread that ended, oldest first, and whether the thread can be
+    /// forked from each one.
+    ThreadTurns, "thread.turns", ThreadTurnsParams => ThreadTurnsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadTurnsParams {
+    pub thread_id: ThreadId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadTurnsResult {
+    pub turns: Vec<TurnSummary>,
+}
+
+/// One ended turn of a thread.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TurnSummary {
+    pub turn_id: TurnId,
+    /// Its place among the thread's ended turns, from 1: what `qcc thread fork`
+    /// takes.
+    pub number: u32,
+    pub status: TurnStatus,
+    /// The first line of the message that started it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    /// The first line of the agent's last message in it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply: Option<String>,
+    /// Why the thread cannot be forked from it; absent when it can.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_blocker: Option<String>,
+}
+
+method!(
+    /// Fork a thread from the end of one of its turns: a new thread whose agent goes
+    /// on from there with the conversation up to it, while the thread it came from
+    /// stays as it is. Only the conversation is forked: the files are as they are
+    /// now. The fork stands where the thread stands (under the same parent).
+    ThreadFork, "thread.fork", ThreadForkParams => ThreadResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadForkParams {
+    pub thread_id: ThreadId,
+    /// The turn to fork from. Absent: the latest one it can be forked from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    /// An environment that makes the fork a working directory of its own from the
+    /// thread's (`git-worktree`). Absent: the fork works in the thread's directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// The fork's first message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
 }
 
 method!(

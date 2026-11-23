@@ -59,6 +59,10 @@ impl Core {
         let mcp_servers = mcp_servers_for(&self.settings.mcp_servers, &thread.mcp_disabled);
         let resume = thread.provider_session.filter(|_| info.capabilities.resume);
         let resumed = resume.is_some();
+        // A fork's first session is made from the session it was forked from.
+        let fork_at = thread.fork_at.filter(|_| resumed);
+        // A fork is a session of its own, made from another: nothing is resumed.
+        let resumed = resumed && fork_at.is_none();
         let prompt = match prompt {
             Some(UserInput { text, notes, attachments }) if thread.handover => {
                 Some(UserInput { text: self.handover_prompt(id, text), notes, attachments })
@@ -73,6 +77,7 @@ impl Core {
                 model: thread.model,
                 effort: thread.effort,
                 resume,
+                fork_at,
                 prompt,
                 permission_mode: thread.permission_mode,
                 env: self.session_env(id),

@@ -9,4 +9,4 @@
 {"type":"item/text/delta","item_id":"item_1","text":" world"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"hello brave new world"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":4},"last":{"input_tokens":4,"output_tokens":4},"context_used":4}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"1"}

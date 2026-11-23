@@ -231,7 +231,7 @@
 {"type":"item/text/delta","item_id":"item_1","text":"\n"}
 {"type":"item/text/delta","item_id":"item_1","text":"113"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50\n51\n52\n53\n54\n55\n56\n57\n58\n59\n60\n61\n62\n63\n64\n65\n66\n67\n68\n69\n70\n71\n72\n73\n74\n75\n76\n77\n78\n79\n80\n81\n82\n83\n84\n85\n86\n87\n88\n89\n90\n91\n92\n93\n94\n95\n96\n97\n98\n99\n100\n101\n102\n103\n104\n105\n106\n107\n108\n109\n110\n111\n112\n113"}}
-{"type":"turn/completed","turn_id":"turn_1","status":"interrupted"}
+{"type":"turn/completed","turn_id":"turn_1","status":"interrupted","point":"01a1de77-21f4-71e2-b473-e126ee77ae82"}
 {"type":"thread/status","status":"idle"}
 {"type":"input/submitted","text":"Reply with exactly: still here"}
 {"type":"turn/started","turn_id":"turn_2"}
@@ -241,7 +241,7 @@
 {"type":"item/text/delta","item_id":"item_2","text":" here"}
 {"type":"item/completed","turn_id":"turn_2","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"still here"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"last":{"input_tokens":28253,"output_tokens":6,"cached_input_tokens":22144},"model_context_window":475000,"context_used":28259}}
-{"type":"turn/completed","turn_id":"turn_2","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_2","status":"completed","point":"01a1de77-318f-7fb1-a872-af9ca0705854"}
 {"type":"thread/status","status":"idle"}
 {"type":"session/ended","reason":"stopped"}
 {"type":"input/submitted","text":"What exact phrase did I ask you to reply with last time?"}
@@ -254,5 +254,5 @@
 {"type":"item/text/delta","item_id":"item_3","text":" here"}
 {"type":"item/completed","turn_id":"turn_3","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"still here"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":61304,"output_tokens":12,"cached_input_tokens":50176},"last":{"input_tokens":33051,"output_tokens":6,"cached_input_tokens":28032},"model_context_window":475000,"context_used":33057}}
-{"type":"turn/completed","turn_id":"turn_3","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_3","status":"completed","point":"01a1de77-488f-7600-a5ac-296aa47b08b5"}
 {"type":"thread/status","status":"idle"}

@@ -37,6 +37,7 @@ fn summary(id: &str, state: ThreadState, last: Option<TurnStatus>) -> ThreadSumm
         started_by: None,
         hidden: false,
         automation: None,
+        fork: None,
     }
     .into_thread(0);
     thread.last_turn_status = last;

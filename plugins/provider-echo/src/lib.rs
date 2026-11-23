@@ -25,8 +25,14 @@
 //! | `/limits <percent>`  | reports its account's 5-hour window spent that much (`42`)   |
 //! | `/crash`             | the plugin traps                                             |
 //! | `/spin`              | a timer that restarts itself with no delay until interrupted |
+//! | `/history`           | lists the prompts of the session's turns so far              |
 //!
 //! A message steered into a running `/slow` turn is appended to what it streams.
+//!
+//! It forks sessions from any turn (`fork-support::any`). A session's history (the
+//! prompts of its turns) is kept in the plugin's key-value store under its handle,
+//! and the point a turn ends at is how many turns the session has then: a fork from
+//! it starts with that many of the old session's turns, under a handle of its own.
 //!
 //! Each MCP server it is given is reported ready at once, or failed when its
 //! command or URL contains `fail`. It changes the servers of a running session
@@ -98,6 +104,48 @@ struct Session {
     agent: String,
     /// The MCP servers it was given, at the start or since.
     mcp_servers: Vec<McpServer>,
+    /// Its handle, under which its history is kept.
+    id: String,
+    /// The prompts of its turns, oldest first.
+    history: Vec<String>,
+    /// The prompt of the running turn, which joins the history when the turn ends.
+    prompt: Option<String>,
+}
+
+/// Where a session's history is kept.
+fn history_key(session: &str) -> String {
+    format!("history/{session}")
+}
+
+fn load_history(session: &str) -> Result<Vec<String>, String> {
+    Ok(match kv::get(&history_key(session))? {
+        Some(bytes) => serde_json::from_slice(&bytes).map_err(|error| error.to_string())?,
+        None => Vec::new(),
+    })
+}
+
+/// Keep a session's history. Without the key-value store (a test that granted less)
+/// it is only lost on a restart, which is not worth failing a turn over.
+fn save_history(session: &str, history: &[String]) {
+    let saved = serde_json::to_vec(history).unwrap_or_default();
+    if let Err(error) = kv::put(&history_key(session), &saved) {
+        log::warn(format!("the history of {session} is not kept: {error}"));
+    }
+}
+
+impl Session {
+    /// A turn of `out` ends: its prompt joins the history, and its boundary says how
+    /// many turns the session has now, which is where a fork from it starts.
+    fn mark_points(&mut self, out: &mut [Delta]) {
+        for delta in out {
+            let Delta::TurnBoundary(boundary) = delta else { continue };
+            if let Some(prompt) = self.prompt.take() {
+                self.history.push(prompt);
+                save_history(&self.id, &self.history);
+            }
+            boundary.point = Some(self.history.len().to_string());
+        }
+    }
 }
 
 /// What the running turn is waiting for.
@@ -249,8 +297,26 @@ impl Echo {
             Some((command, rest)) => (command, rest.trim()),
             None => (prompt.trim(), ""),
         };
+        session.prompt = Some(prompt.to_owned());
         let mut out = vec![Delta::TurnOpen];
         match command {
+            "/history" => {
+                let reply = if session.history.is_empty() {
+                    "no history".to_owned()
+                } else {
+                    let lines: Vec<String> = session
+                        .history
+                        .iter()
+                        .enumerate()
+                        .map(|(index, prompt)| format!("{}. {prompt}", index + 1))
+                        .collect();
+                    lines.join("\n")
+                };
+                out.push(text(reply.clone()));
+                out.push(text_close());
+                out.push(session.usage(prompt, &reply));
+                out.push(completed());
+            }
             "/slow" => {
                 let words = rest.split_whitespace().map(str::to_owned).collect();
                 let timer = timers::start(SLOW_TICK_MS)?;
@@ -480,6 +546,7 @@ impl Echo {
                 out.push(completed());
             }
         }
+        session.mark_points(&mut out);
         deltas::emit(thread, &out)
     }
 
@@ -498,7 +565,9 @@ impl Echo {
             }
             Some(Turn::Asking { .. } | Turn::Approving { .. }) => {}
         }
-        deltas::emit(thread, &[boundary(TurnStatus::Interrupted, None)])
+        let mut out = [boundary(TurnStatus::Interrupted, None)];
+        session.mark_points(&mut out);
+        deltas::emit(thread, &out)
     }
 
     fn thread_of_process(&self, process: u64) -> Option<String> {
@@ -530,12 +599,39 @@ impl Provider for Echo {
                 context_usage: true,
                 images: true,
                 rate_limits: true,
+                fork: ForkSupport::Any,
             },
         }
     }
 
     fn start(&mut self, start: SessionStart) -> Result<SessionStarted, String> {
+        // A fork starts with as many of the old session's turns as its point says,
+        // under a handle of its own; the old session keeps all of its own.
+        let (id, history) = match (&start.resume, &start.fork_at) {
+            (Some(resume), Some(point)) => {
+                let kept: usize =
+                    point.parse().map_err(|_| format!("{point:?} is not a point of echo's"))?;
+                let mut history = load_history(resume)?;
+                if kept > history.len() {
+                    return Err(format!("session {resume} has no turn {kept}"));
+                }
+                history.truncate(kept);
+                let id = format!("echo-{}-fork-{kept}", start.thread);
+                save_history(&id, &history);
+                (id, history)
+            }
+            (None, Some(_)) => return Err("a fork needs the session it forks".into()),
+            (Some(resume), None) => (resume.clone(), load_history(resume).unwrap_or_default()),
+            (None, None) => {
+                // A new conversation in the same thread starts with no history.
+                let id = format!("echo-{}", start.thread);
+                save_history(&id, &[]);
+                (id, Vec::new())
+            }
+        };
         let session = Session {
+            id: id.clone(),
+            history,
             mode: start.permission_mode,
             skills: session_context(&start),
             agent: format!(
@@ -555,9 +651,7 @@ impl Provider for Echo {
         if let Some(prompt) = &start.prompt {
             self.run(&start.thread, prompt, &start.prompt_notes, &start.prompt_attachments)?;
         }
-        Ok(SessionStarted {
-            provider_session: Some(start.resume.unwrap_or(format!("echo-{}", start.thread))),
-        })
+        Ok(SessionStarted { provider_session: Some(id) })
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
@@ -575,7 +669,9 @@ impl Provider for Echo {
         session.output_tokens = 0;
         let compaction =
             Compaction { automatic: false, tokens_before: Some(before), tokens_after: Some(0) };
-        deltas::emit(&thread, &[Delta::TurnOpen, Delta::ContextCompacted(compaction), completed()])
+        let mut out = [Delta::TurnOpen, Delta::ContextCompacted(compaction), completed()];
+        session.mark_points(&mut out);
+        deltas::emit(&thread, &out)
     }
 
     fn set_mcp_servers(&mut self, update: McpServersUpdate) -> Result<(), String> {
@@ -620,7 +716,7 @@ impl Provider for Echo {
 
     fn resolve_interaction(&mut self, answer: InteractionAnswer) -> Result<(), String> {
         let session = self.sessions.get_mut(&answer.thread).ok_or("the session was not started")?;
-        let out = match session.turn.take() {
+        let mut out = match session.turn.take() {
             Some(Turn::Asking { request_id }) if request_id == answer.request_id => {
                 let reply = match &answer.resolution {
                     InteractionResolution::Selected(option) => format!("You chose {option}."),
@@ -650,6 +746,7 @@ impl Provider for Echo {
                 return Err(format!("no interaction {:?} is pending", answer.request_id));
             }
         };
+        session.mark_points(&mut out);
         deltas::emit(&answer.thread, &out)
     }
 
@@ -915,6 +1012,7 @@ impl Plugin for Echo {
                 out.push(completed());
             }
         }
+        session.mark_points(&mut out);
         if let Err(error) = deltas::emit(thread, &out) {
             log::error(format!("emit failed: {error}"));
         }
@@ -942,10 +1040,12 @@ impl Plugin for Echo {
         let Some(thread) = self.thread_of_process(process) else {
             return;
         };
+        let mut out = out;
         if matches!(out.last(), Some(Delta::TurnBoundary(_)))
             && let Some(session) = self.sessions.get_mut(&thread)
         {
             session.turn = None;
+            session.mark_points(&mut out);
         }
         if let Err(error) = deltas::emit(&thread, &out) {
             log::error(format!("emit failed: {error}"));

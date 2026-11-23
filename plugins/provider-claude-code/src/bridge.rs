@@ -27,7 +27,7 @@ use qcc_plugin_sdk::json::str_field;
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{Message, add_usage, base64, boundary, option};
+use qcc_plugin_sdk::{Message, add_usage, base64, boundary_at, option};
 use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
@@ -158,6 +158,10 @@ pub struct Bridge {
     /// Context breakdown requests sent, which names them.
     context_queries: u32,
     usage_queries: u32,
+    /// The uuid of the main agent's latest message in the running turn: the entry of
+    /// the session's transcript a fork from the turn keeps up to
+    /// (`--resume-session-at`).
+    last_message: Option<String>,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -296,6 +300,7 @@ impl Bridge {
             mcp_polls: 0,
             context_queries: 0,
             usage_queries: 0,
+            last_message: None,
         }
     }
 
@@ -316,6 +321,7 @@ impl Bridge {
         let mut output = self.steer_message(message);
         if !self.turn_open {
             self.turn_open = true;
+            self.last_message = None;
             output.deltas.push(Delta::TurnOpen);
         }
         output
@@ -763,14 +769,21 @@ impl Bridge {
     fn settle(&mut self, status: TurnStatus, error: Option<String>, deltas: &mut Vec<Delta>) {
         self.tools.clear();
         self.approvals.clear();
+        // Where a fork from this turn starts: the main agent's last message in it.
+        let point = self.last_message.take();
         if !self.turn_open {
             // A result nobody asked for: let the assembler decide whether input was
             // waiting for it.
-            deltas.push(Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: true }));
+            deltas.push(Delta::TurnBoundary(TurnBoundary {
+                status,
+                error,
+                claim_if_idle: true,
+                point,
+            }));
             return;
         }
         self.turn_open = false;
-        deltas.push(boundary(status, error));
+        deltas.push(boundary_at(status, error, point));
     }
 }
 
@@ -888,6 +901,12 @@ impl LineBridge for Bridge {
         match kind {
             "stream_event" => self.stream_event(&message["event"], parent, &mut output.deltas),
             "assistant" => {
+                // A sub-agent's messages are a transcript of their own.
+                if parent.is_none()
+                    && let Some(uuid) = message.get("uuid").and_then(Value::as_str)
+                {
+                    self.last_message = Some(uuid.to_owned());
+                }
                 self.note_request(&message["message"]["usage"], parent, &mut output.deltas);
                 for block in message["message"]["content"].as_array().into_iter().flatten() {
                     self.assistant_block(block, parent, &mut output.deltas);
@@ -1123,6 +1142,31 @@ mod tests {
             panic!("expected a compaction");
         };
         assert!(compaction.automatic);
+    }
+
+    #[test]
+    fn a_turn_ends_at_the_main_agent_s_last_message() {
+        let mut bridge = Bridge::new(None);
+        bridge.prompt("one");
+        let assistant = |uuid: &str, parent: Value| {
+            json!({"type": "assistant", "uuid": uuid, "parent_tool_use_id": parent,
+                   "message": {"content": []}})
+            .to_string()
+        };
+        bridge.on_line(&assistant("a1", Value::Null));
+        bridge.on_line(&assistant("a2", Value::Null));
+        // A sub-agent's message is not in the main transcript.
+        bridge.on_line(&assistant("sub", json!("toolu_1")));
+        let point = |deltas: &[Delta]| {
+            deltas.iter().find_map(|delta| match delta {
+                Delta::TurnBoundary(boundary) => Some(boundary.point.clone()),
+                _ => None,
+            })
+        };
+        assert_eq!(point(&bridge.on_line(&result(json!({}))).deltas), Some(Some("a2".into())));
+        // A turn in which the agent said nothing has no point.
+        bridge.prompt("two");
+        assert_eq!(point(&bridge.on_line(&result(json!({}))).deltas), Some(None));
     }
 
     #[test]

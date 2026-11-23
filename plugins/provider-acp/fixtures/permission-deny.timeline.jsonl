@@ -9,5 +9,5 @@
 {"type":"interaction/resolved","interaction_id":"int_1","resolution":{"type":"selected","option_id":"reject"}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"declined","type":"fileChange","path":"/work/made.txt","diff":"Index: /work/made.txt\n===================================================================\n--- /work/made.txt\n+++ /work/made.txt\n@@ -0,0 +1,1 @@\n+ok\n"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"last":{"input_tokens":16025,"output_tokens":105,"cached_input_tokens":1792},"model_context_window":200000,"context_used":17817}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"ses_e218ad4aeffey1rhFZ1r7iB6fV"}
 {"type":"thread/status","status":"idle"}

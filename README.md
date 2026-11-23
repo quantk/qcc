@@ -70,7 +70,8 @@ agents start other agents, and is extended with WebAssembly plugins.
     <td valign="top">
       <h3>🔀 Switch mid-thread</h3>
       Change the model, effort, permission mode or even the agent between turns; the new agent gets
-      the conversation so far. Queue a message or steer it into the running turn.
+      the conversation so far. Queue a message or steer it into the running turn. Fork a thread from
+      any reply to try another way.
     </td>
   </tr>
   <tr>
@@ -190,7 +191,7 @@ temporary daemon.
 
 | | |
 | --- | --- |
-| 🤖 [Agents and sessions](docs/agents.md) | models, effort, switching agents, settings, MCP servers, permission modes, steering, compaction, context, usage limits, attachments, skills |
+| 🤖 [Agents and sessions](docs/agents.md) | models, effort, switching agents, settings, MCP servers, permission modes, steering, compaction, forks, context, usage limits, attachments, skills |
 | 🌿 [Projects and worktrees](docs/projects-and-worktrees.md) | projects, isolated worktrees, delivering work back, comments on changes |
 | 🪆 [Orchestration](docs/orchestration.md) | agents starting agents, permission inheritance, `handoff` and `review` |
 | 🔍 [Reviewers](docs/reviewers.md) | reviewers that look at a thread's changes when its agent is done: profiles, triggers, findings as line comments |

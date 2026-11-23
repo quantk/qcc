@@ -15,5 +15,5 @@
 {"type":"item/text/delta","item_id":"item_2","text":"\nhello fixture\n```"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"The command printed:\n\n```\nhello fixture\n```"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":4,"output_tokens":180,"cached_input_tokens":50575},"last":{"input_tokens":2,"output_tokens":99,"cached_input_tokens":26350},"model_context_window":1000000,"context_used":26352}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"9bde809d-226f-4866-bdf0-2dbc86483f7a"}
 {"type":"thread/status","status":"idle"}

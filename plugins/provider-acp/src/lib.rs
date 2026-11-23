@@ -23,6 +23,9 @@ struct Agent {
     /// How the agent is told to run read-only, by its own rules: refusing what
     /// writes without asking anyone. `None`: it cannot be, and does not offer it.
     read_only_env: Option<(&'static str, &'static str)>,
+    /// Whether it forks a session (ACP's `session/fork`, which takes no point in it):
+    /// the whole session as it is now, or not at all.
+    fork: bool,
 }
 
 /// opencode's permission rules for a read-only session: everything refused but the
@@ -38,6 +41,7 @@ const AGENTS: &[Agent] = &[Agent {
     args: &["acp"],
     models_args: Some(&["models"]),
     read_only_env: Some(("OPENCODE_PERMISSION", OPENCODE_READ_ONLY)),
+    fork: true,
 }];
 
 #[derive(Default)]
@@ -80,6 +84,8 @@ impl Provider for AcpProvider {
                 // As images when the agent says it takes them, by path otherwise.
                 images: true,
                 rate_limits: false,
+                // `session/fork` copies the whole session: only from its latest turn.
+                fork: if self.agent.fork { ForkSupport::Latest } else { ForkSupport::None },
             },
         }
     }
@@ -103,6 +109,7 @@ impl Provider for AcpProvider {
             cwd: start.cwd,
             model: start.model,
             resume: start.resume.clone(),
+            fork: start.fork_at.is_some(),
             mode: start.permission_mode,
             // ACP has no extra directories: the agent is told of them instead.
             context,
@@ -123,7 +130,8 @@ impl Provider for AcpProvider {
         }
         // A new session is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
-        Ok(SessionStarted { provider_session: start.resume })
+        // A fork is a session of its own, named by the agent too.
+        Ok(SessionStarted { provider_session: start.resume.filter(|_| start.fork_at.is_none()) })
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {

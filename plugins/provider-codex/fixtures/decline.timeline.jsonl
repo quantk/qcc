@@ -39,5 +39,5 @@
 {"type":"item/text/delta","item_id":"item_3","text":"."}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"Could not run `touch made.txt`: permission to create the file was rejected; no reason was provided."}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":44776,"output_tokens":187,"cached_input_tokens":34304},"last":{"input_tokens":22477,"output_tokens":54,"cached_input_tokens":22144},"model_context_window":475000,"context_used":22531}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"01a1de76-d444-7491-95c6-f52b8f1d1b72"}
 {"type":"thread/status","status":"idle"}

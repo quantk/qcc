@@ -520,7 +520,13 @@ queue_id?: string | null } |
  *  A queued message was discarded before delivery: the thread was stopped, or the
  *  user took the message back.
  */
-{ type: "input/dropped"; queue_id: string } | { type: "turn/started"; turn_id: TurnId } | { type: "turn/completed"; turn_id: TurnId; status: TurnStatus; error?: string | null } | 
+{ type: "input/dropped"; queue_id: string } | { type: "turn/started"; turn_id: TurnId } | { type: "turn/completed"; turn_id: TurnId; status: TurnStatus; error?: string | null; 
+/**
+ *  Where the provider session stands after the turn, in the provider's
+ *  terms: a fork from this turn starts there. Absent: the turn cannot be
+ *  forked from.
+ */
+point?: string | null } | 
 /**  Every item's first event. */
 { type: "item/started"; turn_id: TurnId; item: Item } | { type: "item/text/delta"; item_id: ItemId; text: string } | 
 /**  Carries the full terminal item. */
@@ -550,6 +556,33 @@ queue_id?: string | null } |
  *  gets: both whole lists, sorted.
  */
 { type: "thread/skills"; enabled?: string[]; disabled?: string[] } | { type: "interaction/requested"; interaction_id: InteractionId; turn_id?: TurnId | null; item_id?: ItemId | null; request: InteractionRequest } | { type: "interaction/resolved"; interaction_id: InteractionId; resolution: InteractionResolution } | { type: "provider/error"; message: string } | { type: "provider/warning"; message: string } | { type: "provider/unhandled"; payload: Value };
+
+/**
+ *  Where a forked thread's conversation comes from: a turn of another thread. The
+ *  fork goes on from the end of that turn; the thread it came from is left as it was.
+ */
+export type ForkOrigin = {
+	thread: ThreadId,
+	turn: TurnId,
+	/**
+	 *  The sequence number of the turn's `turn/completed` in that thread: its
+	 *  events up to this one are the fork's conversation before its own.
+	 */
+	seq: number,
+};
+
+/**
+ *  From which points of its sessions a provider forks them: starts a new session
+ *  whose conversation is the old one's up to that point. The old session is left
+ *  as it was.
+ */
+export type ForkSupport = 
+/**  It cannot fork a session. */
+"none" | 
+/**  Only the whole session, as it is now: from its latest turn. */
+"latest" | 
+/**  From the end of any turn that reported a point. */
+"any";
 
 /**
  *  A color from the app's palette. The app picks the shade for its light or dark
@@ -977,6 +1010,11 @@ export type ProviderCapabilities = {
 	 *  can be asked for them without a session.
 	 */
 	rate_limits?: boolean,
+	/**
+	 *  From which points of a session the provider can start a new session that
+	 *  holds the conversation up to there, leaving the first one as it was.
+	 */
+	fork?: ForkSupport,
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -1274,6 +1312,16 @@ export type Thread = {
 	 *  the conversation so far instead.
 	 */
 	handover?: boolean,
+	/**
+	 *  The thread was forked from a turn of another one. It is not that thread's
+	 *  child: it stands where that thread stands (under the same parent, if any).
+	 */
+	forked_from?: ForkOrigin | null,
+	/**
+	 *  The point in `provider_session` the next session forks from, in the
+	 *  provider's terms. Cleared once the provider names the new session.
+	 */
+	fork_at?: string | null,
 };
 
 /**
@@ -1441,6 +1489,19 @@ export type ThreadEventsParams = {
 
 export type ThreadEventsResult = {
 	events: ThreadEvent[],
+};
+
+export type ThreadForkParams = {
+	thread_id: ThreadId,
+	/**  The turn to fork from. Absent: the latest one it can be forked from. */
+	turn_id?: TurnId | null,
+	/**
+	 *  An environment that makes the fork a working directory of its own from the
+	 *  thread's (`git-worktree`). Absent: the fork works in the thread's directory.
+	 */
+	environment?: string | null,
+	/**  The fork's first message. */
+	prompt?: string | null,
 };
 
 export type ThreadGetParams = {
@@ -1632,6 +1693,14 @@ export type ThreadStopParams = {
 	mode?: StopMode,
 };
 
+export type ThreadTurnsParams = {
+	thread_id: ThreadId,
+};
+
+export type ThreadTurnsResult = {
+	turns: TurnSummary[],
+};
+
 export type ThreadUnqueueParams = {
 	thread_id: ThreadId,
 	/**  From `thread.send` or the `input/queued` event. */
@@ -1744,6 +1813,23 @@ export type ToolKind = "command" | "fileChange" | "fileRead" | "search" |
 export type TurnId = string;
 
 export type TurnStatus = "completed" | "failed" | "interrupted";
+
+/**  One ended turn of a thread. */
+export type TurnSummary = {
+	turn_id: TurnId,
+	/**
+	 *  Its place among the thread's ended turns, from 1: what `qcc thread fork`
+	 *  takes.
+	 */
+	number: number,
+	status: TurnStatus,
+	/**  The first line of the message that started it. */
+	prompt?: string | null,
+	/**  The first line of the agent's last message in it. */
+	reply?: string | null,
+	/**  Why the thread cannot be forked from it; absent when it can. */
+	fork_blocker?: string | null,
+};
 
 export type UiActionParams = {
 	plugin: string,
@@ -1893,6 +1979,8 @@ export type Methods = {
 	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
 	"thread.set_skill": { params: ThreadSetSkillParams; result: ThreadResult },
 	"thread.reset": { params: ThreadResetParams; result: ThreadResult },
+	"thread.turns": { params: ThreadTurnsParams; result: ThreadTurnsResult },
+	"thread.fork": { params: ThreadForkParams; result: ThreadResult },
 	"thread.compact": { params: ThreadCompactParams; result: ThreadResult },
 	"skill.list": { params: Empty; result: SkillListResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },

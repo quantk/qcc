@@ -10,6 +10,7 @@ import type { ThreadContext } from "../../ui/registry";
 import { compactNumber } from "../../util/format";
 import { fromAttachment, toNewAttachment } from "../../state/attachments";
 import { ComposerAttachmentList, useComposerAttachments } from "./ComposerAttachments";
+import { listenComposer, readDraft, saveDraft } from "./composerInput";
 import { readText, saveText } from "../../util/storage";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
@@ -17,9 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-
-// Unsent text survives switching between threads.
-const drafts = new Map<string, string>();
 
 // What Enter does while the agent works; Alt+Enter does the other. Remembered for
 // every thread.
@@ -39,7 +37,7 @@ function statusText(thread: Thread): string {
 
 export function Composer(props: { thread: Thread; timeline: Timeline; provider?: ProviderInfo; context: ThreadContext }) {
   const { thread, timeline, provider } = props;
-  const [text, setText] = useState(() => drafts.get(thread.id) ?? "");
+  const [text, setText] = useState(() => readDraft(thread.id));
   const [sending, setSending] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
   const [preferred, setPreferred] = useState<SendMode>(readDelivery);
@@ -55,7 +53,7 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   const canSend = (text.trim() !== "" || files.attachments.length > 0) && files.ready && !sending;
 
   useEffect(() => {
-    drafts.set(thread.id, text);
+    saveDraft(thread.id, text);
     const element = input.current;
     if (element) {
       element.style.height = "auto";
@@ -64,6 +62,26 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   }, [thread.id, text]);
 
   useEffect(() => input.current?.focus(), []);
+
+  // Text from the timeline, such as a quote of what the user selected there: it goes
+  // where the text ends, and so does the caret, ready for the reply to it.
+  const caretToEnd = useRef(false);
+  useEffect(
+    () =>
+      listenComposer(thread.id, (change) => {
+        caretToEnd.current = true;
+        setText(change);
+      }),
+    [thread.id],
+  );
+  useEffect(() => {
+    const element = input.current;
+    if (!caretToEnd.current || !element) return;
+    caretToEnd.current = false;
+    element.focus();
+    element.setSelectionRange(text.length, text.length);
+    element.scrollTop = element.scrollHeight;
+  }, [text]);
 
   const send = async (mode: SendMode) => {
     const message = text.trim();

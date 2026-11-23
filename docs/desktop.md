@@ -108,6 +108,13 @@ A command's or tool's output unfolds to its first 12 lines with "Show all N line
 it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close
 stays where it is on the screen: the timeline stops following the end until you scroll.
 
+Under each of the agent's replies, a copy button (shown while the pointer is over the reply)
+puts the reply on the clipboard as the markdown the agent wrote. Selecting text anywhere in the
+timeline brings up a **Reply** button over the selection: it adds the selection to the composer
+as a markdown quote (`> ` before every line) after whatever is typed there, a blank line apart,
+and leaves the caret under the quote. The button goes away with the selection, on scrolling, on
+Escape or on a click elsewhere.
+
 ### Mermaid
 
 A ` ```mermaid ` block in an agent's answer is drawn as a diagram (in the light or dark theme),

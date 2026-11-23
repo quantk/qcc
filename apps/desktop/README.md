@@ -173,6 +173,14 @@ under a sent message, whose pictures are read back with `thread.attachment`. Whe
 the agent looks at images is its provider's `images` capability; the paperclip's hint
 says when it does not.
 
+The timeline reaches its composer through `modules/timeline/composerInput.ts`: a
+thread's composer listens while it is drawn and takes the caret and the focus, and
+text sent while it is not drawn waits in the thread's draft. That is how the Reply
+button over a selection (`QuoteSelection.tsx`, drawn outside the scrolling viewport,
+whose paint containment would clip it) adds a quote, formatted by `state/quote.ts`.
+Copying goes through `util/clipboard.ts`, the webview's clipboard API, and `CopyButton`
+in `ui/kit` (the reply's copy button under each agent message).
+
 A project's icon is drawn everywhere by `ProjectIconView` (`ui/kit/ProjectIcon.tsx`),
 which also holds the curated set of lucide icons the picker offers and the palette: its
 colors are the `--brand`, `--red`, `--orange`, … variables of `styles.css`, so a project

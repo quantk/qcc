@@ -16,6 +16,7 @@ import {
 } from "../../ui/kit";
 import { itemKey, useUi } from "../../ui/registry";
 import { deferScrollWrites } from "./deferScrollWrites";
+import { QuoteSelection } from "./QuoteSelection";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Message, MessageContent, MessageFooter } from "@/components/ui/message";
@@ -122,6 +123,7 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
   }, [entries, start]);
 
   const viewportRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   // What the user opened in entries that scrolled out, for when they come back.
   const [memory] = useState(() => new Map<string, unknown>());
 
@@ -292,7 +294,7 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
 
   const items = virtualizer.getVirtualItems();
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div ref={frameRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       <div
         ref={viewportRef}
         role="region"
@@ -356,6 +358,7 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
         <ArrowDownIcon />
         <span className="sr-only">Scroll to end</span>
       </Button>
+      <QuoteSelection threadId={thread.id} viewport={viewportRef} frame={frameRef} />
     </div>
   );
 }

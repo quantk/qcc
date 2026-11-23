@@ -4,8 +4,8 @@
 //! version actually sent, and the shapes match its own `generate-ts` output. What the
 //! bridge relies on:
 //!
-//! * `initialize`, the `initialized` notification, then `thread/start` or
-//!   `thread/resume`, then one `turn/start` per turn;
+//! * `initialize`, the `initialized` notification, then `thread/start`,
+//!   `thread/resume`, or `thread/fork` for a fork, then one `turn/start` per turn;
 //! * everything a turn does arrives as notifications that name its `turnId`, ending
 //!   with `turn/completed`;
 //! * items have their own ids and lifecycle (`item/started`, deltas,
@@ -22,7 +22,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{Message, boundary, option};
+use qcc_plugin_sdk::{Message, boundary_at, option};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -69,6 +69,8 @@ pub struct Config {
     pub model: Option<String>,
     /// The thread to resume, if any.
     pub resume: Option<String>,
+    /// Fork `resume` through this turn of it (`thread/fork`) instead of resuming it.
+    pub fork_at: Option<String>,
     pub mode: Option<PermissionMode>,
     /// Developer instructions for the thread: what qcc tells the agent at the start
     /// of a session. Sent with `thread/start` and `thread/resume`.
@@ -91,6 +93,9 @@ pub struct Bridge {
     mode: Option<PermissionMode>,
     /// The thread being resumed, until the agent accepted or refused it.
     resume: Option<String>,
+    /// The turn of `resume` a fork of it goes through: the new thread keeps the
+    /// turns up to it and `resume` is left as it was.
+    fork_at: Option<String>,
     /// The agent's thread, once it is ready for prompts.
     thread: Option<String>,
     /// Prompts not sent yet: the agent is not ready or a turn is running.
@@ -188,14 +193,24 @@ fn text_item(item: &Value) -> Option<(TextChannel, String)> {
 impl Bridge {
     /// A bridge for a new agent process, and the handshake to send it.
     pub fn new(config: Config) -> (Self, Output) {
-        let Config { cwd, model, resume, mode, instructions, effort, writable_roots, mcp_servers } =
-            config;
+        let Config {
+            cwd,
+            model,
+            resume,
+            fork_at,
+            mode,
+            instructions,
+            effort,
+            writable_roots,
+            mcp_servers,
+        } = config;
         let mut bridge = Self {
             peer: Peer::default(),
             cwd,
             model,
             mode,
             resume,
+            fork_at,
             thread: None,
             waiting: VecDeque::new(),
             compacting: false,
@@ -311,12 +326,13 @@ impl Bridge {
         for (_, approval) in self.approvals.drain() {
             output.writes.push(self.peer.respond(&approval.id, json!({"decision": "cancel"})));
         }
-        match self.turn_id.take() {
-            Some(turn) => self.send_interrupt(turn, &mut output),
+        let turn = self.turn_id.take();
+        match &turn {
+            Some(turn) => self.send_interrupt(turn.clone(), &mut output),
             // `turn/start` has not been answered yet; interrupt as soon as it is.
             None => self.interrupt_pending = true,
         }
-        self.settle(TurnStatus::Interrupted, None, &mut output.deltas);
+        self.settle(TurnStatus::Interrupted, None, turn, &mut output.deltas);
         output
     }
 
@@ -381,7 +397,8 @@ impl Bridge {
                 self.thread = Some(thread);
                 self.send_next_prompt(output);
             }
-            (Call::Thread, Err(error)) if self.resume.is_some() => {
+            // A fork that failed must not quietly become a conversation of its own.
+            (Call::Thread, Err(error)) if self.resume.is_some() && self.fork_at.is_none() => {
                 // The old thread is gone on the agent's side. A fresh one loses the
                 // context, which the user has to know.
                 self.resume = None;
@@ -422,7 +439,7 @@ impl Bridge {
                 // The agent never took the prompt: no turn exists on its side.
                 self.in_flight = false;
                 self.interrupt_pending = false;
-                self.settle(TurnStatus::Failed, Some(error.message), &mut output.deltas);
+                self.settle(TurnStatus::Failed, Some(error.message), None, &mut output.deltas);
                 self.send_next_prompt(output);
             }
             // The turn's own `turn/completed` is what counts.
@@ -481,22 +498,35 @@ impl Bridge {
         if !config.is_empty() {
             params["config"] = Value::Object(config);
         }
-        match &self.resume {
-            Some(thread) => {
+        match (&self.resume, &self.fork_at) {
+            (Some(thread), Some(turn)) => {
+                params["threadId"] = json!(thread);
+                params["lastTurnId"] = json!(turn);
+                self.peer.request("thread/fork", params, Call::Thread)
+            }
+            (Some(thread), None) => {
                 params["threadId"] = json!(thread);
                 self.peer.request("thread/resume", params, Call::Thread)
             }
-            None => self.peer.request("thread/start", params, Call::Thread),
+            (None, _) => self.peer.request("thread/start", params, Call::Thread),
         }
     }
 
-    fn settle(&mut self, status: TurnStatus, error: Option<String>, deltas: &mut Vec<Delta>) {
+    /// Close the running turn. `turn` is Codex's id of it, if it has one: where a
+    /// fork from it goes through (`thread/fork` with `lastTurnId`).
+    fn settle(
+        &mut self,
+        status: TurnStatus,
+        error: Option<String>,
+        turn: Option<String>,
+        deltas: &mut Vec<Delta>,
+    ) {
         self.compacting = false;
         self.approvals.clear();
         self.steers_pending.clear();
         self.turn_id = None;
         if std::mem::take(&mut self.turn_open) {
-            deltas.push(boundary(status, error));
+            deltas.push(boundary_at(status, error, turn));
         }
     }
 
@@ -621,7 +651,8 @@ impl Bridge {
                     _ => (TurnStatus::Completed, None),
                 };
                 self.in_flight = false;
-                self.settle(status, error, deltas);
+                let turn = Some(str_field(turn, "id").to_owned()).filter(|id| !id.is_empty());
+                self.settle(status, error, turn, deltas);
                 self.send_next_prompt(output);
             }
             "error" => {
@@ -952,6 +983,38 @@ mod tests {
         let (mut bridge, _) = Bridge::new(Config { resume: Some("old".into()), ..config() });
         bridge.on_line(r#"{"id":1,"result":{}}"#);
         assert!(bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"old"}}}"#).deltas.is_empty());
+    }
+
+    #[test]
+    fn a_fork_goes_through_a_turn_and_each_turn_ends_at_its_id() {
+        let fork = || Config { resume: Some("old".into()), fork_at: Some("t1".into()), ..config() };
+        let (mut bridge, _) = Bridge::new(fork());
+        let asked = bridge.on_line(r#"{"id":1,"result":{}}"#);
+        assert_eq!(methods(&asked), ["initialized", "thread/fork"]);
+        let request: Value = serde_json::from_str(&asked.writes[1]).unwrap();
+        assert_eq!(request["params"]["threadId"], "old");
+        assert_eq!(request["params"]["lastTurnId"], "t1");
+        assert_eq!(request["params"]["cwd"], "/work");
+        let forked = bridge.on_line(r#"{"id":2,"result":{"thread":{"id":"new"}}}"#);
+        assert_eq!(forked.deltas, [Delta::SessionIdentity("new".into())]);
+
+        bridge.prompt("go");
+        bridge.on_line(&notify("turn/started", json!({"turn": {"id": "t9"}})));
+        let done = bridge.on_line(&notify(
+            "turn/completed",
+            json!({"turn": {"id": "t9", "status": "completed"}}),
+        ));
+        let [Delta::TurnBoundary(boundary)] = &done.deltas[..] else {
+            panic!("expected the boundary: {:?}", done.deltas);
+        };
+        assert_eq!(boundary.point.as_deref(), Some("t9"));
+
+        // A fork that fails is not quietly a new conversation.
+        let (mut bridge, _) = Bridge::new(fork());
+        bridge.on_line(r#"{"id":1,"result":{}}"#);
+        let refused = bridge.on_line(r#"{"id":2,"error":{"code":-32600,"message":"no turn"}}"#);
+        assert!(refused.fatal, "{refused:?}");
+        assert!(methods(&refused).is_empty(), "{refused:?}");
     }
 
     #[test]

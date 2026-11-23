@@ -48,7 +48,8 @@ impl Provider for Codex {
                 // is given go unused.
                 images: true,
                 rate_limits: true,
-                fork: ForkSupport::None,
+                // `thread/fork` goes through any turn that is over.
+                fork: ForkSupport::Any,
             },
         }
     }
@@ -65,6 +66,7 @@ impl Provider for Codex {
             cwd: start.cwd,
             model: start.model,
             resume: start.resume.clone(),
+            fork_at: start.fork_at.clone(),
             mode: start.permission_mode,
             instructions: context,
             effort: start.effort,
@@ -82,7 +84,8 @@ impl Provider for Codex {
         }
         // A new thread is named by the agent after the handshake; the bridge reports
         // it with `session-identity`.
-        Ok(SessionStarted { provider_session: start.resume })
+        // A fork is a new thread, named by the agent too.
+        Ok(SessionStarted { provider_session: start.resume.filter(|_| start.fork_at.is_none()) })
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {

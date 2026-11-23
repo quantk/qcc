@@ -8,5 +8,5 @@
 {"type":"item/text/delta","item_id":"item_1","text":"ok"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"ok"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":19951,"output_tokens":5,"cached_input_tokens":0},"last":{"input_tokens":19951,"output_tokens":5,"cached_input_tokens":0},"model_context_window":475000,"context_used":19956}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"01a1f020-f3b4-7523-af6d-35d8aaae7bf8"}
 {"type":"thread/status","status":"idle"}

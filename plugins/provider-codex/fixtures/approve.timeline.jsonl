@@ -21,5 +21,5 @@
 {"type":"item/text/delta","item_id":"item_3","text":"done"}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"done"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":44772,"output_tokens":151,"cached_input_tokens":34304},"last":{"input_tokens":22473,"output_tokens":5,"cached_input_tokens":22144},"model_context_window":475000,"context_used":22478}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"01a1de76-bcd9-7f92-92e5-e957e1094033"}
 {"type":"thread/status","status":"idle"}

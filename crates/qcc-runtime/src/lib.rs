@@ -19,5 +19,5 @@ mod timeline;
 pub use assembler::{DeltaAssembler, GrammarViolation};
 pub use engine::{EngineError, ThreadEngine};
 pub use mint::{IdMint, SequentialMint, UuidMint};
-pub use supervisor::{NewThread, Supervisor, SupervisorError};
+pub use supervisor::{ForkStart, NewThread, Supervisor, SupervisorError};
 pub use timeline::{Timeline, TimelineViolation};

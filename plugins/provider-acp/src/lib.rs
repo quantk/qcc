@@ -80,6 +80,7 @@ impl Provider for AcpProvider {
                 // As images when the agent says it takes them, by path otherwise.
                 images: true,
                 rate_limits: false,
+                fork: ForkSupport::None,
             },
         }
     }

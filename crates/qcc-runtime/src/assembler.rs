@@ -108,7 +108,7 @@ impl DeltaAssembler {
                     self.start_turn(&mut out);
                 }
             }
-            Delta::TurnBoundary { status, error, claim_if_idle } => {
+            Delta::TurnBoundary { status, error, claim_if_idle, point } => {
                 if self.turn.is_none() {
                     if !claim_if_idle {
                         self.violations.push(GrammarViolation::BoundaryWithoutTurn);
@@ -119,7 +119,7 @@ impl DeltaAssembler {
                     }
                     self.start_turn(&mut out);
                 }
-                self.settle_into(status, error, &mut out);
+                self.settle_into(status, error, point, &mut out);
             }
             Delta::ItemOpen { key, shape } => {
                 let Some(turn_id) = self.require_turn("item.open") else {
@@ -302,7 +302,7 @@ impl DeltaAssembler {
         out: &mut Vec<EventPayload>,
     ) {
         if self.turn.is_some() {
-            self.settle_into(status, error, out);
+            self.settle_into(status, error, None, out);
         } else {
             self.cancel_interactions(out);
         }
@@ -319,6 +319,7 @@ impl DeltaAssembler {
         &mut self,
         status: TurnStatus,
         error: Option<String>,
+        point: Option<String>,
         out: &mut Vec<EventPayload>,
     ) {
         let Some(turn_id) = self.turn.take() else {
@@ -332,7 +333,7 @@ impl DeltaAssembler {
             out.push(EventPayload::ItemCompleted { turn_id: turn_id.clone(), item });
         }
         self.input_pending = false;
-        out.push(EventPayload::TurnCompleted { turn_id, status, error });
+        out.push(EventPayload::TurnCompleted { turn_id, status, error, point });
     }
 
     fn cancel_interactions(&mut self, out: &mut Vec<EventPayload>) {

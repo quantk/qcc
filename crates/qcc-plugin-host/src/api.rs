@@ -28,6 +28,8 @@ pub struct SessionStart {
     pub effort: Option<String>,
     /// Provider session handle from an earlier start of this thread.
     pub resume: Option<String>,
+    /// Fork `resume` from this point instead of continuing it.
+    pub fork_at: Option<String>,
     pub prompt: Option<UserInput>,
     /// Absent: the agent's own configuration decides.
     pub permission_mode: Option<PermissionMode>,

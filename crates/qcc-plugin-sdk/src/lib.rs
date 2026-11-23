@@ -23,6 +23,7 @@
 //!                 list_skills: false,
 //!                 context_usage: false,
 //!                 rate_limits: false,
+//!                 fork: ForkSupport::None,
 //!             },
 //!         }
 //!     }
@@ -104,9 +105,9 @@ pub mod prelude {
     pub use crate::types::*;
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
-        attachments_note, boundary, comments, completions, deltas, files, kv, log, message,
-        notifications, option, process, session_context, skills_prompt, threads, timers, views,
-        with_notes,
+        attachments_note, boundary, boundary_at, comments, completions, deltas, files, kv, log,
+        message, notifications, option, process, session_context, skills_prompt, threads, timers,
+        views, with_notes,
     };
 }
 
@@ -426,7 +427,13 @@ fn extra_dirs_prompt(dirs: &[String]) -> Option<String> {
 
 /// The end of the running turn, as a bridge reports it.
 pub fn boundary(status: TurnStatus, error: Option<String>) -> Delta {
-    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false })
+    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false, point: None })
+}
+
+/// The end of the running turn, with where the session stands after it: what a fork
+/// from this turn starts from (`session-start.fork-at`).
+pub fn boundary_at(status: TurnStatus, error: Option<String>, point: Option<String>) -> Delta {
+    Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: false, point })
 }
 
 /// One choice of an approval prompt.

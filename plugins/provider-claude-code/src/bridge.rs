@@ -766,7 +766,12 @@ impl Bridge {
         if !self.turn_open {
             // A result nobody asked for: let the assembler decide whether input was
             // waiting for it.
-            deltas.push(Delta::TurnBoundary(TurnBoundary { status, error, claim_if_idle: true }));
+            deltas.push(Delta::TurnBoundary(TurnBoundary {
+                status,
+                error,
+                claim_if_idle: true,
+                point: None,
+            }));
             return;
         }
         self.turn_open = false;

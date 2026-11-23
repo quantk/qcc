@@ -73,6 +73,7 @@ impl Provider for ClaudeCode {
                 context_usage: true,
                 images: true,
                 rate_limits: true,
+                fork: ForkSupport::None,
             },
         }
     }

@@ -134,6 +134,10 @@ interface types {
     error: option<string>,
     /// With no turn open, own one only if submitted input is still waiting for a turn.
     claim-if-idle: bool,
+    /// Where the session stands once the turn is over, in the provider's own terms
+    /// (a message id, a turn id): what a fork from this turn starts from, handed
+    /// back as `session-start.fork-at`. Only from a provider that forks.
+    point: option<string>,
   }
 
   record item-open {
@@ -332,6 +336,17 @@ interface types {
     full,
   }
 
+  /// From which points of its sessions a provider forks them: starts a new session
+  /// whose conversation is an old one's up to there, leaving the old one as it was.
+  enum fork-support {
+    /// It cannot.
+    none,
+    /// Only a whole session as it is now: from its latest turn.
+    latest,
+    /// From the end of any turn whose boundary carried a `point`.
+    any,
+  }
+
   /// Session-behaviour facts, reported by the code that implements them.
   record provider-capabilities {
     /// A session can be resumed from its `provider-session` handle.
@@ -359,6 +374,9 @@ interface types {
     /// The provider reports its account's usage limits: `rate-limits` deltas during
     /// sessions, and an answer to `read-rate-limits` without one.
     rate-limits: bool,
+    /// Whether and from where it forks a session (`session-start.fork-at`). A turn
+    /// can be forked from only if its boundary carried a `point`.
+    fork: fork-support,
   }
 
   record provider-info {
@@ -646,8 +664,15 @@ interface types {
     /// How hard the model thinks: one of the levels its `model-info` lists.
     /// Absent: the agent's own default.
     effort: option<string>,
-    /// A `provider-session` handle returned by an earlier start of this thread.
+    /// A `provider-session` handle returned by an earlier start of this thread, or,
+    /// with `fork-at`, of the thread it was forked from.
     resume: option<string>,
+    /// Fork `resume` instead of continuing it: start a new session whose conversation
+    /// is `resume`'s up to this point (a turn boundary's `point`), and leave `resume`
+    /// as it was. Only to a provider that declared `fork`, with `resume`; for `latest`,
+    /// the point is always that session's latest. The new session's handle is the
+    /// one returned, or the `session-identity` reported later; never `resume`.
+    fork-at: option<string>,
     /// The first user message, if the session starts with one.
     prompt: option<string>,
     /// What qcc tells the agent along with the first message, as with

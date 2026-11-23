@@ -48,6 +48,7 @@ impl Provider for Codex {
                 // is given go unused.
                 images: true,
                 rate_limits: true,
+                fork: ForkSupport::None,
             },
         }
     }

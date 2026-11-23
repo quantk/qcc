@@ -183,6 +183,7 @@ impl Core {
                     started_by: p.started_by,
                     hidden: p.hidden,
                     automation: automation.as_ref().map(|(id, _)| id.clone()),
+                    fork: None,
                 },
                 now,
             )

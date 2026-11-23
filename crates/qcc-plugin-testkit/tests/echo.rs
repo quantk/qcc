@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use qcc_domain::{
-    Attachment, EventPayload, InteractionResolution, ItemStatus, PermissionMode,
+    Attachment, EventPayload, ForkSupport, InteractionResolution, ItemStatus, PermissionMode,
     ProviderCapabilities, TurnStatus, UserInput,
 };
 use qcc_plugin_host::services::DirKv;
@@ -55,6 +55,7 @@ fn declares_its_provider_and_its_ui() {
             context_usage: true,
             images: true,
             rate_limits: true,
+            fork: ForkSupport::Any,
         }
     );
     assert_eq!(harness.handle().id(), "provider-echo");
@@ -385,4 +386,34 @@ fn images_reach_a_provider_that_looks_at_them_with_their_bytes() {
         })
         .unwrap();
     assert_eq!(submitted, 2);
+}
+
+#[test]
+fn a_fork_starts_with_the_turns_up_to_its_point_and_leaves_the_session_alone() {
+    let mut harness = echo();
+    harness.start(Some("one")).unwrap();
+    harness.input("two").unwrap();
+    harness.input("/history").unwrap();
+    // Each turn ends where a fork from it starts: after that many turns.
+    assert_eq!(harness.points(), [Some("1".into()), Some("2".into()), Some("3".into())]);
+    assert_eq!(harness.agent_messages().last().unwrap(), "1. one\n2. two");
+    let source = harness.thread().provider_session.clone().unwrap();
+    harness.stop().unwrap();
+
+    harness.fork(&source, "1", Some("/history")).unwrap();
+    assert_eq!(harness.agent_messages().last().unwrap(), "1. one");
+    let fork = harness.thread().provider_session.clone().unwrap();
+    assert_ne!(fork, source, "a fork is a session of its own");
+    harness.stop().unwrap();
+
+    // The fork goes on with its own turns.
+    harness.resume(Some("/history")).unwrap();
+    assert_eq!(harness.agent_messages().last().unwrap(), "1. one\n2. /history");
+    harness.stop().unwrap();
+    // The session it was forked from still has every turn.
+    harness.fork(&source, "3", Some("/history")).unwrap();
+    assert_eq!(harness.agent_messages().last().unwrap(), "1. one\n2. two\n3. /history");
+    harness.stop().unwrap();
+    harness.fork(&source, "9", None).expect_err("there is no ninth turn");
+    harness.assert_conformant();
 }

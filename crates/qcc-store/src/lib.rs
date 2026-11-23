@@ -362,44 +362,82 @@ impl Store {
     }
 
     /// The conversation of a thread since it was last started afresh: messages handed
-    /// to the agent and the agent's settled replies, oldest first. With
+    /// to the agent and the agent's settled replies, oldest first. A forked thread's
+    /// conversation begins with the one it was forked from, up to the fork. With
     /// `last_agent_only`, just the latest reply.
     pub fn transcript(&self, id: &ThreadId, last_agent_only: bool) -> Result<Vec<TranscriptEntry>> {
-        const REPLY: &str = "json_extract(payload, '$.type') = 'item/completed' \
-                             AND json_extract(payload, '$.item.type') = 'agentMessage'";
-        let sql = if last_agent_only {
-            format!(
-                "SELECT payload FROM events WHERE thread_id = ?1 AND {REPLY} \
-                 ORDER BY seq DESC LIMIT 1"
-            )
-        } else {
-            // The conversation since the user last started it afresh.
-            format!(
-                "SELECT payload FROM events WHERE thread_id = ?1 AND \
-                 (json_extract(payload, '$.type') = 'input/submitted' OR ({REPLY})) AND \
-                 seq > (SELECT COALESCE(MAX(seq), 0) FROM events WHERE thread_id = ?1 AND \
-                        json_extract(payload, '$.type') = 'thread/reset') \
-                 ORDER BY seq"
-            )
-        };
-        let conn = self.lock();
-        let mut statement = conn.prepare(&sql)?;
-        let rows = statement.query_map([id.as_str()], |row| row.get::<_, String>(0))?;
-        let mut entries = Vec::new();
-        for row in rows {
-            let entry = match decode(&row?)? {
-                EventPayload::InputSubmitted { text, .. } => {
-                    TranscriptEntry { role: Role::User, text }
-                }
-                EventPayload::ItemCompleted {
-                    item: Item { shape: ItemShape::AgentMessage { text }, .. },
-                    ..
-                } => TranscriptEntry { role: Role::Agent, text },
-                _ => continue,
-            };
-            entries.push(entry);
+        if !last_agent_only {
+            return self.conversation(id, u64::MAX, 0);
         }
-        Ok(entries)
+        let sql = format!(
+            "SELECT payload FROM events WHERE thread_id = ?1 AND {REPLY} ORDER BY seq DESC LIMIT 1"
+        );
+        let latest = {
+            let conn = self.lock();
+            let mut statement = conn.prepare(&sql)?;
+            let rows = statement.query_map([id.as_str()], |row| row.get::<_, String>(0))?;
+            rows.map(|row| Ok(transcript_entry(decode(&row?)?))).collect::<Result<Vec<_>>>()?
+        };
+        let latest: Vec<_> = latest.into_iter().flatten().collect();
+        if !latest.is_empty() {
+            return Ok(latest);
+        }
+        // A fork that has not replied yet: its latest reply is the one it was forked at.
+        Ok(match self.thread(id)?.and_then(|thread| thread.forked_from) {
+            Some(origin) => self
+                .conversation(&origin.thread, origin.seq, 1)?
+                .into_iter()
+                .rev()
+                .find(|entry| entry.role == Role::Agent)
+                .into_iter()
+                .collect(),
+            None => Vec::new(),
+        })
+    }
+
+    /// The conversation of a thread up to `until` (a sequence number), since it was
+    /// last started afresh before then; `depth` counts the forks followed so far.
+    fn conversation(
+        &self,
+        id: &ThreadId,
+        until: u64,
+        depth: usize,
+    ) -> Result<Vec<TranscriptEntry>> {
+        /// Forks of forks of forks are rare; a cycle cannot happen but must not hang.
+        const MAX_FORK_DEPTH: usize = 32;
+        let until = i64::try_from(until).unwrap_or(i64::MAX);
+        let (entries, reset) = {
+            let conn = self.lock();
+            let reset: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(seq), 0) FROM events WHERE thread_id = ?1 AND seq <= ?2 AND \
+                 json_extract(payload, '$.type') = 'thread/reset'",
+                rusqlite::params![id.as_str(), until],
+                |row| row.get(0),
+            )?;
+            let sql = format!(
+                "SELECT payload FROM events WHERE thread_id = ?1 AND seq > ?2 AND seq <= ?3 AND \
+                 (json_extract(payload, '$.type') = 'input/submitted' OR ({REPLY})) ORDER BY seq"
+            );
+            let mut statement = conn.prepare(&sql)?;
+            let rows = statement
+                .query_map(rusqlite::params![id.as_str(), reset, until], |row| {
+                    row.get::<_, String>(0)
+                })?;
+            let mut entries = Vec::new();
+            for row in rows {
+                entries.extend(transcript_entry(decode(&row?)?));
+            }
+            (entries, reset > 0)
+        };
+        if reset || depth >= MAX_FORK_DEPTH {
+            return Ok(entries);
+        }
+        let Some(origin) = self.thread(id)?.and_then(|thread| thread.forked_from) else {
+            return Ok(entries);
+        };
+        let mut conversation = self.conversation(&origin.thread, origin.seq, depth + 1)?;
+        conversation.extend(entries);
+        Ok(conversation)
     }
 
     /// Every project, oldest first. Projects are settings, not history: a row is
@@ -638,10 +676,28 @@ fn save_thread(tx: &Transaction<'_>, thread: &Thread) -> Result<()> {
     Ok(())
 }
 
+/// What counts as the agent's reply in a transcript: a settled agent message.
+const REPLY: &str = "json_extract(payload, '$.type') = 'item/completed' \
+                     AND json_extract(payload, '$.item.type') = 'agentMessage'";
+
+/// A message of a transcript, if the event is one.
+fn transcript_entry(payload: EventPayload) -> Option<TranscriptEntry> {
+    match payload {
+        EventPayload::InputSubmitted { text, .. } => {
+            Some(TranscriptEntry { role: Role::User, text })
+        }
+        EventPayload::ItemCompleted {
+            item: Item { shape: ItemShape::AgentMessage { text }, .. },
+            ..
+        } => Some(TranscriptEntry { role: Role::Agent, text }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use qcc_domain::{Delta, ItemKey, ProjectIcon, TextChannel, ThreadStatus, TurnStatus};
-    use qcc_runtime::{NewThread, SequentialMint, Supervisor};
+    use qcc_runtime::{ForkStart, NewThread, SequentialMint, Supervisor};
 
     use super::*;
 
@@ -801,6 +857,7 @@ mod tests {
             started_by: None,
             hidden: false,
             automation: None,
+            fork: None,
         }
     }
 
@@ -830,6 +887,7 @@ mod tests {
                 status: TurnStatus::Completed,
                 error: None,
                 claim_if_idle: false,
+                point: None,
             }],
             30,
         ));
@@ -872,6 +930,55 @@ mod tests {
         assert_eq!(store.transcript(&"a".into(), true).unwrap(), [agent("hi")]);
         assert_eq!(store.transcript(&"b".into(), false).unwrap(), [user("hello from b")]);
         assert_eq!(store.transcript(&"b".into(), true).unwrap(), []);
+    }
+
+    #[test]
+    fn a_fork_s_conversation_begins_with_the_one_it_was_forked_from() {
+        let store = Store::open_in_memory().unwrap();
+        let mut supervisor = Supervisor::new(|| Box::new(SequentialMint::default()));
+        let mut journal = scenario(&mut supervisor);
+        let (turn, seq) = journal
+            .iter()
+            .find_map(|event| match &event.payload {
+                EventPayload::TurnCompleted { turn_id, .. } if event.thread_id.as_str() == "a" => {
+                    Some((turn_id.clone(), event.seq))
+                }
+                _ => None,
+            })
+            .unwrap();
+        // `a` goes on after the fork; the fork does not hear of it.
+        let engine = supervisor.engine(&"a".into()).unwrap();
+        journal.extend(engine.submit_input("later in a".into(), 40));
+        let mut fork = new_thread("f");
+        fork.fork = Some(ForkStart {
+            origin: qcc_domain::ForkOrigin { thread: "a".into(), turn, seq },
+            provider_session: "sess-a".into(),
+            point: "p1".into(),
+        });
+        journal.extend(supervisor.create(fork, 50).unwrap());
+        store.append(&journal).unwrap();
+
+        let user = |text: &str| TranscriptEntry { role: Role::User, text: text.into() };
+        let agent = |text: &str| TranscriptEntry { role: Role::Agent, text: text.into() };
+        assert_eq!(
+            store.transcript(&"f".into(), false).unwrap(),
+            [user("hello from a"), agent("hi")]
+        );
+        assert_eq!(store.transcript(&"f".into(), true).unwrap(), [agent("hi")]);
+        let thread = store.thread(&"f".into()).unwrap().unwrap();
+        assert_eq!(thread.provider_session.as_deref(), Some("sess-a"));
+        assert_eq!(thread.fork_at.as_deref(), Some("p1"));
+
+        let engine = supervisor.engine(&"f".into()).unwrap();
+        store.append(&engine.submit_input("in the fork".into(), 60)).unwrap();
+        assert_eq!(
+            store.transcript(&"f".into(), false).unwrap(),
+            [user("hello from a"), agent("hi"), user("in the fork")]
+        );
+        // Started afresh, the fork's conversation is its own.
+        store.append(&engine.record(EventPayload::ConversationReset, 70)).unwrap();
+        store.append(&engine.submit_input("fresh".into(), 80)).unwrap();
+        assert_eq!(store.transcript(&"f".into(), false).unwrap(), [user("fresh")]);
     }
 
     #[test]
@@ -934,6 +1041,7 @@ mod tests {
                     status: TurnStatus::Failed,
                     error: None,
                     claim_if_idle: false,
+                    point: None,
                 },
             ],
             ts + 500,

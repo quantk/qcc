@@ -62,6 +62,10 @@ pub enum Delta {
         /// turn. A provider-terminal fallback signal on an idle thread settles nothing.
         #[serde(default)]
         claim_if_idle: bool,
+        /// Where the session stands once the turn is over, in the provider's own
+        /// terms: what a fork from this turn starts from (`fork-at`).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        point: Option<String>,
     },
 
     #[serde(rename = "item.open")]

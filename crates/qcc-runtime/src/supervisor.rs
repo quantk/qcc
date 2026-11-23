@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use qcc_domain::{
-    AutomationId, EventPayload, PermissionMode, ProjectId, ProviderId, Thread, ThreadEnvironment,
-    ThreadEvent, ThreadId, ThreadStatus, ThreadUsage,
+    AutomationId, EventPayload, ForkOrigin, PermissionMode, ProjectId, ProviderId, Thread,
+    ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, ThreadUsage,
 };
 
 use crate::engine::{ThreadEngine, sorted};
@@ -33,11 +33,25 @@ pub struct NewThread {
     pub hidden: bool,
     /// The automation whose run this thread is.
     pub automation: Option<AutomationId>,
+    /// The turn of another thread this one goes on from.
+    pub fork: Option<ForkStart>,
+}
+
+/// What a forked thread starts from: the provider session of the turn it was forked
+/// from, and the point in it.
+pub struct ForkStart {
+    pub origin: ForkOrigin,
+    pub provider_session: String,
+    pub point: String,
 }
 
 impl NewThread {
     /// The thread as it is the moment it is created.
     pub fn into_thread(self, now: u64) -> Thread {
+        let (forked_from, provider_session, fork_at) = match self.fork {
+            Some(fork) => (Some(fork.origin), Some(fork.provider_session), Some(fork.point)),
+            None => (None, None, None),
+        };
         Thread {
             id: self.id,
             provider: self.provider,
@@ -53,7 +67,7 @@ impl NewThread {
             permission_mode: self.permission_mode,
             title: None,
             status: ThreadStatus::Idle,
-            provider_session: None,
+            provider_session,
             created_at: now,
             updated_at: now,
             last_seq: 0,
@@ -72,6 +86,8 @@ impl NewThread {
             context: None,
             archived: false,
             handover: false,
+            forked_from,
+            fork_at,
         }
     }
 }

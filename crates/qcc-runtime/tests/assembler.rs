@@ -48,7 +48,7 @@ fn item(item: &Item) -> String {
 fn render(payload: &EventPayload) -> String {
     match payload {
         EventPayload::TurnStarted { turn_id } => format!("turn/started {turn_id}"),
-        EventPayload::TurnCompleted { turn_id, status, error } => match error {
+        EventPayload::TurnCompleted { turn_id, status, error, .. } => match error {
             Some(error) => format!("turn/completed {turn_id} {status:?} {error:?}"),
             None => format!("turn/completed {turn_id} {status:?}"),
         },

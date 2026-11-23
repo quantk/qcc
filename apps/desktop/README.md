@@ -4,7 +4,8 @@ The control panel for qcc: a Tauri window over the daemon's API.
 
 ```
 src-tauri/        the backend: one connection to qccd, requests and notifications passed through;
-                  system notifications (notifications.rs), which the webview cannot show
+                  system notifications (notifications.rs), which the webview cannot show, and
+                  starting the user's editor on a directory (editor.rs)
 src/api/          the typed door to the daemon; protocol.gen.ts is generated from qcc-protocol
 src/state/        the store (mirror of the daemon) and pure folds: timeline, diff, block layout,
                   delegated threads (children.ts: states, counts, filters of the Agents tab)
@@ -83,7 +84,7 @@ works as a screen, a tab or a panel tab.
 | Extension point | Call | Built-in example |
 | --- | --- | --- |
 | A block: a screen, a sidebar section, a thread tab, a side panel tab or a chip beside the composer | `ui.block` | `modules/overview`, `modules/live`, `modules/metrics`, `modules/limits`, `modules/timeline`, `modules/changes`, `modules/insights`, `modules/context`, `modules/lineage`, `modules/mcp`, `modules/skills` |
-| A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage` |
+| A control in the thread header | `ui.threadAction` | `modules/thread-controls`, `modules/lineage`, `modules/open-in-editor` |
 | An entry of a thread's right-click menu | `ui.threadMenuItem` | `modules/thread-menu`, `modules/projects` |
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |

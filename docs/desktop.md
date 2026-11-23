@@ -178,6 +178,30 @@ to the agent.
 In a narrow window the panel opens over the thread, and `Esc` closes it. This is the default
 layout: the panel's tabs are blocks like everything else (see [Block layout](#block-layout)).
 
+### Open in editor
+
+The button left of the side panel's in the thread header (`Ctrl+Shift+E`, "Open in editor" in
+the thread menu, or the palette) opens the directory the thread works in: its `cwd`, which for a
+thread in a git worktree is the worktree. It is disabled, with the reason in its tooltip, while
+the worktree is not made yet or could not be made, once it is removed, and when the directory is
+gone from the disk. If the editor cannot be started or exits with an error at once, the app says
+so with what it printed.
+
+The editor is the "Editor" command in Settings, kept in this window like the interface scale:
+`code`, `zed`, `idea --new-window`, or a full path. Quotes and backslashes group words as in a
+shell. The directory is passed as the last argument, or in place of `{path}` wherever the command
+has it (`--folder={path}`). With the field empty the app takes the first of `code`, `cursor`,
+`zed`, `zeditor`, `windsurf`, `codium`, `subl`, `idea`, `idea-ultimate`, `idea-community` it finds
+(Settings shows which), and with none of them, the system's default app for a directory
+(`xdg-open`, `open`, Explorer).
+
+An app started from a desktop menu does not see the PATH of your shell, so programs are looked up
+in the app's own PATH, then in the PATH your login shell (`$SHELL -l`, asked once, for at most
+three seconds) sets up, then in the usual places: `~/.local/bin`, `~/.nix-profile/bin`,
+`/etc/profiles/per-user/$USER/bin`, `/run/current-system/sw/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin`, `/usr/bin`, `/snap/bin` and Flatpak's exports. The editor starts with all of them
+in its PATH, in the thread's directory, apart from the app: closing the app leaves it open.
+
 ### Side panel width
 
 The left (thread list) and right panels can be resized by dragging their edge with the mouse (or
@@ -186,7 +210,7 @@ are remembered, and the thread always stays visible.
 
 ### Thread menu
 
-Right-click a thread in the sidebar or a card in the overview: open, rename
+Right-click a thread in the sidebar or a card in the overview: open, open in editor, rename
 (`qcc thread rename`), move to a project, mark as read or unread, copy the id or the path, stop the
 turn, archive. Modules add items through `ui.threadMenuItem`.
 
@@ -245,7 +269,7 @@ read but take no messages until it is back on. Turning off a plugin whose agents
 first; confirming cuts their turns short. See
 [Turning plugins on and off](plugins.md#turning-plugins-on-and-off). Interface scale: `Ctrl+Plus` / `Ctrl+Minus`, as in a
 browser, or the buttons on the "Settings" screen; it can be reset to 100% there or from the
-palette.
+palette. Editor: what [Open in editor](#open-in-editor) runs.
 
 ### Notifications
 
@@ -339,8 +363,9 @@ blocks (from a plugin that connected later) take their default places.
 
 The Tauri backend is a thin proxy: it keeps one connection to `qccd`, passes requests and
 notifications through as they are, and starts the daemon itself if it is not running. The one
-thing it does on its own is show system notifications (`show_notification`), which the webview
-cannot. The daemon
+things it does on its own are what the webview cannot: show system notifications
+(`show_notification`) and open a thread's directory in an editor (`open_in_editor`,
+`detect_editor`, `directory_exists`; `src-tauri/src/editor.rs`). The daemon
 outlives the window: agents keep working when the app is closed. TypeScript types are generated
 from `qcc-protocol` (`apps/desktop/src/api/protocol.gen.ts`); a test fails if the file is out of
 date:

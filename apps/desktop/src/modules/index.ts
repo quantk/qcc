@@ -14,6 +14,7 @@ import { metricsModule } from "./metrics";
 import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
 import { notificationsModule } from "./notifications";
+import { openInEditorModule } from "./open-in-editor";
 import { overviewModule } from "./overview";
 import { pluginCommandsModule } from "./plugin-commands";
 import { pluginUiModule } from "./plugin-ui";
@@ -32,6 +33,7 @@ export const builtinModules: UiModule[] = [
   lineageModule,
   threadControlsModule,
   threadMenuModule,
+  openInEditorModule,
   newThreadModule,
   navigationModule,
   projectsModule,

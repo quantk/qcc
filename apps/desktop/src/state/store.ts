@@ -463,6 +463,9 @@ export class AppStore {
 
   // ----- actions ------------------------------------------------------------------
 
+  /** Show an error the app itself ran into, the way the daemon's are shown. */
+  showError = (message: string) => this.set({ error: message });
+
   dismissError = () => this.set({ error: null });
 
   notify = (notice: string) => this.set({ notice });

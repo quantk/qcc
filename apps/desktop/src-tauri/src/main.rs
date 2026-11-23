@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod editor;
 mod notifications;
 
 use std::os::unix::process::CommandExt;
@@ -114,6 +115,32 @@ async fn show_notification(
     tauri::async_runtime::spawn_blocking(move || notifications::show(app, &title, &body, thread))
         .await
         .map_err(|error| error.to_string())?
+}
+
+/// Open a thread's directory in the user's editor: `command` is the one set in the
+/// app's settings, absent or empty to find one. Says what opened it.
+#[tauri::command]
+async fn open_in_editor(path: String, command: Option<String>) -> Result<String, String> {
+    // Finding the editor may ask a login shell, and starting it waits a moment to
+    // see that it did not fail at once.
+    tauri::async_runtime::spawn_blocking(move || {
+        editor::open(std::path::Path::new(&path), command.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// The editor used when the settings name none, for the settings to show.
+#[tauri::command]
+async fn detect_editor() -> Option<String> {
+    let found = tauri::async_runtime::spawn_blocking(editor::detect).await.ok()??;
+    Some(found.display().to_string())
+}
+
+/// Whether a thread's directory is still there, so its header can say it cannot be opened.
+#[tauri::command]
+async fn directory_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_dir()
 }
 
 #[tauri::command]
@@ -283,7 +310,10 @@ fn main() {
             rpc,
             daemon_state,
             attachment_preview,
-            show_notification
+            show_notification,
+            open_in_editor,
+            detect_editor,
+            directory_exists
         ])
         .run(tauri::generate_context!())
         .expect("the qcc desktop app runs");

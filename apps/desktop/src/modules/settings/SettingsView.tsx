@@ -40,6 +40,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { EditorSetting } from "../open-in-editor/EditorSetting";
 import { LAYOUT_SECTION, LayoutSettings } from "./LayoutSettings";
 import { setZoom, useZoom } from "./zoom";
 
@@ -128,6 +129,7 @@ export function SettingsView() {
           </Setting>
           <ExamplesSetting />
           <ZoomSetting />
+          <EditorSetting Setting={Setting} />
         </Section>
         <div id={LAYOUT_SECTION}>
           <Section title="Layout" hint="Which blocks the window shows and where: screens, sidebar, a thread's tabs, its side panel and the chips beside its composer.">

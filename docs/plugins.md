@@ -169,6 +169,20 @@ the bridge whatever permission request still comes. How the bundled providers do
 [Permission mode](agents.md#permission-mode). A plugin that starts threads can check the list
 (`threads::providers`) and fall back when an agent does not offer the mode, as `reviewers` does.
 
+## Forking sessions
+
+A provider that can start a new session from a point of an old one, leaving the old one as it
+was, declares `ProviderCapabilities::fork`: `ForkSupport::Any` for any turn, `Latest` for only the
+session as it is now (ACP's `session/fork`), `None` otherwise. The bridge ends each turn with a
+point (`qcc_plugin_sdk::boundary_at`, or `TurnBoundary::point`): whatever names, in its agent's
+terms, where the session stands after the turn — Claude Code's last message uuid, Codex's turn id.
+qcc keeps it with the turn and, to fork the thread from there, starts the new thread's first
+session with `SessionStart::resume` set to that turn's session and `fork_at` to the point. The
+bridge makes the fork and names it (`SessionStarted::provider_session`, or `session-identity`
+later), never with `resume`'s name; a fork the agent refuses fails the session rather than
+starting an empty one. A turn without a point cannot be forked from. `plugins/provider-echo`
+forks from any turn; `qcc_plugin_testkit::Harness::fork` and `points` test a bridge's forks.
+
 ## Installing and permissions
 
 An installed plugin lives in `<data>/plugins/<id>/`. A third-party plugin is granted permissions by

@@ -115,6 +115,16 @@ as a markdown quote (`> ` before every line) after whatever is typed there, a bl
 and leaves the caret under the quote. The button goes away with the selection, on scrolling, on
 Escape or on a click elsewhere.
 
+Beside the copy button of each turn's last reply, a **…** menu holds what can be done from that
+reply; for now, **Fork the thread from here…** (see [Forking a
+thread](agents.md#forking-a-thread)). An entry that cannot be used is greyed out, and its tooltip
+says why (opencode forks only from its latest reply; a reply from before qcc could fork has no
+point to fork from). The dialog asks where the fork works — the same directory, or a new worktree,
+the default for a thread that has one, with a word on what does not go along — and for an optional
+first message, then opens the fork. A fork has a button back to its thread in the header, and its
+timeline starts with a "Forked from …" line; **Show the conversation before** unfolds that
+thread's conversation up to the fork above the fork's own, dimmed.
+
 ### Mermaid
 
 A ` ```mermaid ` block in an agent's answer is drawn as a diagram (in the light or dark theme),

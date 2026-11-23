@@ -11,6 +11,7 @@ qcc thread wait <id>… [--any] [--timeout 100]   # wait until the threads finis
 qcc thread list --parent <id>                  # children; without --parent, everything as a tree
 qcc thread parent <id> <parent-id>             # move a thread under another one; none makes it standalone
 qcc thread archive <id> [--force] [--no-descendants]   # put the thread and everything under it away
+qcc thread fork <id> [<turn>] --prompt '…'     # try another way from an earlier turn, leaving the thread as it is
 ```
 
 A child inherits from its parent whatever is not set explicitly at start: the provider, the

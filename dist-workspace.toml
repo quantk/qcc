@@ -1,0 +1,39 @@
+# Release configuration for `dist` (https://opensource.axo.dev/cargo-dist/).
+# It builds `qcc` and `qccd`, the shell installers, and writes
+# .github/workflows/release.yml; after changing this file run `dist generate`.
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.33.0"
+ci = "github"
+installers = ["shell"]
+# No Windows: qccd listens on a unix socket.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+# Both binaries land in the same directory: qccd hands agents the `qcc` next to it.
+install-path = ["$XDG_BIN_HOME/", "$XDG_DATA_HOME/../bin", "~/.local/bin"]
+install-updater = false
+# dist would pick README.ru.md on its own.
+auto-includes = false
+include = ["README.md"]
+pr-run-mode = "plan"
+# Build only the released packages: the workspace also holds the desktop app,
+# which needs GUI libraries the dist runners do not have.
+precise-builds = true
+# The bundled plugins are compiled to wasm32-wasip2 by crates/qcc-plugins-bundle/build.rs.
+github-build-setup = "../build-setup.yml"
+# The desktop app: Tauri bundles with qccd and qcc inside, built from the archives above.
+global-artifacts-jobs = ["./desktop"]
+# Linux on Ubuntu 22.04 for an older glibc, aarch64 on a native arm runner;
+# both macOS targets on Apple silicon (x86_64 is cross-compiled).
+[dist.github-custom-runners]
+x86_64-unknown-linux-gnu = "ubuntu-22.04"
+aarch64-unknown-linux-gnu = "ubuntu-22.04-arm"
+x86_64-apple-darwin = "macos-14"
+aarch64-apple-darwin = "macos-14"
+global = "ubuntu-22.04"

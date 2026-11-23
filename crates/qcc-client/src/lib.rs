@@ -9,8 +9,9 @@ use qcc_domain::{ThreadEvent, ThreadId};
 use qcc_protocol::Method;
 use qcc_protocol::jsonrpc::{Incoming, Request, RpcError};
 use qcc_protocol::methods::{
-    THREAD_EVENT, ThreadEventNotification, ThreadEvents, ThreadEventsParams, ThreadUnsubscribe,
-    ThreadUnsubscribeParams,
+    ArchiveProgress, THREAD_ARCHIVE_PROGRESS, THREAD_EVENT, ThreadArchive, ThreadArchiveParams,
+    ThreadArchiveProgressNotification, ThreadArchiveResult, ThreadEventNotification, ThreadEvents,
+    ThreadEventsParams, ThreadUnsubscribe, ThreadUnsubscribeParams,
 };
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -39,6 +40,8 @@ pub enum ClientError {
 /// made after that fails at once instead of waiting for an answer that cannot come.
 type Pending = Arc<Mutex<Option<HashMap<u64, oneshot::Sender<Result<Value, RpcError>>>>>>;
 type Subscriptions = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<ThreadEvent>>>>;
+/// Archives that report how they go, by their `progress` id.
+type Progress = Arc<Mutex<HashMap<u64, mpsc::UnboundedSender<Vec<ArchiveProgress>>>>>;
 
 /// A notification as the daemon sent it.
 #[derive(Debug, Clone, PartialEq)]
@@ -52,6 +55,7 @@ pub struct Client {
     writer: tokio::sync::Mutex<OwnedWriteHalf>,
     pending: Pending,
     subscriptions: Subscriptions,
+    progress: Progress,
     next_id: AtomicU64,
 }
 
@@ -82,10 +86,12 @@ impl Client {
             writer: tokio::sync::Mutex::new(writer),
             pending: Arc::new(Mutex::new(Some(HashMap::new()))),
             subscriptions: Arc::default(),
+            progress: Arc::default(),
             next_id: AtomicU64::new(1),
         });
 
         let (pending, subscriptions) = (client.pending.clone(), client.subscriptions.clone());
+        let progress = client.progress.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(reader).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -124,6 +130,18 @@ impl Client {
                             subscriptions.remove(&subscription);
                         }
                     }
+                    Ok(Incoming::Request(notification))
+                        if notification.method == THREAD_ARCHIVE_PROGRESS =>
+                    {
+                        let Ok(ThreadArchiveProgressNotification { progress: id, threads }) =
+                            serde_json::from_value(notification.params)
+                        else {
+                            continue;
+                        };
+                        if let Some(sender) = progress.lock().unwrap().get(&id) {
+                            let _ = sender.send(threads);
+                        }
+                    }
                     // Unknown notifications are ignored: additions must not break clients.
                     Ok(Incoming::Request(_)) | Err(_) => {}
                 }
@@ -131,6 +149,7 @@ impl Client {
             // Wake everyone waiting: dropping the senders reports the disconnect.
             pending.lock().unwrap().take();
             subscriptions.lock().unwrap().clear();
+            progress.lock().unwrap().clear();
         });
         Ok(client)
     }
@@ -161,6 +180,22 @@ impl Client {
         }
 
         Ok(receiver.await.map_err(|_| ClientError::Disconnected)??)
+    }
+
+    /// Archive a thread, sending every report of how far it got to `progress` as it
+    /// comes, the last one before this returns. The `progress` id of `params` is
+    /// chosen here.
+    pub async fn archive(
+        &self,
+        mut params: ThreadArchiveParams,
+        progress: mpsc::UnboundedSender<Vec<ArchiveProgress>>,
+    ) -> Result<ThreadArchiveResult, ClientError> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        self.progress.lock().unwrap().insert(id, progress);
+        params.progress = Some(id);
+        let result = self.call::<ThreadArchive>(params).await;
+        self.progress.lock().unwrap().remove(&id);
+        result
     }
 
     /// Read a thread's events after `after`. With `follow`, the stream continues with

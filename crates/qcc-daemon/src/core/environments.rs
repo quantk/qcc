@@ -5,7 +5,7 @@ use qcc_domain::{
 };
 use qcc_plugin_host::{EnvironmentRequest, Outcome, PluginError, PluginHandle};
 use qcc_protocol::jsonrpc::{RpcError, codes};
-use qcc_protocol::methods::{Empty, ThreadChangesResult, ThreadDiffResult};
+use qcc_protocol::methods::{ArchiveStep, Empty, ThreadChangesResult, ThreadDiffResult};
 
 use super::{
     Command, Core, PREPARE_TIMEOUT, QUERY_TIMEOUT, REMOVE_TIMEOUT, Responder, call_environment,
@@ -263,6 +263,10 @@ impl Core {
                 return responder.reply::<Empty>(Err(error));
             }
         };
+        let name = self.host.environment(&environment).map(|(_, info)| info.name.clone());
+        let step =
+            ArchiveStep::RemovingEnvironment { environment: name.unwrap_or(environment.clone()) };
+        self.archive_moved(&id, step);
         let request = EnvironmentRequest::Remove { thread: id.clone(), cwd, force };
         let commands = self.commands.clone();
         tokio::spawn(async move {

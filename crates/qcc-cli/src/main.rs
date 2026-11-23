@@ -7,6 +7,7 @@
 mod automation;
 mod comment;
 mod mcp;
+mod progress;
 mod project;
 mod render;
 mod settings;

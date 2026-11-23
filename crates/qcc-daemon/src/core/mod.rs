@@ -234,7 +234,17 @@ pub(crate) enum Command {
     ArchiveStep {
         thread: ThreadId,
         force: bool,
+        /// The run that follows the archive for its caller, if one does.
+        run: Option<u64>,
         reply: oneshot::Sender<archive::StepOutcome>,
+    },
+    /// Archiving one thread of a `thread.archive` that reports its progress came to
+    /// `result`, which `responder` passes on.
+    ArchiveSettled {
+        run: u64,
+        thread: ThreadId,
+        result: Result<Value, RpcError>,
+        responder: Responder,
     },
     /// Every thread of a tree was archived, or refused, or kept for a refusal under it.
     TreeArchived {
@@ -330,6 +340,9 @@ pub(crate) struct Core {
     isolating: HashSet<ThreadId>,
     /// Threads on their way to the archive. They take no input meanwhile.
     archiving: HashSet<ThreadId>,
+    /// Archives that tell their caller how they go, by a number of their own.
+    archive_runs: HashMap<u64, archive::ArchiveRun>,
+    next_archive_run: u64,
     subscribers: HashMap<ThreadId, Vec<Subscriber>>,
     /// Connections following the list of threads.
     watchers: Vec<Subscriber>,
@@ -463,6 +476,8 @@ impl Core {
             sessions: HashMap::new(),
             queued,
             archiving: HashSet::new(),
+            archive_runs: HashMap::new(),
+            next_archive_run: 0,
             isolating: HashSet::new(),
             subscribers: HashMap::new(),
             watchers: Vec::new(),
@@ -579,8 +594,11 @@ impl Core {
             Command::LimitsRead { only, results, responder } => {
                 self.limits_read(only, results, responder);
             }
-            Command::ArchiveStep { thread, force, reply } => {
-                self.archive_step(thread, force, reply);
+            Command::ArchiveStep { thread, force, run, reply } => {
+                self.archive_step(thread, force, run, reply);
+            }
+            Command::ArchiveSettled { run, thread, result, responder } => {
+                self.archive_settled(run, &thread, result, responder);
             }
             Command::TreeArchived { root, members, report, responder } => {
                 self.tree_archived(root, members, report, responder);

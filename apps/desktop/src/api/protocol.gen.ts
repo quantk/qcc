@@ -13,6 +13,15 @@ export type AgentSkill = {
 	path?: string | null,
 };
 
+/**  Where one thread of an archive is. */
+export type ArchiveProgress = {
+	thread_id: ThreadId,
+	title?: string | null,
+	/**  The thread it is under in this archive; absent for the thread asked for. */
+	parent?: ThreadId | null,
+	step: ArchiveStep,
+};
+
 /**  Why one thread of an archived tree stays. */
 export type ArchiveRefusal = {
 	thread_id: ThreadId,
@@ -23,6 +32,24 @@ export type ArchiveRefusal = {
 	code: number,
 	message: string,
 };
+
+/**  A step of archiving one thread. The first three are under way, the rest final. */
+export type ArchiveStep = 
+/**  Its turn has not come yet. */
+{ kind: "waiting" } | 
+/**
+ *  Its provider session is being released. `working`: a turn was running, and
+ *  releasing the session stops it.
+ */
+{ kind: "stopping_session"; working: boolean } | 
+/**  The environment that made its working directory is removing it. */
+{ kind: "removing_environment"; 
+/**  The environment's name, as it calls itself. */
+environment: string } | { kind: "archived" } | 
+/**  It stays, and why. */
+{ kind: "refused"; code: number; message: string } | 
+/**  It stays because a thread under it refused. */
+{ kind: "kept" };
 
 /**
  *  A file attached to a user message. qcc keeps its own copy, so the message reads
@@ -1346,6 +1373,22 @@ export type ThreadArchiveParams = {
 	 *  client that does not know about it archives the one thread, as before.
 	 */
 	descendants?: boolean,
+	/**
+	 *  A client-chosen id. While the call runs, [`THREAD_ARCHIVE_PROGRESS`]
+	 *  notifications carrying it tell the connection that asked how far it got:
+	 *  archiving a tree, or removing a worktree, can take a while.
+	 */
+	progress?: number | null,
+};
+
+export type ThreadArchiveProgressNotification = {
+	/**  The `progress` of the call it is about. */
+	progress: number,
+	/**
+	 *  The threads in the order they are archived: deepest first, the thread asked
+	 *  for last.
+	 */
+	threads: ArchiveProgress[],
 };
 
 /**
@@ -2045,4 +2088,5 @@ export type Notifications = {
 	"limits.updated": LimitsUpdatedNotification,
 	"ui.changed": UiChangedNotification,
 	"notification.show": NotificationShowNotification,
+	"thread.archive_progress": ThreadArchiveProgressNotification,
 };

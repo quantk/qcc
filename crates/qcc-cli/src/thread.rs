@@ -9,14 +9,14 @@ use clap::Subcommand;
 use qcc_client::protocol::jsonrpc::codes;
 use qcc_client::protocol::methods::{
     Delivery, Empty, MessageContext, NewAttachment, SendMode, SettingsGet, SkillList, StopMode,
-    ThreadArchive, ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact,
-    ThreadCompactParams, ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams,
-    ThreadFork, ThreadForkParams, ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams,
-    ThreadList, ThreadListParams, ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams,
-    ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp,
-    ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams,
-    ThreadSetProject, ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn,
-    ThreadSpawnParams, ThreadStop, ThreadStopParams, ThreadTurns, ThreadTurnsParams, ThreadUnqueue,
+    ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact, ThreadCompactParams,
+    ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams, ThreadFork, ThreadForkParams,
+    ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
+    ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
+    ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode,
+    ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
+    ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams,
+    ThreadStop, ThreadStopParams, ThreadTurns, ThreadTurnsParams, ThreadUnqueue,
     ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
@@ -28,7 +28,7 @@ use qcc_domain::{
 use serde::Serialize;
 
 use crate::project::find_project;
-use crate::{out, print_json, render};
+use crate::{out, print_json, progress, render};
 
 /// Which part of a thread's work `changes` and `diff` show; all of it by default.
 #[derive(clap::Args)]
@@ -865,13 +865,13 @@ pub(crate) async fn run(
         }
 
         ThreadCommand::Archive { thread, force, no_descendants } => {
-            let result = client
-                .call::<ThreadArchive>(ThreadArchiveParams {
-                    thread_id: ThreadId::new(thread),
-                    force,
-                    descendants: !no_descendants,
-                })
-                .await?;
+            let params = ThreadArchiveParams {
+                thread_id: ThreadId::new(thread),
+                force,
+                descendants: !no_descendants,
+                progress: None,
+            };
+            let result = progress::archive(client, params).await?;
             if json {
                 print_json(&result)?;
             } else {

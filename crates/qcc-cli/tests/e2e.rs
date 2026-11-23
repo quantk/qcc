@@ -3529,6 +3529,98 @@ fn a_refusal_under_a_thread_keeps_it_and_its_ancestors_and_lets_the_rest_go() {
     assert_eq!(daemon.thread(&root)["archived"], true);
 }
 
+/// The kind of each thread's step in an archive progress report, by thread.
+fn steps(report: &[qcc_client::protocol::methods::ArchiveProgress]) -> Vec<(String, String)> {
+    report
+        .iter()
+        .map(|thread| {
+            let step = serde_json::to_value(&thread.step).unwrap();
+            (thread.thread_id.to_string(), step["kind"].as_str().unwrap().to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn an_archive_tells_its_caller_each_step_of_each_thread() {
+    use qcc_client::Client;
+    use qcc_client::protocol::methods::{ArchiveStep, ThreadArchiveParams};
+    use qcc_domain::ThreadId;
+
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    let repo = repo(dir.path(), &[("README.md", "hello\n")]);
+    let daemon = Daemon::start(&data);
+    let root = daemon.spawn("root");
+    let output = spawn_in_worktree(&daemon, &repo, &["--parent", &root, "--prompt", "dirty"]);
+    assert!(output.ok, "{}", output.stderr);
+    let dirty = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+    let working = spawn_child(&daemon, &root, &format!("/slow {}", words(3000)));
+    assert!(daemon.qcc(&["thread", "wait", &root, &dirty]).ok);
+    daemon.wait_for(&working, "item/text/delta");
+    let worktree = data.join("environments/git-worktree").join(&dirty).join("app");
+    write(worktree.join("README.md"), "hello\nworld\n");
+
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let client = Client::connect(&daemon.socket).await.unwrap();
+        let archive = |thread: &str, force: bool| ThreadArchiveParams {
+            thread_id: ThreadId::new(thread),
+            force,
+            descendants: true,
+            progress: None,
+        };
+        let (sender, mut reports) = tokio::sync::mpsc::unbounded_channel();
+        let result = client.archive(archive(&root, false), sender).await.unwrap();
+        let mut seen = Vec::new();
+        while let Ok(report) = reports.try_recv() {
+            seen.push(report);
+        }
+
+        // Every report has the whole tree, the thread asked for last.
+        let first = steps(&seen[0]);
+        assert_eq!(first.len(), 3, "{first:?}");
+        assert_eq!(first[2].0, root);
+        assert!(first.iter().all(|(_, kind)| kind == "waiting"), "{first:?}");
+        assert!(seen.iter().all(|report| report.len() == 3));
+        assert_eq!(seen[0][0].title.as_deref(), daemon.thread(&first[0].0)["title"].as_str());
+        // The working thread is stopped, the worktree is asked to go.
+        let stopped = seen.iter().flatten().any(|thread| {
+            thread.thread_id.as_str() == working
+                && thread.step == ArchiveStep::StoppingSession { working: true }
+        });
+        assert!(stopped, "{seen:#?}");
+        let removing = seen.iter().flatten().any(|thread| {
+            thread.thread_id.as_str() == dirty
+                && thread.step
+                    == ArchiveStep::RemovingEnvironment { environment: "Git worktree".into() }
+        });
+        assert!(removing, "{seen:#?}");
+        // The last report, sent before the answer, is final for every thread, and
+        // agrees with it: the dirty one refused, the root is kept for it.
+        let last = seen.last().unwrap();
+        assert!(last.iter().all(|thread| thread.step.is_final()), "{last:#?}");
+        let last: std::collections::HashMap<_, _> = steps(last).into_iter().collect();
+        assert_eq!(last[&dirty], "refused");
+        assert_eq!(last[&working], "archived");
+        assert_eq!(last[&root], "kept");
+        assert_eq!(result.refused[0].thread_id.as_str(), dirty);
+        assert_eq!(result.kept, [ThreadId::new(&root)]);
+
+        // One thread alone reports too.
+        let (sender, mut reports) = tokio::sync::mpsc::unbounded_channel();
+        let alone = ThreadArchiveParams { descendants: false, ..archive(&dirty, true) };
+        let result = client.archive(alone, sender).await.unwrap();
+        assert!(result.thread.archived);
+        let mut kinds = Vec::new();
+        while let Ok(report) = reports.try_recv() {
+            assert_eq!(report.len(), 1);
+            kinds.push(steps(&report)[0].1.clone());
+        }
+        assert_eq!(kinds, ["waiting", "removing_environment", "archived"]);
+    });
+    assert!(!worktree.exists());
+}
+
 // ----- reviewers --------------------------------------------------------------------
 
 /// A reviewer profile for the echo agent: echo answers with its prompt, which ends

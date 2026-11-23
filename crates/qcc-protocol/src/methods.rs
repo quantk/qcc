@@ -489,6 +489,71 @@ pub struct ThreadArchiveParams {
     /// client that does not know about it archives the one thread, as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub descendants: bool,
+    /// A client-chosen id. While the call runs, [`THREAD_ARCHIVE_PROGRESS`]
+    /// notifications carrying it tell the connection that asked how far it got:
+    /// archiving a tree, or removing a worktree, can take a while.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u64>,
+}
+
+/// Notification to the connection that called `thread.archive` with `progress`:
+/// the archive moved on. Each one carries every thread of the call as it stands
+/// now, so a client only shows the latest. The last one, sent before the answer,
+/// has every thread in a final step.
+pub const THREAD_ARCHIVE_PROGRESS: &str = "thread.archive_progress";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadArchiveProgressNotification {
+    /// The `progress` of the call it is about.
+    pub progress: u64,
+    /// The threads in the order they are archived: deepest first, the thread asked
+    /// for last.
+    pub threads: Vec<ArchiveProgress>,
+}
+
+/// Where one thread of an archive is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ArchiveProgress {
+    pub thread_id: ThreadId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The thread it is under in this archive; absent for the thread asked for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<ThreadId>,
+    pub step: ArchiveStep,
+}
+
+/// A step of archiving one thread. The first three are under way, the rest final.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ArchiveStep {
+    /// Its turn has not come yet.
+    Waiting,
+    /// Its provider session is being released. `working`: a turn was running, and
+    /// releasing the session stops it.
+    StoppingSession {
+        working: bool,
+    },
+    /// The environment that made its working directory is removing it.
+    RemovingEnvironment {
+        /// The environment's name, as it calls itself.
+        environment: String,
+    },
+    Archived,
+    /// It stays, and why.
+    Refused {
+        code: i32,
+        message: String,
+    },
+    /// It stays because a thread under it refused.
+    Kept,
+}
+
+impl ArchiveStep {
+    /// Whether nothing more happens to the thread in this archive.
+    pub fn is_final(&self) -> bool {
+        matches!(self, Self::Archived | Self::Refused { .. } | Self::Kept)
+    }
 }
 
 /// The archived thread, and with `descendants` what happened to the threads under

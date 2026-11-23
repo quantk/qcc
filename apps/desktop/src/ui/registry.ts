@@ -97,6 +97,24 @@ export type ThreadAction = {
 
 export type ItemRendererProps = { item: Item; thread: Thread };
 
+/** What an entry of an item's menu is given: the item, and the thread it is of. */
+export type ItemContext = { item: Item; thread: Thread; timeline: Timeline | undefined };
+
+/**
+ * An entry of the "…" menu under an item of the timeline, beside its copy button.
+ * The menu shows only under items some entry is offered for.
+ */
+export type ItemMenuItem = {
+  id: string;
+  title: string;
+  order: number;
+  /** Absent: offered under every item. */
+  when?: (context: ItemContext) => boolean;
+  /** Why it cannot be run now, which the entry says; null: it can. Absent: always can. */
+  blocker?: (context: ItemContext) => string | null;
+  run: (context: ItemContext) => void;
+};
+
 /** Draws one kind of timeline item. */
 export type ItemRenderer = ComponentType<ItemRendererProps>;
 
@@ -165,6 +183,7 @@ type Snapshot = {
   actions: readonly ThreadAction[];
   commands: readonly Command[];
   menu: readonly ThreadMenuItem[];
+  itemMenu: readonly ItemMenuItem[];
   groupActions: readonly GroupAction[];
   items: ReadonlyMap<string, ItemRenderer>;
   dialog: DialogRenderer | null;
@@ -179,6 +198,7 @@ export class UiRegistry {
     actions: [],
     commands: [],
     menu: [],
+    itemMenu: [],
     groupActions: [],
     items: new Map(),
     dialog: null,
@@ -238,6 +258,13 @@ export class UiRegistry {
   threadMenuItem(item: ThreadMenuItem): () => void {
     this.update({ menu: [...this.snapshot.menu.filter((other) => other.id !== item.id), item].sort(byOrder) });
     return this.track(() => this.update({ menu: this.snapshot.menu.filter((other) => other !== item) }));
+  }
+
+  itemMenuItem(item: ItemMenuItem): () => void {
+    this.update({
+      itemMenu: [...this.snapshot.itemMenu.filter((other) => other.id !== item.id), item].sort(byOrder),
+    });
+    return this.track(() => this.update({ itemMenu: this.snapshot.itemMenu.filter((other) => other !== item) }));
   }
 
   groupAction(action: GroupAction): () => void {

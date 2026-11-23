@@ -3967,6 +3967,8 @@ fn a_thread_is_forked_from_a_turn_and_both_go_on_their_own_way() {
     assert_eq!(fork["cwd"], daemon.thread(&id)["cwd"], "the same directory: {fork}");
     let events = daemon.wait_for(&fork_id, "turn/completed");
     assert_eq!(events["status"], "completed");
+    // The fork's session is made from the other one, not resumed.
+    assert_eq!(daemon.wait_for(&fork_id, "session/started")["resumed"], false);
     assert_eq!(messages(&daemon.events(&fork_id)), ["1. one"]);
     let fork_now = daemon.thread(&fork_id);
     assert!(fork_now.get("fork_at").is_none(), "the fork is made: {fork_now}");

@@ -61,6 +61,8 @@ impl Core {
         let resumed = resume.is_some();
         // A fork's first session is made from the session it was forked from.
         let fork_at = thread.fork_at.filter(|_| resumed);
+        // A fork is a session of its own, made from another: nothing is resumed.
+        let resumed = resumed && fork_at.is_none();
         let prompt = match prompt {
             Some(UserInput { text, notes, attachments }) if thread.handover => {
                 Some(UserInput { text: self.handover_prompt(id, text), notes, attachments })

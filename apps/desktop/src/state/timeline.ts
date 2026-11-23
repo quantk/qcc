@@ -11,6 +11,7 @@ import type {
   ThreadEvent,
   UsageSnapshot,
 } from "../api/protocol.gen";
+import { type Turns, applyTurns, emptyTurns } from "./fork";
 import { type ThreadStats, applyStats, emptyStats } from "./stats";
 
 export type Entry =
@@ -50,9 +51,17 @@ export type Timeline = {
   usage?: UsageSnapshot;
   /** Turns, token counts and compactions, for the panels that sum them up. */
   stats: ThreadStats;
+  /** Where each ended turn's session stood, for forking the thread from it. */
+  turns: Turns;
 };
 
-export const emptyTimeline: Timeline = { lastSeq: 0, entries: [], turnOpen: false, stats: emptyStats };
+export const emptyTimeline: Timeline = {
+  lastSeq: 0,
+  entries: [],
+  turnOpen: false,
+  stats: emptyStats,
+  turns: emptyTurns,
+};
 
 function replaceLast(
   entries: readonly Entry[],
@@ -215,7 +224,14 @@ export function applyEvent(timeline: Timeline, event: ThreadEvent): Timeline {
     case "provider/unhandled":
       break;
   }
-  return { lastSeq: event.seq, entries, turnOpen, usage, stats: applyStats(timeline.stats, event) };
+  return {
+    lastSeq: event.seq,
+    entries,
+    turnOpen,
+    usage,
+    stats: applyStats(timeline.stats, event),
+    turns: applyTurns(timeline.turns, event),
+  };
 }
 
 export function applyEvents(timeline: Timeline, events: readonly ThreadEvent[]): Timeline {
@@ -253,4 +269,13 @@ export function conversationStart(entries: readonly Entry[]): number {
 /** How many conversations came before the latest one. */
 export function earlierConversations(entries: readonly Entry[]): number {
   return entries.filter((entry) => entry.kind === "conversation").length;
+}
+
+/**
+ * What a fork's agent knows from the thread it was forked from, given that thread's
+ * timeline up to the fork: its latest conversation there, without what was still
+ * waiting in the queue.
+ */
+export function forkedEntries(origin: Timeline): Entry[] {
+  return origin.entries.slice(conversationStart(origin.entries)).filter((entry) => !(entry.kind === "user" && entry.queued));
 }

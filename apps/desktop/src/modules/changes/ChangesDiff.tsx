@@ -367,6 +367,7 @@ export function ChangesDiff({
                   tokens={diffHighlights.tokens(file, row.index)}
                   gutter={gutter}
                   inset={inset}
+                  viewWidth={viewWidth}
                   start={item.start}
                   pick={review.addon.pick && (review.addon.canPick?.(file, row.index) ?? true) ? review.addon.pick : undefined}
                 />
@@ -461,6 +462,7 @@ const LineRow = memo(function LineRow({
   tokens,
   gutter,
   inset,
+  viewWidth,
   start,
   pick,
 }: {
@@ -470,16 +472,31 @@ const LineRow = memo(function LineRow({
   tokens: Token[] | undefined;
   gutter: string;
   inset: number;
+  /** The width of the view, which the file's box takes, whatever the line's. */
+  viewWidth: number;
   start: number;
   pick?: (file: DiffFile, index: number) => void;
 }) {
   const number = "flex-none pr-1.5 text-right text-muted-foreground opacity-70 select-none";
   return (
-    <div
-      className="absolute top-0 left-0 w-full"
-      style={{ height: LINE_HEIGHT, transform: `translateY(${start}px)`, paddingLeft: inset, paddingRight: inset }}
-    >
-      <div className={`group/line flex h-full border-x whitespace-pre ${lineTone[line.kind]}`}>
+    <div className="absolute top-0 left-0 flex w-full" style={{ height: LINE_HEIGHT, transform: `translateY(${start}px)` }}>
+      {/* The file's box is as wide as the view, like its header, while the lines may
+          be wider and scroll sideways under it: the box's sides are drawn stuck over
+          the line, and its margins hide what scrolls past them, so a long line stays
+          inside the box rather than running out to the edge of the view. */}
+      <div
+        aria-hidden
+        className="pointer-events-none sticky left-0 z-[1] flex h-full flex-none"
+        style={viewWidth ? { width: viewWidth, marginRight: -viewWidth } : { width: "100%", marginRight: "-100%" }}
+      >
+        <div className="h-full flex-none bg-background" style={{ width: inset }} />
+        <div className="h-full min-w-0 flex-1 border-x" />
+        <div className="h-full flex-none bg-background" style={{ width: inset }} />
+      </div>
+      <div
+        className={`group/line flex h-full min-w-0 flex-1 border-x border-transparent whitespace-pre ${lineTone[line.kind]}`}
+        style={{ marginLeft: inset, marginRight: inset }}
+      >
         {line.kind === "hunk" || line.kind === "note" ? (
           <>
             <span className="flex-none" style={{ width: `calc(2 * ${gutter})` }} />

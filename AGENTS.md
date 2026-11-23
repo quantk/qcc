@@ -120,6 +120,24 @@ nix develop .#desktop -c ./scripts/check-desktop.sh   # clippy desktop, tsc, vit
 - Dev-сервер Vite иногда отдаёт устаревший CSS после пересоздания файла компонента: перед тем как
   верить скриншоту, перезапустите `./dev desktop`.
 
+## Версии и релизы
+
+Подробно — раздел «Versioning» в `docs/releasing.md`. Коротко:
+
+- Три версии: продукта (`[workspace.package] version` в `Cargo.toml`, одна на все крейты и
+  десктоп), протокола (`PROTOCOL_VERSION` в `crates/qcc-protocol/src/lib.rs`) и API плагинов
+  (`package qcc:plugin@X.Y.Z` в `wit/plugin.wit` + `API_VERSION` в
+  `crates/qcc-plugin-host/src/manifest.rs` + `api` в `plugins/*/plugin.toml` — меняются вместе).
+- **Версию продукта в ветках задач не трогайте** — её поднимает только релизный коммит в `main`.
+- `PROTOCOL_VERSION` поднимайте в той же ветке, где меняете RPC несовместимо для клиента или демона
+  другой сборки (метод добавлен, убран, переименован, параметры или результат изменились).
+- API плагинов поднимайте в той же ветке, где меняется интерфейс плагинов; до 1.0 ломающее
+  изменение — minor (`0.1.0` → `0.2.0`).
+- `CHANGELOG.md` (Keep a Changelog) пишется только при релизе; раздел `Unreleased` в ветках задач не
+  ведите.
+- Релиз: changelog → версия в `Cargo.toml` + `cargo check` → коммит `Release X.Y.Z` → тег `vX.Y.Z`
+  (сначала `vX.Y.Z-rc.N`) только с `main` → push. Теги и пуш — только по просьбе пользователя.
+
 ## Тестирование
 
 - Unit-тесты рядом с кодом; интеграционные — в `crates/*/tests` и `plugins/*/tests`; сквозные

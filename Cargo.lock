@@ -1302,7 +1302,7 @@ dependencies = [
 
 [[package]]
 name = "env-git-worktree"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-plugin-sdk",
  "serde_json",
@@ -2728,7 +2728,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "notify"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-plugin-sdk",
 ]
@@ -3033,7 +3033,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchestration"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-plugin-sdk",
 ]
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-plugin-sdk",
@@ -3409,7 +3409,7 @@ dependencies = [
 
 [[package]]
 name = "provider-claude-code"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-plugin-sdk",
@@ -3419,7 +3419,7 @@ dependencies = [
 
 [[package]]
 name = "provider-codex"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-plugin-sdk",
@@ -3429,7 +3429,7 @@ dependencies = [
 
 [[package]]
 name = "provider-echo"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-plugin-sdk",
  "serde_json",
@@ -3460,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-cli"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3477,7 +3477,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-client"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-protocol",
@@ -3488,7 +3488,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-daemon"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3512,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-desktop"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "base64 0.22.1",
  "notify-rust",
@@ -3530,7 +3530,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-domain"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3539,7 +3539,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-plugin-host"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "serde",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-plugin-sdk"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -3564,7 +3564,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-plugin-testkit"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-plugin-host",
@@ -3576,11 +3576,11 @@ dependencies = [
 
 [[package]]
 name = "qcc-plugins-bundle"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 
 [[package]]
 name = "qcc-protocol"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "serde",
@@ -3593,7 +3593,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-runtime"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "serde_json",
@@ -3603,7 +3603,7 @@ dependencies = [
 
 [[package]]
 name = "qcc-store"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-domain",
  "qcc-runtime",
@@ -3817,7 +3817,7 @@ dependencies = [
 
 [[package]]
 name = "reviewers"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "qcc-plugin-sdk",
  "serde",

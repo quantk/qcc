@@ -21,6 +21,7 @@ use qcc_protocol::methods::{
     SendMode, ThreadSendParams, ThreadSpawnParams,
 };
 
+use super::threads::SpawnOrigin;
 use super::{Command, Core, notify, now_ms};
 use crate::schedule::Schedule;
 
@@ -399,7 +400,7 @@ impl Core {
                         started_by: None,
                         hidden: false,
                     },
-                    Some((automation.id.clone(), spec.name.clone())),
+                    SpawnOrigin::Automation(automation.id.clone(), spec.name.clone()),
                 )
                 .map(|result| result.thread.id),
         };

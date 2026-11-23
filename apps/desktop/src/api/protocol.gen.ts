@@ -1491,6 +1491,19 @@ export type ThreadEventsResult = {
 	events: ThreadEvent[],
 };
 
+export type ThreadForkParams = {
+	thread_id: ThreadId,
+	/**  The turn to fork from. Absent: the latest one it can be forked from. */
+	turn_id?: TurnId | null,
+	/**
+	 *  An environment that makes the fork a working directory of its own from the
+	 *  thread's (`git-worktree`). Absent: the fork works in the thread's directory.
+	 */
+	environment?: string | null,
+	/**  The fork's first message. */
+	prompt?: string | null,
+};
+
 export type ThreadGetParams = {
 	thread_id: ThreadId,
 };
@@ -1680,6 +1693,14 @@ export type ThreadStopParams = {
 	mode?: StopMode,
 };
 
+export type ThreadTurnsParams = {
+	thread_id: ThreadId,
+};
+
+export type ThreadTurnsResult = {
+	turns: TurnSummary[],
+};
+
 export type ThreadUnqueueParams = {
 	thread_id: ThreadId,
 	/**  From `thread.send` or the `input/queued` event. */
@@ -1792,6 +1813,23 @@ export type ToolKind = "command" | "fileChange" | "fileRead" | "search" |
 export type TurnId = string;
 
 export type TurnStatus = "completed" | "failed" | "interrupted";
+
+/**  One ended turn of a thread. */
+export type TurnSummary = {
+	turn_id: TurnId,
+	/**
+	 *  Its place among the thread's ended turns, from 1: what `qcc thread fork`
+	 *  takes.
+	 */
+	number: number,
+	status: TurnStatus,
+	/**  The first line of the message that started it. */
+	prompt?: string | null,
+	/**  The first line of the agent's last message in it. */
+	reply?: string | null,
+	/**  Why the thread cannot be forked from it; absent when it can. */
+	fork_blocker?: string | null,
+};
 
 export type UiActionParams = {
 	plugin: string,
@@ -1941,6 +1979,8 @@ export type Methods = {
 	"thread.set_mcp": { params: ThreadSetMcpParams; result: ThreadResult },
 	"thread.set_skill": { params: ThreadSetSkillParams; result: ThreadResult },
 	"thread.reset": { params: ThreadResetParams; result: ThreadResult },
+	"thread.turns": { params: ThreadTurnsParams; result: ThreadTurnsResult },
+	"thread.fork": { params: ThreadForkParams; result: ThreadResult },
 	"thread.compact": { params: ThreadCompactParams; result: ThreadResult },
 	"skill.list": { params: Empty; result: SkillListResult },
 	"thread.set_agent": { params: ThreadSetAgentParams; result: ThreadResult },

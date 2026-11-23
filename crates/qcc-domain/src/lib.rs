@@ -15,6 +15,7 @@ pub mod comment;
 pub mod context;
 pub mod delta;
 pub mod event;
+pub mod fork;
 pub mod ids;
 pub mod interaction;
 pub mod item;
@@ -34,6 +35,7 @@ pub use comment::{CommentAuthor, DiffSide, LineComment};
 pub use context::{ContextCategory, ContextEntry, ContextKind, ContextUsage};
 pub use delta::{Compaction, Delta, ItemKey, TextChannel};
 pub use event::{EventPayload, ThreadEvent, UserInput};
+pub use fork::{TurnRecord, fork_blocker, turns};
 pub use ids::{
     AutomationId, CommentId, InteractionId, ItemId, ProjectId, ProviderId, ThreadId, TurnId,
 };

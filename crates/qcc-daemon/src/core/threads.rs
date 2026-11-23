@@ -14,7 +14,17 @@ use qcc_protocol::methods::{
     ThreadSetModeParams, ThreadSetParentParams, ThreadSetProjectParams, ThreadSpawnParams,
     ThreadStopParams, ThreadUnqueueParams, ThreadUnqueueResult,
 };
-use qcc_runtime::NewThread;
+use qcc_runtime::{ForkStart, NewThread};
+
+/// Why a thread is made, beyond what its parameters say.
+pub(super) enum SpawnOrigin {
+    /// A client asked for it.
+    Client,
+    /// A run of this automation, which the thread is named after.
+    Automation(AutomationId, String),
+    /// A fork of another thread's turn, with the title it gets.
+    Fork(ForkStart, Option<String>),
+}
 
 use super::{
     Action, Core, MAX_SPAWN_DEPTH, QUERY_TIMEOUT, Responder, Subscriber, call_environment,
@@ -23,16 +33,21 @@ use super::{
 
 impl Core {
     pub(super) fn thread_spawn(&mut self, p: ThreadSpawnParams) -> Result<ThreadResult, RpcError> {
-        self.spawn_thread(p, None)
+        self.spawn_thread(p, SpawnOrigin::Client)
     }
 
-    /// Create a thread for a client, or, with `automation`, for a run of that
-    /// automation, which the thread is then named after.
+    /// Create a thread for a client, for a run of an automation, or as a fork of
+    /// another thread's turn.
     pub(super) fn spawn_thread(
         &mut self,
         mut p: ThreadSpawnParams,
-        automation: Option<(AutomationId, String)>,
+        origin: SpawnOrigin,
     ) -> Result<ThreadResult, RpcError> {
+        let (automation, fork, title) = match origin {
+            SpawnOrigin::Client => (None, None, None),
+            SpawnOrigin::Automation(id, name) => (Some(id), None, Some(name)),
+            SpawnOrigin::Fork(fork, title) => (None, Some(fork), title),
+        };
         let parent = match &p.parent {
             Some(parent) => {
                 let thread =
@@ -182,14 +197,14 @@ impl Core {
                     skills_disabled: p.skills_disabled,
                     started_by: p.started_by,
                     hidden: p.hidden,
-                    automation: automation.as_ref().map(|(id, _)| id.clone()),
-                    fork: None,
+                    automation,
+                    fork,
                 },
                 now,
             )
             .map_err(|error| RpcError::new(codes::INTERNAL_ERROR, error.to_string()))?;
         // Named before the prompt is submitted, which would otherwise name it.
-        if let Some((_, name)) = automation
+        if let Some(name) = title
             && let Ok(engine) = self.supervisor.engine(&id)
         {
             events.extend(engine.set_title(name, now));

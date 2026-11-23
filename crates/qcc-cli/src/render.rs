@@ -162,6 +162,9 @@ pub fn thread_details(thread: &Thread) -> String {
     if let Some(by) = &thread.started_by {
         lines.push(format!("started   by thread {by}"));
     }
+    if let Some(origin) = &thread.forked_from {
+        lines.push(format!("forked    from thread {} at turn {}", origin.thread, origin.turn));
+    }
     if let Some(automation) = &thread.automation {
         lines.push(format!("started   by automation {automation}"));
     }

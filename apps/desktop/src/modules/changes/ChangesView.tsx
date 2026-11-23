@@ -9,14 +9,15 @@ import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
 import { ChangesDiff } from "./ChangesDiff";
 import { DeliverButtons } from "./DeliverButtons";
-import { ReviewBar, useReview } from "./review";
+import { CommentsBar, ReviewBar, useReview } from "./review";
 import { ScopePicker, nothingChanged, picking } from "./ScopePicker";
 import { useChanges } from "./useChanges";
 
 export function ChangesView({ thread }: { thread: Thread }) {
   const { reader, state, changes, error, loading, active, totals, reload, setScope } = useChanges(thread);
   const files = useMemo(() => readFiles(state), [state]);
-  const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
+  const order = useMemo(() => changes?.files.map((file) => file.path) ?? [], [changes]);
+  const paths = useMemo(() => new Set(order), [order]);
   const review = useReview(thread, files, paths);
   const focus = useApp((app) => (app.changesFocus?.threadId === thread.id ? app.changesFocus : null));
 
@@ -68,6 +69,7 @@ export function ChangesView({ thread }: { thread: Thread }) {
           review={review}
           focus={focus}
           inset={20}
+          bar={(go) => <CommentsBar thread={thread} review={review} paths={order} go={go} />}
           lead={(jump) => (
             <div className="flex flex-col gap-3">
               {changes.files.length === 0 ? (

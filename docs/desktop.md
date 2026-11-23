@@ -132,7 +132,9 @@ the agent amends or rebases away a commit you were looking at, the view goes bac
 changes. The button at the end of a changed file's header shows the whole file, with the changes
 marked in place, and scrolls to the first of them; pressed again, it goes back to the changes
 alone. It is per file, kept while you switch between parts of the work, and the whole file is
-read again when the agent changes it. Code in diffs — here and in
+read again when the agent changes it. While you scroll, the header of the file at the top stays
+pinned there until the next file's header pushes it away, so its path, counts and buttons are
+always at hand. Code in diffs — here and in
 edits in the timeline — is highlighted by the file's language (by extension or name). Collapsed and
 very large files stay unhighlighted.
 
@@ -140,7 +142,11 @@ very large files stay unhighlighted.
 
 A button next to the line number in a diff (on the Changes tab and in the right panel) opens a
 comment field; `Ctrl+Enter` saves. Comments are shown under their lines and follow them when the
-code moves. Those whose line is gone are shown above the file or above the diff. **Send to agent**
+code moves. Those whose line is gone are shown above the file or above the diff. While there are
+comments, a bar stays above the diff however far you scroll: how many are open (or "Comment 2 of
+5" once you step through them), arrows to the previous and next open comment in the order of the
+diff (`P`/`N` or `Alt+↑`/`Alt+↓` when not typing; they wrap around at the ends), which open a
+folded file, scroll to the comment and mark it for a moment, and **Send to agent**, which
 passes the open comments to the agent (see
 [Comments on changes](projects-and-worktrees.md#comments-on-changes)). Comments resolved by the
 agent are shown struck through, with its note. You can also resolve, reopen or delete a comment

@@ -124,7 +124,8 @@ The tag starts `.github/workflows/release.yml`:
 
 - **dist** ([axodotdev/cargo-dist](https://github.com/axodotdev/cargo-dist), configured in
   `dist-workspace.toml`) builds `qcc` and `qccd` for the four targets on Ubuntu 22.04 (for an older
-  glibc) and macOS runners, and writes the archives, checksums and shell installers;
+  glibc) and Apple silicon `macos-26` runners, and writes the archives, checksums and shell
+  installers;
 - `.github/workflows/desktop.yml`, which the release workflow calls, builds the desktop bundles
   with `tauri-apps/tauri-action`, putting the `qccd` and `qcc` built by dist inside them as
   sidecars (`apps/desktop/src-tauri/tauri.release.conf.json`);
@@ -139,6 +140,13 @@ fails while the file is out of date. The plan of a tag, with the release notes i
 ```sh
 nix shell nixpkgs#cargo-dist -c dist plan --tag vX.Y.Z --output-format=json | jq -r '.announcement_title, .announcement_github_body'
 ```
+
+GitHub retires old runner images (macOS 14 went in November 2026). The macOS label is pinned in two
+places that must stay the same: `[dist.github-custom-runners]` in `dist-workspace.toml` and the
+matrix of `.github/workflows/desktop.yml`. To move to a newer image, change both after checking the
+labels against [actions/runner-images](https://github.com/actions/runner-images). `release.yml`
+holds no labels: its build matrix comes from `dist plan` at run time, which `dist plan` shows
+locally.
 
 A local dry run of one target:
 

@@ -28,10 +28,11 @@ jobs:
           # 22.04 for an older glibc, the same as the dist builds.
           - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-          - runner: macos-14
+          # The same pinned Apple silicon image as the dist builds in dist-workspace.toml.
+          - runner: macos-26
             target: aarch64-apple-darwin
           # Cross-compiled on Apple silicon.
-          - runner: macos-14
+          - runner: macos-26
             target: x86_64-apple-darwin
     runs-on: ${{ matrix.runner }}
     env:

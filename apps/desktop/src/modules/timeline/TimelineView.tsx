@@ -3,6 +3,7 @@ import { ArrowDownIcon, GitForkIcon } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { Item, Thread } from "../../api/protocol.gen";
+import { type Timing, turnTimings } from "../../state/durations";
 import { estimateEntryHeight, newTurnKey, turnRoom } from "../../state/scroll";
 import { store, useApp } from "../../state/store";
 import { type Entry, type Timeline, conversationStart, earlierConversations, forkedEntries } from "../../state/timeline";
@@ -24,13 +25,27 @@ import { Message, MessageContent, MessageFooter } from "@/components/ui/message"
 import { cn } from "@/lib/utils";
 
 /** An item nobody registered a renderer for: shown as the data it is. */
-function UnknownItem({ item }: { item: Item }) {
-  return <DataTrace title={item.type === "extension" ? item.kind : item.type} status={item.status} value={item} />;
+function UnknownItem({ item, timing }: { item: Item; timing: Timing }) {
+  return (
+    <DataTrace
+      title={item.type === "extension" ? item.kind : item.type}
+      status={item.status}
+      value={item}
+      timing={timing}
+    />
+  );
 }
 
-function ItemView({ item, thread }: { item: Item; thread: Thread }) {
+function ItemView({ entry, thread, turn }: { entry: Extract<Entry, { kind: "item" }>; thread: Thread; turn?: Timing }) {
+  const { item } = entry;
   const Renderer = useUi((snapshot) => snapshot.items.get(itemKey(item)));
-  return Renderer ? <Renderer item={item} thread={thread} /> : <UnknownItem item={item} />;
+  // Rebuilt only when the entry changes, which the memoised row needs anyway.
+  const timing = useMemo(() => ({ startedAt: entry.ts, endedAt: entry.endTs }), [entry.ts, entry.endTs]);
+  return Renderer ? (
+    <Renderer item={item} thread={thread} timing={timing} turn={turn} />
+  ) : (
+    <UnknownItem item={item} timing={timing} />
+  );
 }
 
 function InteractionView({ thread, entry }: { thread: Thread; entry: Extract<Entry, { kind: "interaction" }> }) {
@@ -39,7 +54,7 @@ function InteractionView({ thread, entry }: { thread: Thread; entry: Extract<Ent
   return <InteractionOutcome request={request} resolution={resolution} />;
 }
 
-const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; entry: Entry }) {
+const EntryView = memo(function EntryView({ thread, entry, turn }: { thread: Thread; entry: Entry; turn?: Timing }) {
   switch (entry.kind) {
     case "user":
       return (
@@ -69,7 +84,7 @@ const EntryView = memo(function EntryView({ thread, entry }: { thread: Thread; e
         </Message>
       );
     case "item":
-      return <ItemView item={entry.item} thread={thread} />;
+      return <ItemView entry={entry} thread={thread} turn={turn} />;
     case "interaction":
       return <InteractionView thread={thread} entry={entry} />;
     case "notice":
@@ -191,6 +206,14 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
         : [];
     return [{ key: "forked", entry: null }, ...before, ...own];
   }, [entries, start, thread.forked_from, originShown, origin]);
+  // How long each ended turn took, shown under its last reply; the fork's origin
+  // has its own turns.
+  const { turns, stats } = timeline;
+  const turnsHere = useMemo(() => turnTimings(turns, stats.turns), [turns, stats.turns]);
+  const turnsThere = useMemo(
+    () => (origin ? turnTimings(origin.timeline.turns, origin.timeline.stats.turns) : null),
+    [origin],
+  );
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<HTMLDivElement>(null);
@@ -400,7 +423,15 @@ export function TimelineView({ thread, timeline }: { thread: Thread; timeline: T
                       <Remembered memory={memory} entryKey={row.key}>
                         <KeepInPlace place={place}>
                           <div className={cn("flex min-w-0 flex-col", row.source && "opacity-75")}>
-                            <EntryView thread={row.source ?? thread} entry={row.entry} />
+                            <EntryView
+                              thread={row.source ?? thread}
+                              entry={row.entry}
+                              turn={
+                                row.entry.kind === "item"
+                                  ? (row.source ? turnsThere : turnsHere)?.get(row.entry.item.id)
+                                  : undefined
+                              }
+                            />
                           </div>
                         </KeepInPlace>
                       </Remembered>

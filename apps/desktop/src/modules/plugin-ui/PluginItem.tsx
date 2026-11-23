@@ -9,7 +9,7 @@ const drawn = new Map<string, unknown>();
 
 /** Makes the renderer of one plugin's extension items. */
 export function pluginItemRenderer(plugin: string) {
-  return function PluginItem({ item }: ItemRendererProps) {
+  return function PluginItem({ item, timing }: ItemRendererProps) {
     const cacheKey = `${item.id}:${item.status}`;
     const [tree, setTree] = useState<unknown>(() => drawn.get(cacheKey) ?? null);
     const [failed, setFailed] = useState(false);
@@ -48,6 +48,7 @@ export function pluginItemRenderer(plugin: string) {
         title={kind}
         status={item.status}
         value={payload}
+        timing={timing}
         description={failed ? <span className="text-destructive">not drawn</span> : undefined}
       />
     );

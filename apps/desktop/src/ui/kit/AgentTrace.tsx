@@ -5,7 +5,9 @@ import { BracesIcon, BrainIcon, TerminalIcon } from "lucide-react";
 import { type MouseEvent, type ReactNode, useMemo, useRef } from "react";
 
 import type { ItemStatus } from "../../api/protocol.gen";
+import { type Timing, durationLabel, timingHint } from "../../state/durations";
 import { previewText } from "../../state/preview";
+import { Duration } from "./Duration";
 import { useKeepInPlace } from "./KeepInPlace";
 import { Markdown } from "./Markdown";
 import { useRemembered } from "./Remembered";
@@ -53,8 +55,10 @@ export function ItemTrace(props: {
   status: ItemStatus;
   /** Marks the item failed even when its status does not, as a non-zero exit does. */
   failed?: boolean;
-  /** Small text after the title: a diff stat, a duration. */
+  /** Small text after the title, such as a diff stat. */
   description?: ReactNode;
+  /** When the item started and ended: its duration follows the description, if worth saying. */
+  timing?: Timing;
   /** Whether it is open while the user has not chosen. */
   open?: boolean;
   /** Classes of the title, for a command's monospace. */
@@ -75,6 +79,12 @@ export function ItemTrace(props: {
         {props.title}
       </TraceTitle>
       {props.description && <TraceDescription>{props.description}</TraceDescription>}
+      <Duration
+        timing={props.timing}
+        running={props.status === "pending"}
+        prefix={props.description ? "· " : undefined}
+        as={DurationSlot}
+      />
       {end && <TraceDescription>{end}</TraceDescription>}
     </TraceLine>
   );
@@ -93,6 +103,10 @@ export function ItemTrace(props: {
       </TraceCollapsible>
     </Trace>
   );
+}
+
+function DurationSlot(props: { title: string; children: ReactNode }) {
+  return <TraceDescription title={props.title}>{props.children}</TraceDescription>;
 }
 
 /**
@@ -134,7 +148,13 @@ function Code(props: { text: string; language: string; failed?: boolean; name: s
 }
 
 /** A shell command and its output: the Terminal pattern. */
-export function CommandTrace(props: { command: string; output?: string | null; exitCode?: number | null; status: ItemStatus }) {
+export function CommandTrace(props: {
+  command: string;
+  output?: string | null;
+  exitCode?: number | null;
+  status: ItemStatus;
+  timing?: Timing;
+}) {
   const failed = props.exitCode !== undefined && props.exitCode !== null && props.exitCode !== 0;
   const verb = props.status === "pending" ? "Running" : "Ran";
   return (
@@ -145,6 +165,7 @@ export function CommandTrace(props: { command: string; output?: string | null; e
       hint={props.command}
       status={props.status}
       failed={failed}
+      timing={props.timing}
       open={props.status === "pending" && !!props.output}
     >
       {props.output ? <Code name="output" text={props.output} language="ansi" failed={failed} /> : null}
@@ -160,6 +181,7 @@ export function ToolTrace(props: {
   status: ItemStatus;
   input?: unknown;
   output?: string | null;
+  timing?: Timing;
 }) {
   // An empty object says nothing a reader needs to unfold.
   const hasInput =
@@ -167,7 +189,7 @@ export function ToolTrace(props: {
     props.input !== null &&
     !(typeof props.input === "object" && Object.keys(props.input).length === 0);
   return (
-    <ItemTrace icon={props.icon} title={props.title} hint={props.hint} status={props.status}>
+    <ItemTrace icon={props.icon} title={props.title} hint={props.hint} status={props.status} timing={props.timing}>
       {hasInput || props.output ? (
         <div className="flex flex-col gap-2">
           {hasInput && <Code name="input" text={JSON.stringify(props.input, null, 2)} language="json" />}
@@ -179,19 +201,40 @@ export function ToolTrace(props: {
 }
 
 /** The agent's thinking: open while it streams, folded once it is done. The Reasoning pattern. */
-export function ReasoningTrace(props: { text: string; status: ItemStatus }) {
+export function ReasoningTrace(props: { text: string; status: ItemStatus; timing?: Timing }) {
   const thinking = props.status === "pending";
+  // Once done, how long it took is part of the title; while it streams, a live count follows.
+  const took = thinking ? null : durationLabel(props.timing, false, 0);
   return (
-    <ItemTrace icon={<BrainIcon />} title={thinking ? "Thinking" : "Thought"} status={props.status} open={thinking}>
+    <ItemTrace
+      icon={<BrainIcon />}
+      title={took ? `Thought for ${took}` : thinking ? "Thinking" : "Thought"}
+      hint={took && props.timing ? timingHint(props.timing) : undefined}
+      status={props.status}
+      timing={thinking ? props.timing : undefined}
+      open={thinking}
+    >
       {props.text ? <Markdown text={props.text} /> : null}
     </ItemTrace>
   );
 }
 
 /** Something with no drawing of its own, shown as the data it is. */
-export function DataTrace(props: { title: string; status: ItemStatus; value: unknown; description?: ReactNode }) {
+export function DataTrace(props: {
+  title: string;
+  status: ItemStatus;
+  value: unknown;
+  description?: ReactNode;
+  timing?: Timing;
+}) {
   return (
-    <ItemTrace icon={<BracesIcon />} title={props.title} status={props.status} description={props.description}>
+    <ItemTrace
+      icon={<BracesIcon />}
+      title={props.title}
+      status={props.status}
+      description={props.description}
+      timing={props.timing}
+    >
       <Code name="value" text={JSON.stringify(props.value, null, 2)} language="json" />
     </ItemTrace>
   );

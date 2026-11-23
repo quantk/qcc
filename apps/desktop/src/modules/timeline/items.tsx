@@ -6,6 +6,7 @@ import {
   CommandTrace,
   CopyButton,
   DiffView,
+  Duration,
   ItemMenu,
   ItemTrace,
   Markdown,
@@ -33,7 +34,7 @@ function summarize(value: unknown): string {
 }
 
 /** Draws every built-in item type. Registered per type, so any one can be replaced. */
-export function CoreItem({ item, thread }: ItemRendererProps) {
+export function CoreItem({ item, thread, timing, turn }: ItemRendererProps) {
   switch (item.type) {
     case "agentMessage":
       return (
@@ -44,6 +45,12 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
             // long conversation does not read as a column of buttons.
             <div className="mt-1 flex items-center gap-1.5">
               <StatusMark status={item.status} />
+              {/* How long the whole turn took, under its last reply. */}
+              <Duration
+                timing={turn}
+                running={false}
+                className="text-xs text-muted-foreground/70 tabular-nums"
+              />
               <CopyButton
                 text={item.text}
                 label="Copy the reply"
@@ -59,7 +66,7 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
         </div>
       );
     case "reasoning":
-      return <ReasoningTrace text={item.text} status={item.status} />;
+      return <ReasoningTrace text={item.text} status={item.status} timing={timing} />;
     case "plan":
       return (
         <ItemTrace icon={<ListTodoIcon />} title="Plan" status={item.status} open>
@@ -69,7 +76,15 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
         </ItemTrace>
       );
     case "command":
-      return <CommandTrace command={item.command} output={item.output} exitCode={item.exit_code} status={item.status} />;
+      return (
+        <CommandTrace
+          command={item.command}
+          output={item.output}
+          exitCode={item.exit_code}
+          status={item.status}
+          timing={timing}
+        />
+      );
     case "fileChange": {
       const files = item.diff ? parseDiff(item.diff, item.path) : [];
       const additions = files.reduce((sum, file) => sum + file.additions, 0);
@@ -81,6 +96,7 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
           title={`Edit ${relativePath(item.path, thread.cwd)}`}
           hint={item.path}
           status={item.status}
+          timing={timing}
           description={
             files.length > 0 && (
               <span className="diff-stat">
@@ -101,10 +117,11 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
           title={`Read ${relativePath(item.path, thread.cwd)}`}
           hint={item.path}
           status={item.status}
+          timing={timing}
         />
       );
     case "search":
-      return <ToolTrace icon={<SearchIcon />} title={`Search ${item.query}`} hint={item.query} status={item.status} />;
+      return <ToolTrace icon={<SearchIcon />} title={`Search ${item.query}`} hint={item.query} status={item.status} timing={timing} />;
     case "tool":
       return (
         <ToolTrace
@@ -118,6 +135,7 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
           status={item.status}
           input={item.input}
           output={item.output}
+          timing={timing}
         />
       );
     case "extension":

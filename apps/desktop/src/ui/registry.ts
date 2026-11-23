@@ -7,6 +7,7 @@ import { type ComponentType, useSyncExternalStore } from "react";
 
 import type { Item, ProviderInfo, Thread } from "../api/protocol.gen";
 import type { Placement } from "../state/blocks";
+import type { Timing } from "../state/durations";
 import type { ThreadGroup } from "../state/selectors";
 import type { Timeline } from "../state/timeline";
 
@@ -95,7 +96,14 @@ export type ThreadAction = {
   render: ComponentType<ThreadContext>;
 };
 
-export type ItemRendererProps = { item: Item; thread: Thread };
+export type ItemRendererProps = {
+  item: Item;
+  thread: Thread;
+  /** When the item started and, once settled, ended. Absent where the timeline does not know. */
+  timing?: Timing;
+  /** For the last reply of an ended turn: when the whole turn started and ended. */
+  turn?: Timing;
+};
 
 /** What an entry of an item's menu is given: the item, and the thread it is of. */
 export type ItemContext = { item: Item; thread: Thread; timeline: Timeline | undefined };

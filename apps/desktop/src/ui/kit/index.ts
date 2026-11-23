@@ -4,6 +4,7 @@ export { type DiffAddon, DiffStat, DiffView, scrollToFile } from "./DiffView";
 export { Markdown } from "./Markdown";
 export { CommandTrace, DataTrace, ItemTrace, ReasoningTrace, ToolTrace } from "./AgentTrace";
 export { StatusMark } from "./StatusMark";
+export { Duration } from "./Duration";
 export { Choice, type ChoiceOption } from "./Choice";
 export { InteractionOutcome, InteractionPrompt } from "./InteractionPrompt";
 export { type NodeAction, NodeView } from "./NodeView";

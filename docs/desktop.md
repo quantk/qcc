@@ -111,6 +111,13 @@ A command's or tool's output unfolds to its first 12 lines with "Show all N line
 it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close
 stays where it is on the screen: the timeline stops following the end until you scroll.
 
+Actions say how long they took after their title, faintly: "Ran cargo test · 47s", "Thought for
+12s". One that took under 2 seconds says nothing, which also leaves out the zero durations of
+history imported or forked from elsewhere and of items an agent reports only once they are done.
+An action still running counts up once it has gone on for 5 seconds. Under the last reply of a
+finished turn, beside its copy button, is how long the whole turn took. Hovering a duration shows
+when the action started and ended.
+
 Under each of the agent's replies, a copy button (shown while the pointer is over the reply)
 puts the reply on the clipboard as the markdown the agent wrote. Selecting text anywhere in the
 timeline brings up a **Reply** button over the selection: it adds the selection to the composer

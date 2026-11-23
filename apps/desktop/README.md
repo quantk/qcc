@@ -217,6 +217,11 @@ export const notesModule: UiModule = {
 };
 ```
 
+An item renderer is given the item, its thread and `timing`, when the item started and
+settled, which `ItemTrace` turns into a duration after the title (`timing` prop; the
+thresholds are in `state/durations.ts`); the last reply of an ended turn also gets
+`turn`, the whole turn's times.
+
 List it in `src/modules/index.ts` and it is part of the app. `ui.deactivate(id)` takes
 out everything the module registered; activating the same id again replaces it, which
 is how contributions that arrive at runtime stay current.

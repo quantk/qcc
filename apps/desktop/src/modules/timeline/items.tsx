@@ -43,7 +43,7 @@ export function CoreItem({ item, thread, timing, turn }: ItemRendererProps) {
           {item.text && item.status !== "pending" && (
             // The reply's own actions: faint until the pointer is over the reply, so a
             // long conversation does not read as a column of buttons.
-            <div className="mt-1 flex items-center gap-1.5">
+            <div className="mt-1 flex items-center gap-1">
               <StatusMark status={item.status} />
               {/* How long the whole turn took, under its last reply. */}
               <Duration
@@ -51,16 +51,21 @@ export function CoreItem({ item, thread, timing, turn }: ItemRendererProps) {
                 running={false}
                 className="text-xs text-muted-foreground/70 tabular-nums"
               />
-              <CopyButton
-                text={item.text}
-                label="Copy the reply"
-                className="-ml-1.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
-              />
-              <ItemMenu
-                item={item}
-                thread={thread}
-                className="opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
-              />
+              {/* The buttons sit flush: each one's padding is the space around its icon, so
+                  text-to-icon and icon-to-icon gaps come out equal. A 20px box keeps the hover
+                  fill close to the 16px line of the duration instead of hanging below it. */}
+              <div className="flex items-center">
+                <CopyButton
+                  text={item.text}
+                  label="Copy the reply"
+                  className="size-5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
+                />
+                <ItemMenu
+                  item={item}
+                  thread={thread}
+                  className="size-5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100 aria-expanded:opacity-100"
+                />
+              </div>
             </div>
           )}
         </div>

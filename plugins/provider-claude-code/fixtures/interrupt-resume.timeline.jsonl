@@ -65,7 +65,7 @@
 {"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"context_used":26663}}
 {"type":"item/completed","turn_id":"turn_2","item":{"id":"item_2","status":"completed","type":"agentMessage","text":"still here"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":26661},"model_context_window":1000000,"context_used":26663}}
-{"type":"turn/completed","turn_id":"turn_2","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_2","status":"completed","point":"ad481b81-824c-4bda-a309-3da36cb17103"}
 {"type":"thread/status","status":"idle"}
 {"type":"session/ended","reason":"stopped"}
 {"type":"input/submitted","text":"What exact phrase did I ask you to reply with last time?"}
@@ -77,5 +77,5 @@
 {"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"context_used":27122}}
 {"type":"item/completed","turn_id":"turn_3","item":{"id":"item_3","status":"completed","type":"agentMessage","text":"still here"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":27120},"model_context_window":1000000,"context_used":27122}}
-{"type":"turn/completed","turn_id":"turn_3","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_3","status":"completed","point":"19c40541-dc43-4a5c-90a0-f28a62c9d16b"}
 {"type":"thread/status","status":"idle"}

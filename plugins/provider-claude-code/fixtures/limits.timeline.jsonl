@@ -9,5 +9,5 @@
 {"type":"usage/updated","usage":{"total":{"input_tokens":0,"output_tokens":0},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"context_used":23207}}
 {"type":"item/completed","turn_id":"turn_1","item":{"id":"item_1","status":"completed","type":"agentMessage","text":"ok"}}
 {"type":"usage/updated","usage":{"total":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"last":{"input_tokens":2,"output_tokens":4,"cached_input_tokens":23205},"model_context_window":1000000,"context_used":23207}}
-{"type":"turn/completed","turn_id":"turn_1","status":"completed"}
+{"type":"turn/completed","turn_id":"turn_1","status":"completed","point":"2cb7afd0-0e67-4d67-80ca-5896135e276e"}
 {"type":"thread/status","status":"idle"}

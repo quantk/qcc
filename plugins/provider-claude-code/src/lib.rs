@@ -73,7 +73,7 @@ impl Provider for ClaudeCode {
                 context_usage: true,
                 images: true,
                 rate_limits: true,
-                fork: ForkSupport::None,
+                fork: ForkSupport::Any,
             },
         }
     }
@@ -115,6 +115,15 @@ impl Provider for ClaudeCode {
         if let Some(session) = &start.resume {
             args.extend(["--resume".to_owned(), session.clone()]);
         }
+        // A fork keeps the transcript up to and including the turn's last message, in
+        // a session of its own; the one it comes from is not touched.
+        if let Some(point) = &start.fork_at {
+            args.extend([
+                "--resume-session-at".to_owned(),
+                point.clone(),
+                "--fork-session".to_owned(),
+            ]);
+        }
         // The project's other folders are working directories too.
         for dir in &start.extra_dirs {
             args.extend(["--add-dir".to_owned(), dir.clone()]);
@@ -134,7 +143,9 @@ impl Provider for ClaudeCode {
             cwd: Some(start.cwd),
         })?;
 
-        let mut bridge = Bridge::new(start.resume.clone());
+        // A fork's session is new, and named by the agent once it answers.
+        let resumed = start.resume.clone().filter(|_| start.fork_at.is_none());
+        let mut bridge = Bridge::new(resumed.clone());
         if start.permission_mode == Some(PermissionMode::ReadOnly) {
             bridge = bridge.read_only();
         }
@@ -158,7 +169,7 @@ impl Provider for ClaudeCode {
         }
         // A new session is named by the agent's first message; the bridge reports it
         // with `session-identity` when it arrives.
-        Ok(SessionStarted { provider_session: start.resume })
+        Ok(SessionStarted { provider_session: resumed })
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {

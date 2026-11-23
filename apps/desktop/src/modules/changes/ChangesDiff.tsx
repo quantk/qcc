@@ -18,8 +18,9 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import type { ChangedFile } from "../../api/protocol.gen";
+import type { ChangedFile, LineComment } from "../../api/protocol.gen";
 import { type ChangesState, type ThreadChangesReader, isBinary } from "../../state/changes";
+import type { CommentStop } from "../../state/commentNav";
 import type { DiffFile, DiffLine } from "../../state/diff";
 import { type ChangesFocus, focusRow } from "../../state/focus";
 import {
@@ -49,6 +50,12 @@ const statusTag: Record<ChangedFile["kind"], string> = { added: "new", untracked
 /** Lines of context left in sight above the first change when a file opens whole. */
 const LEAD_LINES = 4;
 
+/**
+ * Pixels kept clear above a place scrolled to, for the file's header stuck over the
+ * top of the view: a header's height (as `estimateRowHeight` guesses it) and a line.
+ */
+const UNDER_HEADER = 31 + LINE_HEIGHT;
+
 /** Where the first row in sight was, to keep it in place when rows above it change. */
 type Anchor = { key: string; offset: number; header: string; headerOffset: number };
 
@@ -57,6 +64,7 @@ export function ChangesDiff({
   state,
   review,
   lead,
+  bar,
   inset,
   focus,
 }: {
@@ -65,6 +73,8 @@ export function ChangesDiff({
   review: Review;
   /** What comes before the diff (the list of files, the comments' bar); `jump` brings a file into view. */
   lead: (jump: (path: string) => void) => ReactNode;
+  /** What stays above the diff as it scrolls (the comments' bar); `go` brings a comment into view. */
+  bar?: (go: (stop: CommentStop) => void) => ReactNode;
   /** Pixels between the diff and the sides of the view. */
   inset: number;
   /** A place to bring into view, asked for from elsewhere (a reviewer's finding). */
@@ -209,9 +219,9 @@ export function ChangesDiff({
     const at = rows.findIndex((row) => row.key === key);
     const start = virtualizer.measurementsCache[at + 1]?.start;
     if (at < 0 || start === undefined) return;
-    // Held there from now on, as rows above it come and go.
-    anchor.current = { key, offset: 0, header: `f:${path}`, headerOffset: 0 };
-    element.scrollTop = start;
+    // Held there from now on, as rows above it come and go, clear of the stuck header.
+    anchor.current = { key, offset: UNDER_HEADER, header: `f:${path}`, headerOffset: 0 };
+    element.scrollTop = start - UNDER_HEADER;
   }, [rows, state, virtualizer]);
 
   // A place asked for: its file is opened, read, then scrolled to.
@@ -233,77 +243,191 @@ export function ChangesDiff({
     const at = rows.findIndex((row) => row.key === key);
     const start = virtualizer.measurementsCache[at + 1]?.start;
     if (at < 0 || start === undefined) return;
-    anchor.current = { key, offset: 0, header: `f:${want.path}`, headerOffset: 0 };
-    element.scrollTop = start;
+    const room = found !== null && found !== `f:${want.path}` ? UNDER_HEADER : 0;
+    anchor.current = { key, offset: room, header: `f:${want.path}`, headerOffset: 0 };
+    element.scrollTop = start - room;
     // Not read yet: the header is in view, so it is read; the line comes after.
     if (found !== null || failed) focusing.current = null;
   }, [rows, state, virtualizer, fileOf]);
+
+  // A comment stepped to from the bar: its file is opened, read, then scrolled to
+  // with the commented line under the stuck header, and the comment marked.
+  const seeking = useRef<{ id: LineComment["id"]; path: string } | null>(null);
+  const [seekSeq, setSeekSeq] = useState(0);
+  const goToComment = useCallback(
+    (stop: CommentStop) => {
+      seeking.current = { id: stop.comment.id, path: stop.path };
+      toggle(stop.path, true);
+      setSeekSeq((seq) => seq + 1);
+    },
+    [toggle],
+  );
+  useLayoutEffect(() => {
+    const want = seeking.current;
+    const element = scrollRef.current;
+    if (!want || !element) return;
+    const header = `f:${want.path}`;
+    const failed = state.diffs.get(want.path)?.state === "failed";
+    const read = fileOf(want.path) !== undefined;
+    let key = header;
+    let room = 0;
+    if (read) {
+      if (review.placement.adrift.get(want.path)?.some((comment) => comment.id === want.id)) {
+        key = `h:${want.path}`;
+        room = UNDER_HEADER - LINE_HEIGHT;
+      } else {
+        for (const [index, here] of review.placement.byFile.get(want.path) ?? []) {
+          if (!here.some((comment) => comment.id === want.id)) continue;
+          key = `l:${want.path}:${index}`;
+          room = UNDER_HEADER;
+          break;
+        }
+      }
+    }
+    const at = rows.findIndex((row) => row.key === key);
+    const start = virtualizer.measurementsCache[at + 1]?.start;
+    if (at < 0 || start === undefined) return;
+    anchor.current = { key, offset: room, header, headerOffset: 0 };
+    element.scrollTop = start - room;
+    // Not read yet: its header is in view, so it is read; the comment comes after.
+    if (read || failed) {
+      seeking.current = null;
+      if (read) review.flash(want.id);
+    }
+  }, [rows, state, virtualizer, fileOf, review, seekSeq]);
+
+  // The header of the file at the top of the view, stuck there while its diff is in
+  // sight and pushed up by the next file's. The rows are placed absolutely, out of
+  // their file's flow, so the header is drawn again over them rather than made sticky.
+  const fileSpans = useMemo(() => {
+    const spans = new Map<string, { header: number; end: number }>();
+    rows.forEach((row, index) => {
+      if (row.kind === "file") spans.set(row.path, { header: index, end: index });
+      else if (row.kind === "end") spans.get(row.path)!.end = index;
+    });
+    return spans;
+  }, [rows]);
+  const stuck = stuckHeader(rows, fileSpans, virtualizer.measurementsCache, virtualizer.scrollOffset ?? 0);
 
   const gutter = `calc(${extent.digits}ch + 12px)`;
   const width = `max(100%, calc(${2 * inset + 2}px + 2 * ${gutter} + ${extent.columns + 3}ch + 12px))`;
   const pinned: CSSProperties = { width: viewWidth || "100%", paddingLeft: inset, paddingRight: inset };
 
+  const stuckRow = stuck && rows[stuck.index];
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto [overflow-anchor:none]" onScroll={remember}>
-      <div
-        className="relative font-[family-name:var(--mono)] text-[12.5px]"
-        style={{ height: virtualizer.getTotalSize(), width, lineHeight: `${LINE_HEIGHT}px` }}
-      >
-        {items.map((item) => {
-          const place: CSSProperties = { transform: `translateY(${item.start}px)` };
-          if (item.index === 0) {
+    <div data-changes-view className="flex min-h-0 flex-1 flex-col">
+      {bar?.(goToComment)}
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto [overflow-anchor:none]" onScroll={remember}>
+        {stuck && stuckRow?.kind === "file" && (
+          // No height of its own, so the rows under it keep their places.
+          <div className="pointer-events-none sticky top-0 left-0 z-10 h-0" style={{ width: viewWidth || "100%" }}>
+            <div
+              className="pointer-events-auto bg-background font-sans leading-normal"
+              style={{ ...pinned, width: "100%", transform: `translateY(${stuck.shift}px)` }}
+            >
+              <PinnedRow
+                row={stuckRow}
+                stuck
+                changed={changed.get(stuckRow.path)}
+                file={fileOf(stuckRow.path)}
+                state={state}
+                review={review}
+                toggle={toggle}
+                showWhole={showWhole}
+              />
+            </div>
+          </div>
+        )}
+        <div
+          className="relative font-[family-name:var(--mono)] text-[12.5px]"
+          style={{ height: virtualizer.getTotalSize(), width, lineHeight: `${LINE_HEIGHT}px` }}
+        >
+          {items.map((item) => {
+            const place: CSSProperties = { transform: `translateY(${item.start}px)` };
+            if (item.index === 0) {
+              return (
+                <div key={item.key} data-index={0} ref={virtualizer.measureElement} className="absolute top-0 left-0 w-full" style={place}>
+                  <div className="sticky left-0 py-3 font-sans text-sm leading-normal" style={pinned}>
+                    {lead(jump)}
+                  </div>
+                </div>
+              );
+            }
+            const row = rows[item.index - 1]!;
+            if (row.kind === "line") {
+              const file = fileOf(row.path);
+              const line = file?.lines[row.index];
+              if (!file || !line) return null;
+              return (
+                <LineRow
+                  key={item.key}
+                  file={file}
+                  index={row.index}
+                  line={line}
+                  tokens={diffHighlights.tokens(file, row.index)}
+                  gutter={gutter}
+                  inset={inset}
+                  start={item.start}
+                  pick={review.addon.pick && (review.addon.canPick?.(file, row.index) ?? true) ? review.addon.pick : undefined}
+                />
+              );
+            }
             return (
-              <div key={item.key} data-index={0} ref={virtualizer.measureElement} className="absolute top-0 left-0 w-full" style={place}>
-                <div className="sticky left-0 py-3 font-sans text-sm leading-normal" style={pinned}>
-                  {lead(jump)}
+              <div
+                key={item.key}
+                data-index={item.index}
+                ref={virtualizer.measureElement}
+                className="absolute top-0 left-0 w-full font-sans leading-normal"
+                style={place}
+              >
+                <div className="sticky left-0" style={pinned}>
+                  <PinnedRow
+                    row={row}
+                    changed={changed.get(row.path)}
+                    file={fileOf(row.path)}
+                    state={state}
+                    review={review}
+                    toggle={toggle}
+                    showWhole={showWhole}
+                  />
                 </div>
               </div>
             );
-          }
-          const row = rows[item.index - 1]!;
-          if (row.kind === "line") {
-            const file = fileOf(row.path);
-            const line = file?.lines[row.index];
-            if (!file || !line) return null;
-            return (
-              <LineRow
-                key={item.key}
-                file={file}
-                index={row.index}
-                line={line}
-                tokens={diffHighlights.tokens(file, row.index)}
-                gutter={gutter}
-                inset={inset}
-                start={item.start}
-                pick={review.addon.pick && (review.addon.canPick?.(file, row.index) ?? true) ? review.addon.pick : undefined}
-              />
-            );
-          }
-          return (
-            <div
-              key={item.key}
-              data-index={item.index}
-              ref={virtualizer.measureElement}
-              className="absolute top-0 left-0 w-full font-sans leading-normal"
-              style={place}
-            >
-              <div className="sticky left-0" style={pinned}>
-                <PinnedRow
-                  row={row}
-                  changed={changed.get(row.path)}
-                  file={fileOf(row.path)}
-                  state={state}
-                  review={review}
-                  toggle={toggle}
-                  showWhole={showWhole}
-                />
-              </div>
-            </div>
-          );
-        })}
+          })}
+        </div>
       </div>
     </div>
   );
+}
+
+/**
+ * Which file's header to draw stuck over the top of the view scrolled to `top`,
+ * and how far up the next file pushes it: none while the view shows what comes
+ * before the diff, or the header itself in its place. `measured[i + 1]` is
+ * `rows[i]` (the first item is the lead).
+ */
+function stuckHeader(
+  rows: readonly DiffRow[],
+  spans: ReadonlyMap<string, { header: number; end: number }>,
+  measured: readonly { start: number; end: number; size: number }[],
+  top: number,
+): { index: number; shift: number } | null {
+  if (top <= 0 || measured.length < 2) return null;
+  let low = 1;
+  let high = measured.length - 1;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (measured[middle]!.end > top) high = middle;
+    else low = middle + 1;
+  }
+  const row = rows[low - 1];
+  const span = row && spans.get(row.path);
+  const header = span && measured[span.header + 1];
+  const end = span && measured[span.end + 1];
+  if (!span || !header || !end || header.start >= top) return null;
+  // The file's box closes at the top of its end row and a pixel of border.
+  const shift = Math.min(0, end.start + 1 - top - header.size);
+  return shift <= -header.size ? null : { index: span.header, shift };
 }
 
 /** The width of `ref`'s box as it changes. */
@@ -400,6 +524,7 @@ const LineRow = memo(function LineRow({
 
 function PinnedRow({
   row,
+  stuck = false,
   changed,
   file,
   state,
@@ -408,6 +533,8 @@ function PinnedRow({
   showWhole,
 }: {
   row: Exclude<DiffRow, { kind: "line" }>;
+  /** Drawn over the top of the view as the file scrolls under it, rather than in its place. */
+  stuck?: boolean;
   changed: ChangedFile | undefined;
   file: DiffFile | undefined;
   state: ChangesState;
@@ -425,7 +552,9 @@ function PinnedRow({
       const whole = state.full.has(row.path);
       const wholeLabel = whole ? "Show only the changes" : "Show the whole file";
       return (
-        <div className="flex overflow-hidden rounded-t-[7px] border border-b-0 bg-[var(--panel)]">
+        <div
+          className={`flex overflow-hidden border bg-[var(--panel)] ${stuck ? "rounded-b-[7px] shadow-sm" : "rounded-t-[7px] border-b-0"}`}
+        >
           <Button
             variant="ghost"
             className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-none bg-[var(--panel)] px-2.5 py-[5px] text-left font-normal group"

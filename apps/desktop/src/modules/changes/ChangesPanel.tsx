@@ -8,7 +8,7 @@ import { plural } from "../../util/format";
 import { Button } from "@/components/ui/button";
 import { ChangedFiles } from "./ChangedFiles";
 import { ChangesDiff } from "./ChangesDiff";
-import { ReviewBar, useReview } from "./review";
+import { CommentsBar, ReviewBar, useReview } from "./review";
 import { ScopePicker, nothingChanged, picking } from "./ScopePicker";
 import { useChanges } from "./useChanges";
 
@@ -19,7 +19,8 @@ import { useChanges } from "./useChanges";
 export function ChangesPanel({ thread }: ThreadContext) {
   const { reader, state, changes, error, loading, totals, reload, setScope } = useChanges(thread);
   const files = useMemo(() => readFiles(state), [state]);
-  const paths = useMemo(() => new Set(changes?.files.map((file) => file.path)), [changes]);
+  const order = useMemo(() => changes?.files.map((file) => file.path) ?? [], [changes]);
+  const paths = useMemo(() => new Set(order), [order]);
   const review = useReview(thread, files, paths);
   const count = changes?.files.length ?? 0;
 
@@ -55,6 +56,7 @@ export function ChangesPanel({ thread }: ThreadContext) {
           state={state}
           review={review}
           inset={12}
+          bar={(go) => <CommentsBar thread={thread} review={review} paths={order} go={go} compact />}
           lead={(jump) => (
             <div className="flex flex-col gap-3">
               {count === 0 ? (
@@ -62,7 +64,7 @@ export function ChangesPanel({ thread }: ThreadContext) {
               ) : (
                 <ChangedFiles changes={changes} open={jump} />
               )}
-              <ReviewBar thread={thread} review={review} compact />
+              <ReviewBar thread={thread} review={review} />
             </div>
           )}
         />

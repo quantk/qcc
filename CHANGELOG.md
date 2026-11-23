@@ -4,6 +4,16 @@ All notable changes to qcc are written down here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and qcc follows
 [Semantic Versioning](https://semver.org/); see [Versioning](docs/releasing.md#versioning).
 
+## [0.1.0-rc.2] - 2026-11-23
+
+A second candidate: 0.1.0-rc.1 was never published, because its macOS builds were cancelled.
+Protocol version 8, plugin API 0.1.
+
+### Fixed
+
+- The macOS builds of the CLI, the daemon and the desktop app run on `macos-26` runners: GitHub
+  retired `macos-14`, which cancelled every macOS job of 0.1.0-rc.1.
+
 ## [0.1.0-rc.1] - 2026-11-23
 
 The first release: a candidate to check the release builds. Protocol version 8, plugin API 0.1.

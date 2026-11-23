@@ -37,7 +37,7 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
               <CopyButton
                 text={item.text}
                 label="Copy the reply"
-                className="opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
+                className="-ml-1.5 opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
               />
             </div>
           )}

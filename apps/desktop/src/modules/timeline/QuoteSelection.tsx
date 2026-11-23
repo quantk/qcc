@@ -4,14 +4,15 @@ import { type RefObject, useCallback, useEffect, useRef, useState } from "react"
 import { appendQuote } from "../../state/quote";
 import { changeComposer } from "./composerInput";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /** Where the button stands: over the selection, in the frame's coordinates. */
 type Spot = { left: number; top: number; text: string };
 
 /** Room kept between the button and the edges of the frame. */
 const MARGIN = 8;
-/** How far above the selection the button stands. */
-const LIFT = 36;
+/** Room between the button and the selected line. */
+const GAP = 6;
 
 /**
  * A button over text the user selected in the timeline that quotes it into the
@@ -41,16 +42,23 @@ export function QuoteSelection(props: {
     const text = selection.toString();
     if (text.trim() === "") return hide();
     const range = selection.getRangeAt(selection.rangeCount - 1);
-    const rects = range.getClientRects();
-    const rect = rects.length > 0 ? rects[0]! : range.getBoundingClientRect();
+    // The selection's first and last lines. The engine does not list a range's boxes
+    // top first, and empty ones stand for line breaks.
+    const lines = [...range.getClientRects()].filter((box) => box.width > 0 && box.height > 0);
+    if (lines.length === 0) lines.push(range.getBoundingClientRect());
+    const rect = lines.reduce((first, box) => (box.top < first.top ? box : first));
+    const last = lines.reduce((end, box) => (box.bottom > end.bottom ? box : end));
     const bounds = box.getBoundingClientRect();
     // Scrolled out of view: nothing to stand over.
-    if (rect.bottom < bounds.top || rect.top > bounds.bottom) return hide();
+    if (last.bottom < bounds.top || rect.top > bounds.bottom) return hide();
     const width = button.current?.offsetWidth ?? 88;
+    const height = button.current?.offsetHeight ?? 32;
     const left = Math.min(Math.max(rect.left - bounds.left, MARGIN), bounds.width - width - MARGIN);
-    // Above the first line when there is room, under it otherwise.
-    const above = rect.top - bounds.top - LIFT;
-    const top = above >= MARGIN ? above : rect.bottom - bounds.top + MARGIN;
+    // Above the first line when there is room, else under the last one, and in the
+    // frame either way.
+    const above = rect.top - bounds.top - height - GAP;
+    const below = last.bottom - bounds.top + GAP;
+    const top = above >= MARGIN ? above : Math.max(MARGIN, Math.min(below, bounds.height - height - MARGIN));
     setSpot({ left, top, text });
   }, [viewport, frame, hide]);
 
@@ -113,7 +121,7 @@ export function QuoteSelection(props: {
   return (
     <div
       ref={button}
-      className={spot ? "absolute z-20" : "pointer-events-none absolute invisible"}
+      className={cn("absolute z-20 rounded-md bg-popover shadow-md", !spot && "pointer-events-none invisible")}
       style={spot ? { left: spot.left, top: spot.top } : { left: 0, top: 0 }}
       // Pressing the button must not take the selection away before it is read.
       onPointerDown={(event) => event.preventDefault()}
@@ -125,8 +133,7 @@ export function QuoteSelection(props: {
         size="sm"
         tabIndex={spot ? 0 : -1}
         aria-hidden={!spot}
-        className="bg-popover shadow-md"
-        title="Quote the selection in a reply"
+        aria-label="Quote the selection in a reply"
         onClick={quote}
       >
         <QuoteIcon /> Reply

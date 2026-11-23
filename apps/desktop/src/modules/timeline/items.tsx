@@ -2,7 +2,7 @@ import { FilePenIcon, FileTextIcon, ListTodoIcon, SearchIcon, WrenchIcon } from 
 
 import { parseDiff } from "../../state/diff";
 import { relativePath } from "../../util/format";
-import { CommandTrace, DiffView, ItemTrace, Markdown, ReasoningTrace, StatusMark, ToolTrace } from "../../ui/kit";
+import { CommandTrace, CopyButton, DiffView, ItemTrace, Markdown, ReasoningTrace, StatusMark, ToolTrace } from "../../ui/kit";
 import type { ItemRendererProps } from "../../ui/registry";
 
 export const CORE_ITEM_TYPES = [
@@ -27,9 +27,20 @@ export function CoreItem({ item, thread }: ItemRendererProps) {
   switch (item.type) {
     case "agentMessage":
       return (
-        <div className="message agent">
+        <div className="message agent group/message">
           {item.text ? <Markdown text={item.text} /> : <StatusMark status={item.status} />}
-          {item.text && item.status !== "pending" && <StatusMark status={item.status} />}
+          {item.text && item.status !== "pending" && (
+            // The reply's own actions: faint until the pointer is over the reply, so a
+            // long conversation does not read as a column of buttons.
+            <div className="mt-1 flex items-center gap-1.5">
+              <StatusMark status={item.status} />
+              <CopyButton
+                text={item.text}
+                label="Copy the reply"
+                className="opacity-0 transition-opacity group-hover/message:opacity-100 focus-visible:opacity-100"
+              />
+            </div>
+          )}
         </div>
       );
     case "reasoning":

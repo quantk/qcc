@@ -16,3 +16,4 @@ export { Remembered, useRemembered } from "./Remembered";
 export { AttachmentTile, MessageAttachments, PictureDialog } from "./Attachments";
 export { KeepInPlace, type Place, useKeepInPlace } from "./KeepInPlace";
 export { ProjectIconView, projectIconLabel } from "./ProjectIcon";
+export { CopyButton } from "./CopyButton";

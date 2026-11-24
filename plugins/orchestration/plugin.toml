@@ -2,7 +2,7 @@ id = "orchestration"
 name = "Orchestration"
 description = "Lets agents delegate to other agents through the qcc CLI: the qcc-orchestration skill and the handoff and review commands."
 version = "0.1.0"
-api = "0.1"
+api = "0.2"
 wasm = "plugin.wasm"
 
 [permissions]

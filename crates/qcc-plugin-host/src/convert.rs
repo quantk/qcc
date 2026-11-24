@@ -1,5 +1,6 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
+use qcc_domain::plausible_icon;
 use qcc_domain::{AgentSkill, Attachment, Compaction, ForkSupport, SettingField, SettingKind};
 use qcc_domain::{
     ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta,
@@ -280,6 +281,8 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                     .map(mode_from_wit)
                     .collect(),
             },
+            // A mark the app could not draw is better left out than shown broken.
+            icon: p.icon.filter(|icon| plausible_icon(icon)),
         }),
         wit::Contribution::Environment(e) => Contribution::Environment(EnvironmentInfo {
             id: e.id,
@@ -477,6 +480,7 @@ pub(crate) fn provider_info(info: ProviderInfo) -> wit::ProviderInfo {
                 ForkSupport::Any => wit::ForkSupport::Any,
             },
         },
+        icon: info.icon,
     }
 }
 

@@ -6,7 +6,7 @@ use crate::permissions::Permissions;
 
 /// The plugin API version this host implements. Plugins state the version they were
 /// built against; before 1.0 the versions must match exactly.
-pub const API_VERSION: &str = "0.1";
+pub const API_VERSION: &str = "0.2";
 
 /// File name of the manifest inside a plugin directory.
 pub const MANIFEST_FILE: &str = "plugin.toml";
@@ -92,7 +92,7 @@ mod tests {
     const BASE: &str = r#"
         id = "provider-echo"
         version = "0.1.0"
-        api = "0.1"
+        api = "0.2"
         wasm = "plugin.wasm"
     "#;
 
@@ -121,7 +121,7 @@ mod tests {
         let with = |from: &str, to: &str| Manifest::parse(&BASE.replace(from, to));
         assert!(matches!(with("provider-echo", "Echo!"), Err(ManifestError::InvalidId(_))));
         assert!(matches!(
-            with("api = \"0.1\"", "api = \"9.0\""),
+            with("api = \"0.2\"", "api = \"9.0\""),
             Err(ManifestError::ApiMismatch { .. })
         ));
         assert!(matches!(with("plugin.wasm", "../evil.wasm"), Err(ManifestError::PathEscapes(_))));

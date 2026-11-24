@@ -10,7 +10,7 @@
 /// Every import but `log`, `completions` and `views` is gated by a permission the
 /// plugin requests in its manifest, and so are the events about every thread
 /// (`turn-ended`: `turn-events`; `thread-changed`: `thread-events`).
-package qcc:plugin@0.1.0;
+package qcc:plugin@0.2.0;
 
 /// The vocabulary shared by imports and exports.
 interface types {
@@ -383,6 +383,13 @@ interface types {
     id: string,
     name: string,
     capabilities: provider-capabilities,
+    /// The agent's mark, as an SVG document (`<svg xmlns=... viewBox=...>...</svg>`),
+    /// that the app draws next to the agent's name at 12 to 16 pixels. Only its
+    /// shape counts: the app paints it in the color of the text around it, so a
+    /// mark of one color with a transparent background fits best. A mark larger
+    /// than 16 KiB or not an SVG is left out. Absent: the app shows the name's
+    /// initials.
+    icon: option<string>,
   }
 
   record environment-info {

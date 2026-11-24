@@ -48,6 +48,7 @@ pub use provider::{
     EnvironmentChanges, EnvironmentInfo, ForkSupport, McpServer, McpServerStatus, McpState,
     McpTransport, ModelInfo, PermissionMode, ProviderCapabilities, ProviderInfo, Revision,
     SettingField, SettingKind, SkillInfo, SkillRef, UiPlacement, UiScope, UiViewInfo,
+    plausible_icon,
 };
 pub use stats::{ToolBucket, ToolKind, ToolUse};
 pub use thread::{

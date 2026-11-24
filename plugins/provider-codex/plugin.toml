@@ -2,7 +2,7 @@ id = "provider-codex"
 name = "Codex"
 description = "Runs Codex sessions through the codex CLI."
 version = "0.1.0"
-api = "0.1"
+api = "0.2"
 wasm = "plugin.wasm"
 
 [permissions]

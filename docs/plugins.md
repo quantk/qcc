@@ -169,6 +169,17 @@ the bridge whatever permission request still comes. How the bundled providers do
 [Permission mode](agents.md#permission-mode). A plugin that starts threads can check the list
 (`threads::providers`) and fall back when an agent does not offer the mode, as `reviewers` does.
 
+## The agent's mark
+
+`ProviderInfo::icon` is the agent's logo as an SVG document, which the app shows where the agent's
+name does not fit, such as a thread's row in the sidebar, at 12 to 16 pixels. Only its shape
+counts: the app uses it as a mask and paints it in the color of the text around it, so it fits the
+light and the dark theme alike and its own colors, scripts and links play no part. Give a mark of
+one color on a transparent background with a square `viewBox`, up to 16 KiB; anything else (larger,
+or not starting with `<svg`) is left out by the host. Without a mark the app shows the initials of
+the agent's name. The bundled providers keep theirs next to their code (`icon.svg`,
+`include_str!`), with where the mark comes from and its license noted inside the file.
+
 ## Forking sessions
 
 A provider that can start a new session from a point of an old one, leaving the old one as it

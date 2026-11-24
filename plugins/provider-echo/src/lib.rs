@@ -583,6 +583,8 @@ impl Provider for Echo {
         ProviderInfo {
             id: "echo".into(),
             name: "Echo".into(),
+            // A test agent has no mark: the app shows its initials.
+            icon: None,
             capabilities: ProviderCapabilities {
                 resume: true,
                 steer: true,

@@ -128,6 +128,24 @@ pub struct ProviderInfo {
     pub id: ProviderId,
     pub name: String,
     pub capabilities: ProviderCapabilities,
+    /// The agent's mark as an SVG document. Clients use only its shape and paint
+    /// it in the color of the text around it. Absent: they show the name's initials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+impl ProviderInfo {
+    /// The largest mark a provider may declare; a larger one is left out.
+    pub const MAX_ICON_BYTES: usize = 16 * 1024;
+}
+
+/// Whether `icon` can be a provider's mark: a small SVG document. It is only a
+/// first check; the client still draws it as an image, never as markup of its own.
+pub fn plausible_icon(icon: &str) -> bool {
+    let icon = icon.trim();
+    icon.len() <= ProviderInfo::MAX_ICON_BYTES
+        && icon.starts_with("<svg")
+        && icon.ends_with("</svg>")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -455,6 +473,19 @@ pub enum McpState {
 #[cfg(test)]
 mod tests {
     use super::PermissionMode::{AcceptEdits, Ask, Auto, Full};
+    use super::{ProviderInfo, plausible_icon};
+
+    #[test]
+    fn a_mark_is_a_small_svg_document() {
+        let mark = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>"#;
+        assert!(plausible_icon(mark));
+        assert!(plausible_icon(&format!("  {mark}\n")));
+        assert!(!plausible_icon("<img src=x>"));
+        assert!(!plausible_icon("<svg>"));
+        assert!(!plausible_icon(""));
+        let path = "M0 0".repeat(ProviderInfo::MAX_ICON_BYTES / 4);
+        assert!(!plausible_icon(&format!("<svg><path d=\"{path}\"/></svg>")));
+    }
 
     #[test]
     fn modes_are_ordered_from_strictest_to_loosest() {

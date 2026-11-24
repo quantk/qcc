@@ -26,6 +26,8 @@ struct Agent {
     /// Whether it forks a session (ACP's `session/fork`, which takes no point in it):
     /// the whole session as it is now, or not at all.
     fork: bool,
+    /// Its mark as an SVG document, with where it comes from noted inside.
+    icon: Option<&'static str>,
 }
 
 /// opencode's permission rules for a read-only session: everything refused but the
@@ -42,6 +44,7 @@ const AGENTS: &[Agent] = &[Agent {
     models_args: Some(&["models"]),
     read_only_env: Some(("OPENCODE_PERMISSION", OPENCODE_READ_ONLY)),
     fork: true,
+    icon: Some(include_str!("../icons/opencode.svg")),
 }];
 
 #[derive(Default)]
@@ -60,6 +63,7 @@ impl Provider for AcpProvider {
         ProviderInfo {
             id: self.agent.id.into(),
             name: self.agent.name.into(),
+            icon: self.agent.icon.map(Into::into),
             capabilities: ProviderCapabilities {
                 resume: true,
                 // The protocol has no way to add input to a running prompt.

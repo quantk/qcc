@@ -1051,6 +1051,11 @@ export type ProviderInfo = {
 	id: ProviderId,
 	name: string,
 	capabilities: ProviderCapabilities,
+	/**
+	 *  The agent's mark as an SVG document. Clients use only its shape and paint
+	 *  it in the color of the text around it. Absent: they show the name's initials.
+	 */
+	icon?: string | null,
 };
 
 /**  The latest known limits of one provider's account. */

@@ -634,6 +634,7 @@ fn provider(id: &str, modes: &[PermissionMode]) -> ProviderInfo {
             permission_modes: modes.to_vec(),
             ..ProviderCapabilities::default()
         },
+        icon: None,
     }
 }
 

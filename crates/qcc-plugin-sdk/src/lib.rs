@@ -25,6 +25,8 @@
 //!                 rate_limits: false,
 //!                 fork: ForkSupport::None,
 //!             },
+//!             // An SVG document of the agent's mark, or `None` for its initials.
+//!             icon: None,
 //!         }
 //!     }
 //!

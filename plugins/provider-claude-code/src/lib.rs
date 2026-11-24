@@ -57,6 +57,8 @@ impl Provider for ClaudeCode {
         ProviderInfo {
             id: "claude-code".into(),
             name: "Claude Code".into(),
+            // The Claude mark; where it comes from is noted inside the file.
+            icon: Some(include_str!("../icon.svg").into()),
             capabilities: ProviderCapabilities {
                 resume: true,
                 steer: true,

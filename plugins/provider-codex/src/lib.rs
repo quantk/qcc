@@ -28,6 +28,8 @@ impl Provider for Codex {
         ProviderInfo {
             id: "codex".into(),
             name: "Codex".into(),
+            // The Codex mark; where it comes from is noted inside the file.
+            icon: Some(include_str!("../icon.svg").into()),
             capabilities: ProviderCapabilities {
                 resume: true,
                 steer: true,

@@ -85,6 +85,25 @@ export function providerMark(name: string): string {
   return initial(first).toUpperCase() + next;
 }
 
+/**
+ * How an agent is drawn where its name does not fit: the mark its provider
+ * declares, as an image to paint in the text's color, or the initials of its name.
+ */
+export type AgentMark = { kind: "logo"; name: string; src: string } | { kind: "initials"; name: string; text: string };
+
+/** The mark of the agent `id`, its initials when its provider declares none or none that looks like SVG. */
+export function agentMark(plugins: readonly PluginInfo[], id: string): AgentMark {
+  const provider = findProvider(plugins, id);
+  const name = provider?.name ?? id;
+  const icon = provider?.icon?.trim();
+  // The daemon already leaves out what is no SVG; this keeps an older one's word from
+  // turning into a broken image. As an image, an SVG runs no scripts of its own.
+  if (icon?.startsWith("<svg") && icon.endsWith("</svg>")) {
+    return { kind: "logo", name, src: `data:image/svg+xml,${encodeURIComponent(icon)}` };
+  }
+  return { kind: "initials", name, text: providerMark(name) };
+}
+
 /** The first character of a word, whole even when it is not one UTF-16 unit. */
 function initial(word: string): string {
   return String.fromCodePoint(word.codePointAt(0) ?? 63);

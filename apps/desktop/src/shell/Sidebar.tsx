@@ -17,9 +17,9 @@ import type { Thread } from "../api/protocol.gen";
 import {
   activityText,
   attentionLabel,
+  agentMark,
   attentionOf,
-  providerMark,
-  providerName,
+  type AgentMark as Mark,
   threadGroups,
   threadProject,
   threadTitle,
@@ -34,7 +34,7 @@ import { store, useApp } from "../state/store";
 import { BlockMenu, useSlot } from "../ui/blocks";
 import { type AppBlock, type ViewBadge, useUi } from "../ui/registry";
 import { isAppBlock, openViewCommand } from "../ui/views";
-import { ResizeHandle, ThreadMenu } from "../ui/kit";
+import { AgentMarkView, ResizeHandle, ThreadMenu } from "../ui/kit";
 import { plural, relativeTime } from "../util/format";
 import { useNow } from "../util/useNow";
 import { SidebarBlocks } from "./SidebarBlocks";
@@ -89,7 +89,7 @@ export function Sidebar() {
     const { thread, depth, children } = row;
     const attention = attentionOf(thread);
     const unread = isUnread(thread, seen);
-    const provider = providerName(plugins, thread.provider);
+    const mark = agentMark(plugins, thread.provider);
     const indent = Math.min(depth, MAX_INDENT);
     const over = drag?.over?.target === thread.id ? drag.over : null;
     const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
@@ -160,7 +160,7 @@ export function Sidebar() {
           <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
           <span className={`thread-meta flex min-w-0 items-center gap-1.5${children > 0 ? " mr-11" : ""}`}>
             {/* The agent stays in sight as a mark, so a status takes only the text's place. */}
-            <AgentMark name={provider} />
+            <AgentMark mark={mark} />
             {status ? <span className="min-w-0 truncate">{status}</span> : <ProjectLabel thread={thread} />}
           </span>
         </ThreadMenu>
@@ -388,20 +388,13 @@ function ViewButtonBody({
 }
 
 /** The agent of a thread row, as a mark that names it in full on hover. */
-function AgentMark({ name }: { name: string }) {
+function AgentMark({ mark }: { mark: Mark }) {
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={name}
-            className="inline-flex h-4 min-w-4 flex-none items-center justify-center rounded-sm border border-border px-0.5 text-[10px] leading-none font-medium text-muted-foreground"
-          />
-        }
-      >
-        {providerMark(name)}
+      <TooltipTrigger render={<span className="inline-flex flex-none text-muted-foreground" />}>
+        <AgentMarkView mark={mark} />
       </TooltipTrigger>
-      <TooltipContent side="right">{name}</TooltipContent>
+      <TooltipContent side="right">{mark.name}</TooltipContent>
     </Tooltip>
   );
 }

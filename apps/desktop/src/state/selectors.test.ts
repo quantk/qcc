@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PluginInfo, Project, Thread } from "../api/protocol.gen";
 import {
+  agentMark,
   allowedModes,
   cardTime,
   changesShown,
@@ -186,6 +187,28 @@ describe("what cards and rows say about a thread", () => {
     expect(providerMark("provider-echo")).toBe("PE");
     expect(providerMark("x")).toBe("X");
     expect(providerMark("  ")).toBe("?");
+  });
+
+  it("draws an agent by the mark its provider declares, by its initials without one", () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>';
+    const marked = [
+      {
+        id: "p",
+        providers: [
+          { id: "claude-code", name: "Claude Code", icon: `${svg}\n` },
+          { id: "echo", name: "Echo" },
+          { id: "odd", name: "Odd one", icon: "<img src=x onerror=alert(1)>" },
+        ],
+      },
+    ] as unknown as PluginInfo[];
+    expect(agentMark(marked, "claude-code")).toEqual({
+      kind: "logo",
+      name: "Claude Code",
+      src: `data:image/svg+xml,${encodeURIComponent(svg)}`,
+    });
+    expect(agentMark(marked, "echo")).toEqual({ kind: "initials", name: "Echo", text: "Ec" });
+    expect(agentMark(marked, "odd")).toEqual({ kind: "initials", name: "Odd one", text: "OO" });
+    expect(agentMark(marked, "gone-agent")).toEqual({ kind: "initials", name: "gone-agent", text: "GA" });
   });
 
   it("names a folder by its last part", () => {

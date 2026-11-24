@@ -47,8 +47,11 @@ thread with an unread answer is highlighted in the sidebar too; it becomes read 
 Under its title a sidebar row shows the agent as a short mark, its logo or else the initials of
 its name (the full name on hover), and the project the thread works on: the last folder of its
 directory, or of the checkout a worktree is made from, with a branch icon for a worktree; hover it
-for the full path. While the thread waits for
-you, has a new reply, failed or is working, the status takes the project's place.
+for the full path. While the thread waits for you, has a new reply, failed or is working, the
+status follows the project after a dot (`· Needs your answer`, `· Run cargo test`); hover it for
+the whole text. Where the row is narrow, what the agent is doing is cut first and the project keeps
+its part of the row, while a question or a failure, shown in color, takes most of the row before it
+is cut.
 Threads started by other agents never count as unread: their answers are collected by the parent
 agent.
 

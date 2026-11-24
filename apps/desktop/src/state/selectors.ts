@@ -211,6 +211,22 @@ export function allowedModes(
   };
 }
 
+/**
+ * What a sidebar row says about its thread after the project, and how loudly: a
+ * question or a failure stands out, a new reply or what the agent is doing does
+ * not. `null` when there is nothing to say.
+ */
+export type RowStatus = { text: string; tone: "waiting" | "failed" | "quiet" };
+
+export function rowStatus(thread: Thread, unread: boolean): RowStatus | null {
+  const attention = attentionOf(thread);
+  if (attention === "waiting") return { text: "Needs your answer", tone: "waiting" };
+  if (attention === "idle" && unread) return { text: "New reply", tone: "quiet" };
+  if (attention === "failed") return { text: "Failed", tone: "failed" };
+  const activity = attention === "active" ? activityText(thread) : "";
+  return activity ? { text: activity, tone: "quiet" } : null;
+}
+
 /** One line saying what the agent last did, or is doing. */
 export function activityText(thread: Thread): string {
   if (!thread.activity) return "";

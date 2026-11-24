@@ -15,10 +15,11 @@ import { useMemo, useState } from "react";
 import type { Thread } from "../api/protocol.gen";
 
 import {
-  activityText,
   attentionLabel,
   agentMark,
   attentionOf,
+  rowStatus,
+  type RowStatus,
   type AgentMark as Mark,
   threadGroups,
   threadProject,
@@ -93,17 +94,7 @@ export function Sidebar() {
     const indent = Math.min(depth, MAX_INDENT);
     const over = drag?.over?.target === thread.id ? drag.over : null;
     const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
-    // What needs saying about the thread takes the place of its project.
-    const status =
-      attention === "waiting"
-        ? "Needs your answer"
-        : unread && attention === "idle"
-          ? "New reply"
-          : attention === "failed"
-            ? "Failed"
-            : attention === "active" && thread.activity
-              ? activityText(thread)
-              : null;
+    const status = rowStatus(thread, unread);
     return (
       <div
         key={thread.id}
@@ -159,9 +150,13 @@ export function Sidebar() {
           </span>
           <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
           <span className={`thread-meta flex min-w-0 items-center gap-1.5${children > 0 ? " mr-11" : ""}`}>
-            {/* The agent stays in sight as a mark, so a status takes only the text's place. */}
             <AgentMark mark={mark} />
-            {status ? <span className="min-w-0 truncate">{status}</span> : <ProjectLabel thread={thread} />}
+            {/* The project always stays; ProjectLabel says which of the two gives way first. */}
+            <ProjectLabel
+              thread={thread}
+              beside={status === null ? "nothing" : status.tone === "quiet" ? "quiet" : "loud"}
+            />
+            {status && <StatusText status={status} />}
           </span>
         </ThreadMenu>
         {children > 0 && <FamilyToggle row={row} />}
@@ -400,13 +395,16 @@ function AgentMark({ mark }: { mark: Mark }) {
 }
 
 /** The project a thread row works on, with its full path on hover and a branch for a worktree. */
-function ProjectLabel({ thread }: { thread: Thread }) {
+function ProjectLabel({ thread, beside }: { thread: Thread; beside: "nothing" | "quiet" | "loud" }) {
+  // Beside what the agent is doing the project keeps up to its share of the row and the
+  // status is cut first; beside a question or a failure it takes what the status leaves.
+  const width = beside === "quiet" ? "max-w-[55%] flex-none" : "";
   const project = threadProject(thread);
   // Until it is ready, a worktree thread still works in the checkout itself.
   const worktree = thread.environment?.state === "ready" && thread.cwd !== project.path;
   return (
     <Tooltip>
-      <TooltipTrigger render={<span className="flex min-w-0 items-center gap-1" />}>
+      <TooltipTrigger render={<span className={`flex min-w-0 items-center gap-1 ${width}`} />}>
         <span className="min-w-0 truncate">{project.name}</span>
         {thread.environment && <GitBranchIcon aria-label="In a worktree" className="size-3 flex-none" />}
       </TooltipTrigger>
@@ -417,6 +415,22 @@ function ProjectLabel({ thread }: { thread: Thread }) {
         )}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+/** What a row says after its project, cut first when the row is narrow; whole on hover. */
+function StatusText({ status }: { status: RowStatus }) {
+  const tone = { waiting: " font-medium text-(--blue)", failed: " font-medium text-destructive", quiet: "" }[status.tone];
+  // A quiet status takes what is left and is cut first. A loud one is short and keeps its
+  // width up to most of the row, so the project gives way to it but never wholly.
+  const room = status.tone === "quiet" ? "min-w-0 flex-1" : "max-w-[60%] min-w-0 flex-none";
+  return (
+    <span className={`flex items-center gap-1.5 ${room}`} title={status.text}>
+      <span aria-hidden className="flex-none">
+        ·
+      </span>
+      <span className={`min-w-0 truncate${tone}`}>{status.text}</span>
+    </span>
   );
 }
 

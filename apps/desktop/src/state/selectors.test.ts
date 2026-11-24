@@ -13,6 +13,7 @@ import {
   providerMark,
   providerName,
   rootOf,
+  rowStatus,
   threadGroups,
   threadProject,
   threadTitle,
@@ -209,6 +210,25 @@ describe("what cards and rows say about a thread", () => {
     expect(agentMark(marked, "echo")).toEqual({ kind: "initials", name: "Echo", text: "Ec" });
     expect(agentMark(marked, "odd")).toEqual({ kind: "initials", name: "Odd one", text: "OO" });
     expect(agentMark(marked, "gone-agent")).toEqual({ kind: "initials", name: "gone-agent", text: "GA" });
+  });
+
+  it("says after the project what needs saying about a thread, loud only when it needs the user", () => {
+    const idle = thread("t", 1);
+    expect(rowStatus(idle, false)).toBeNull();
+    expect(rowStatus(idle, true)).toEqual({ text: "New reply", tone: "quiet" });
+    const asking = { ...idle, status: "active", pending_interactions: [{}] } as unknown as Thread;
+    expect(rowStatus(asking, true)).toEqual({ text: "Needs your answer", tone: "waiting" });
+    const failed = { ...idle, last_turn_status: "failed" } as Thread;
+    expect(rowStatus(failed, true)).toEqual({ text: "Failed", tone: "failed" });
+    const running = {
+      ...idle,
+      status: "active",
+      activity: { kind: "command", detail: "cargo test", status: "pending" },
+    } as unknown as Thread;
+    expect(rowStatus(running, false)).toEqual({ text: "Run cargo test", tone: "quiet" });
+    // Working with nothing to tell yet: the dot says it is working.
+    expect(rowStatus({ ...idle, status: "active" } as Thread, false)).toBeNull();
+    expect(rowStatus({ ...idle, archived: true } as Thread, true)).toBeNull();
   });
 
   it("names a folder by its last part", () => {

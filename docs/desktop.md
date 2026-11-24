@@ -44,6 +44,10 @@ Three columns: who is waiting for you (a question, a permission request, a failu
 you have not opened yet), who is working (what it is doing and how long the turn has been running),
 and who has finished (the last reply). A permission request can be answered right from the card. A
 thread with an unread answer is highlighted in the sidebar too; it becomes read when you open it.
+Under its title a sidebar row shows the agent as a short mark (its full name on hover) and the
+project the thread works on: the last folder of its directory, or of the checkout a worktree is made
+from, with a branch icon for a worktree; hover it for the full path. While the thread waits for
+you, has a new reply, failed or is working, the status takes the project's place.
 Threads started by other agents never count as unread: their answers are collected by the parent
 agent.
 

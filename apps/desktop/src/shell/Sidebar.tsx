@@ -7,16 +7,21 @@ import {
   ChevronRightIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
+  GitBranchIcon,
   PlusIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+
+import type { Thread } from "../api/protocol.gen";
 
 import {
   activityText,
   attentionLabel,
   attentionOf,
+  providerMark,
   providerName,
   threadGroups,
+  threadProject,
   threadTitle,
   threadTree,
   type ThreadGroup,
@@ -88,6 +93,17 @@ export function Sidebar() {
     const indent = Math.min(depth, MAX_INDENT);
     const over = drag?.over?.target === thread.id ? drag.over : null;
     const landing = over && drag?.drop && "parent" in drag.drop ? over.zone : null;
+    // What needs saying about the thread takes the place of its project.
+    const status =
+      attention === "waiting"
+        ? "Needs your answer"
+        : unread && attention === "idle"
+          ? "New reply"
+          : attention === "failed"
+            ? "Failed"
+            : attention === "active" && thread.activity
+              ? activityText(thread)
+              : null;
     return (
       <div
         key={thread.id}
@@ -142,16 +158,10 @@ export function Sidebar() {
             {threadTitle(thread)}
           </span>
           <span className="thread-time">{relativeTime(thread.updated_at, now)}</span>
-          <span className={`thread-meta${children > 0 ? " mr-11" : ""}`}>
-            {attention === "waiting"
-              ? "Needs your answer"
-              : unread && attention === "idle"
-                ? "New reply"
-              : attention === "failed"
-                ? "Failed"
-                : attention === "active" && thread.activity
-                  ? activityText(thread)
-                  : `${provider}${thread.environment ? " · worktree" : ""}`}
+          <span className={`thread-meta flex min-w-0 items-center gap-1.5${children > 0 ? " mr-11" : ""}`}>
+            {/* The agent stays in sight as a mark, so a status takes only the text's place. */}
+            <AgentMark name={provider} />
+            {status ? <span className="min-w-0 truncate">{status}</span> : <ProjectLabel thread={thread} />}
           </span>
         </ThreadMenu>
         {children > 0 && <FamilyToggle row={row} />}
@@ -374,6 +384,46 @@ function ViewButtonBody({
         </TooltipContent>
       </Tooltip>
     </BlockMenu>
+  );
+}
+
+/** The agent of a thread row, as a mark that names it in full on hover. */
+function AgentMark({ name }: { name: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            aria-label={name}
+            className="inline-flex h-4 min-w-4 flex-none items-center justify-center rounded-sm border border-border px-0.5 text-[10px] leading-none font-medium text-muted-foreground"
+          />
+        }
+      >
+        {providerMark(name)}
+      </TooltipTrigger>
+      <TooltipContent side="right">{name}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** The project a thread row works on, with its full path on hover and a branch for a worktree. */
+function ProjectLabel({ thread }: { thread: Thread }) {
+  const project = threadProject(thread);
+  // Until it is ready, a worktree thread still works in the checkout itself.
+  const worktree = thread.environment?.state === "ready" && thread.cwd !== project.path;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="flex min-w-0 items-center gap-1" />}>
+        <span className="min-w-0 truncate">{project.name}</span>
+        {thread.environment && <GitBranchIcon aria-label="In a worktree" className="size-3 flex-none" />}
+      </TooltipTrigger>
+      <TooltipContent side="right" className="flex-col items-start gap-0.5 break-all">
+        <span>{project.path}</span>
+        {thread.environment && (
+          <span className="opacity-70">{worktree ? `In a worktree: ${thread.cwd}` : "In a worktree"}</span>
+        )}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -55,6 +55,41 @@ export function folderOf(thread: Thread): string {
   return thread.environment?.source_dir ?? thread.cwd;
 }
 
+/** The last folder of a path: what tells one project from another at a glance. */
+export function folderName(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.slice(trimmed.lastIndexOf("/") + 1) || path;
+}
+
+/**
+ * The project a thread works on, short and in full. A thread in a worktree is
+ * named after the checkout the worktree is made from: the worktree's own folder
+ * says which task it is, not which repository.
+ */
+export function threadProject(thread: Thread): { name: string; path: string } {
+  const path = folderOf(thread);
+  return { name: folderName(path), path };
+}
+
+/**
+ * A short mark for an agent where its name does not fit: the initials of a name
+ * of several words (`Claude Code` → `CC`), the first two letters of one word
+ * (`Codex` → `Co`).
+ */
+export function providerMark(name: string): string {
+  const words = name.split(/[\s_-]+/).filter(Boolean);
+  const [first, second] = words;
+  if (first === undefined) return "?";
+  if (second !== undefined) return (initial(first) + initial(second)).toUpperCase();
+  const [, next = ""] = [...first];
+  return initial(first).toUpperCase() + next;
+}
+
+/** The first character of a word, whole even when it is not one UTF-16 unit. */
+function initial(word: string): string {
+  return String.fromCodePoint(word.codePointAt(0) ?? 63);
+}
+
 /** A group of the sidebar: a project, or a folder of threads in no project. */
 export type ThreadGroup =
   | { kind: "project"; key: string; project: Project; threads: Thread[]; latest: number }

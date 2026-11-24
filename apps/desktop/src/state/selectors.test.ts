@@ -8,9 +8,12 @@ import {
   childrenOf,
   dropOf,
   failureText,
+  folderName,
+  providerMark,
   providerName,
   rootOf,
   threadGroups,
+  threadProject,
   threadTitle,
   threadTree,
   visiblePlugins,
@@ -174,6 +177,32 @@ describe("what cards and rows say about a thread", () => {
   it("names an agent by its plugin, or by its id when no plugin provides it", () => {
     expect(providerName(plugins, "echo")).toBe("Echo");
     expect(providerName(plugins, "gone")).toBe("gone");
+  });
+
+  it("marks an agent by the initials of its name", () => {
+    expect(providerMark("Claude Code")).toBe("CC");
+    expect(providerMark("Codex")).toBe("Co");
+    expect(providerMark("opencode")).toBe("Op");
+    expect(providerMark("provider-echo")).toBe("PE");
+    expect(providerMark("x")).toBe("X");
+    expect(providerMark("  ")).toBe("?");
+  });
+
+  it("names a folder by its last part", () => {
+    expect(folderName("/home/me/projects/qcc")).toBe("qcc");
+    expect(folderName("/home/me/projects/qcc/")).toBe("qcc");
+    expect(folderName("qcc")).toBe("qcc");
+    expect(folderName("/")).toBe("/");
+  });
+
+  it("names a thread's project after its folder, or the checkout its worktree is made from", () => {
+    expect(threadProject({ ...thread("a", 1), cwd: "/p/qcc" })).toEqual({ name: "qcc", path: "/p/qcc" });
+    const isolated = {
+      ...thread("a", 1),
+      cwd: "/tasks/42/qcc-wt",
+      environment: { id: "git-worktree", source_dir: "/p/parentcontrol", state: "ready" },
+    } as Thread;
+    expect(threadProject(isolated)).toEqual({ name: "parentcontrol", path: "/p/parentcontrol" });
   });
 
   it("calls a thread without a title a new thread", () => {

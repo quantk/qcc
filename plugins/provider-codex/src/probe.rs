@@ -12,11 +12,16 @@ pub const LIST_ID: u64 = 2;
 
 /// The handshake and the question, one line each.
 pub fn requests(method: &str) -> Vec<String> {
+    requests_with(method, json!({}))
+}
+
+/// The handshake and the question with its parameters, one line each.
+pub fn requests_with(method: &str, params: Value) -> Vec<String> {
     vec![
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": client_info()}})
             .to_string(),
         json!({"jsonrpc": "2.0", "method": "initialized"}).to_string(),
-        json!({"jsonrpc": "2.0", "id": LIST_ID, "method": method, "params": {}}).to_string(),
+        json!({"jsonrpc": "2.0", "id": LIST_ID, "method": method, "params": params}).to_string(),
     ]
 }
 

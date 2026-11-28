@@ -763,7 +763,7 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                     })
                 }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
-                ProviderRequest::ListSkills => wit::ProviderRequest::ListSkills,
+                ProviderRequest::ListSkills { cwd } => wit::ProviderRequest::ListSkills(cwd),
                 ProviderRequest::ReadRateLimits => wit::ProviderRequest::ReadRateLimits,
             },
             provider: provider.0,

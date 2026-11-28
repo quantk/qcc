@@ -2,7 +2,7 @@ id = "reviewers"
 name = "Reviewers"
 description = "Reviewers that look at a thread's changes when its agent is done, and leave their findings as line comments or send them to the agent."
 version = "0.1.0"
-api = "0.2"
+api = "0.3"
 wasm = "plugin.wasm"
 
 [permissions]

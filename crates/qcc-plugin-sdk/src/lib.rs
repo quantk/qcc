@@ -195,7 +195,9 @@ pub trait Provider {
 
     /// The skills the agent finds by itself (its own folders, its plugins). Like
     /// [`Provider::models`], usually answered later, with [`Outcome::Skills`].
-    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
+    /// `cwd` is a thread's working directory when the user asks about one thread:
+    /// ask the agent there, so the project's own skills are among those it finds.
+    fn skills(&mut self, _cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
         Ok(Reply::Now(Vec::new()))
     }
 
@@ -634,8 +636,8 @@ pub mod __private {
                     ProviderRequest::ListModels => {
                         provider.models().map(|r| reply(r, Outcome::Models))
                     }
-                    ProviderRequest::ListSkills => {
-                        provider.skills().map(|r| reply(r, Outcome::Skills))
+                    ProviderRequest::ListSkills(cwd) => {
+                        provider.skills(cwd).map(|r| reply(r, Outcome::Skills))
                     }
                     ProviderRequest::ReadRateLimits => {
                         provider.rate_limits().map(|r| reply(r, Outcome::RateLimits))

@@ -607,6 +607,47 @@ pub struct ThreadChangesResult {
 }
 
 method!(
+    /// Files and folders under a thread's working directory whose relative path
+    /// matches `query` fuzzily (its characters in order, as fzf matches), best
+    /// first. What `.gitignore` leaves out, `.git` and hidden folders are skipped.
+    /// The daemon keeps the scanned list for a few seconds, so asking again as the
+    /// user types does not walk the tree again.
+    ThreadPaths, "thread.paths", ThreadPathsParams => ThreadPathsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadPathsParams {
+    pub thread_id: ThreadId,
+    /// Matched against each relative path; every path, shortest first, when empty.
+    #[serde(default)]
+    pub query: String,
+    /// At most this many matches; 50 when absent, never more than 500.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ThreadPathsResult {
+    /// Best first.
+    pub paths: Vec<PathMatch>,
+    /// The folder was too large to scan whole: some paths are missing.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub incomplete: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct PathMatch {
+    /// Relative to the working directory, `/`-separated, without a trailing `/`.
+    pub path: String,
+    /// A folder rather than a file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dir: bool,
+    /// The positions of the matched characters in `path`, counted in characters.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub positions: Vec<u32>,
+}
+
+method!(
     /// Everything a thread changed in its environment, as one unified diff; with
     /// `paths`, only those files.
     ThreadDiff, "thread.diff", ThreadDiffParams => ThreadDiffResult
@@ -1276,8 +1317,9 @@ pub struct ProviderModelsParams {
 
 method!(
     /// The skills a provider's agent finds by itself (its own folders, its
-    /// plugins), as the agent reports them. Shown, not switched. The first call asks
-    /// the agent; the answer is kept until `refresh` asks again.
+    /// plugins, and with `thread` the project it works in), as the agent reports
+    /// them. Shown, not switched. The first call asks the agent; the answer is kept,
+    /// for each working directory, until `refresh` asks again.
     ProviderSkills, "provider.skills", ProviderSkillsParams => ProviderSkillsResult
 );
 
@@ -1286,6 +1328,10 @@ pub struct ProviderSkillsParams {
     pub provider: ProviderId,
     #[serde(default)]
     pub refresh: bool,
+    /// Ask about this thread's working directory, so the project's own skills
+    /// (such as `.claude/skills` there) are among the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

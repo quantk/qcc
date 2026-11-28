@@ -2,13 +2,17 @@
 //! `skills/list`. Skills the user turned off in Codex are left out.
 
 use qcc_plugin_sdk::types::{AgentSkill, Outcome};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::probe::{self, ListProbe};
 
-/// The handshake and the question, one line each.
-pub fn requests() -> Vec<String> {
-    probe::requests("skills/list")
+/// The handshake and the question, one line each: about `cwd` when given (the
+/// project's skills are found there), else about where the server runs.
+pub fn requests(cwd: Option<&str>) -> Vec<String> {
+    match cwd {
+        Some(cwd) => probe::requests_with("skills/list", json!({ "cwds": [cwd] })),
+        None => probe::requests("skills/list"),
+    }
 }
 
 pub fn probe() -> ListProbe {

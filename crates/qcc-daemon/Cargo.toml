@@ -16,6 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 base64.workspace = true
+ignore.workspace = true
 jiff.workspace = true
 qcc-domain.workspace = true
 qcc-plugin-host.workspace = true

@@ -408,7 +408,9 @@ qcc thread skills <thread-id> --on echo-demo --off qcc-orchestration
 
 **The agents' own skills** (from `~/.claude/skills`, `~/.agents/skills`, their plugins) are only
 shown by qcc: `qcc provider skills claude-code [--refresh]` and the "The agents' own" section on the
-"Skills" screen. The list is requested from the agent itself, without a model request: Claude Code
+"Skills" screen. With `--thread <id>` the agent is asked in that thread's working directory, so the
+project's own skills (`.claude/skills`, `.agents/skills` there) are among them; the app's composer
+asks this way for the skills it offers after `/`. The list is requested from the agent itself, without a model request: Claude Code
 answers `reload_skills` in stream-json, Codex answers `skills/list` in app-server. opencode does
 not return the list reliably (in ACP skills are mixed with commands, and `opencode debug skill`
 loses its output in a pipe), so for it the app says "does not say". Turning these skills on and off

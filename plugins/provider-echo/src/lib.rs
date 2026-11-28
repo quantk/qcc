@@ -775,14 +775,24 @@ impl Provider for Echo {
         }))
     }
 
-    /// One skill of its "own", as a real agent finds them in its folders.
-    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
-        Ok(Reply::Now(vec![AgentSkill {
+    /// One skill of its "own", as a real agent finds them in its folders, and,
+    /// asked about a working directory, one of the project's there.
+    fn skills(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
+        let mut skills = vec![AgentSkill {
             name: "echo-own".into(),
             description: "A skill the agent finds by itself.".into(),
             source: Some("user".into()),
             path: Some("/echo/skills/echo-own/SKILL.md".into()),
-        }]))
+        }];
+        if let Some(cwd) = cwd {
+            skills.push(AgentSkill {
+                name: "echo-project".into(),
+                description: "A skill of the project the thread works in.".into(),
+                source: Some("project".into()),
+                path: Some(format!("{cwd}/.agents/skills/echo-project/SKILL.md")),
+            });
+        }
+        Ok(Reply::Now(skills))
     }
 }
 

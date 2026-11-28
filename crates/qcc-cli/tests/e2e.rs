@@ -2900,6 +2900,53 @@ fn skills_are_switched_for_all_threads_and_for_one() {
 }
 
 #[test]
+fn the_composer_finds_a_threads_paths_and_its_agents_skills_there() {
+    let dir = tempfile::tempdir().unwrap();
+    let daemon = Daemon::start(&dir.path().join("data"));
+    let work = dir.path().join("work");
+    for path in ["src/composer.rs", "src/lib.rs", "node_modules/x/index.js", "out/big.bin"] {
+        let path = work.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+    std::fs::write(work.join(".gitignore"), "out/\n").unwrap();
+    let work = work.to_str().unwrap();
+    let output = daemon.qcc(&["thread", "spawn", "--provider", "echo", "--cwd", work, "--json"]);
+    assert!(output.ok, "{}", output.stderr);
+    let thread = output.json()["thread"]["id"].as_str().unwrap().to_owned();
+
+    // Every path the user may mean, shallow first; nothing git or the skipped
+    // folders hide.
+    let all = daemon.qcc(&["thread", "paths", &thread]).stdout;
+    assert_eq!(
+        all.lines().collect::<Vec<_>>(),
+        [".gitignore", "src/", "src/composer.rs", "src/lib.rs"]
+    );
+    // Fuzzy, best first, with where the characters matched.
+    let found = daemon.qcc(&["thread", "paths", &thread, "cmp", "--json"]).json();
+    assert_eq!(found["paths"][0]["path"], "src/composer.rs");
+    assert_eq!(found["paths"][0]["positions"], serde_json::json!([4, 6, 7]));
+    let few = daemon.qcc(&["thread", "paths", &thread, "s", "--limit", "1", "--json"]).json();
+    assert_eq!(few["paths"].as_array().unwrap().len(), 1);
+    assert!(!daemon.qcc(&["thread", "paths", "no-such-thread"]).ok);
+
+    // Asked about the thread, the agent finds the project's own skills as well.
+    let own = daemon.qcc(&["provider", "skills", "echo", "--json"]).json();
+    let names = |list: &Value| -> Vec<String> {
+        list["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(names(&own), ["echo-own"]);
+    let there = daemon.qcc(&["provider", "skills", "echo", "--thread", &thread, "--json"]).json();
+    assert_eq!(names(&there), ["echo-own", "echo-project"]);
+    assert!(there["skills"][1]["path"].as_str().unwrap().starts_with(work));
+}
+
+#[test]
 fn a_plugin_is_told_its_own_settings() {
     let dir = tempfile::tempdir().unwrap();
     let daemon = Daemon::start(dir.path());

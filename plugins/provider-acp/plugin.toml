@@ -2,7 +2,7 @@ id = "provider-acp"
 name = "ACP agents"
 description = "Runs agents that speak the Agent Client Protocol, such as opencode."
 version = "0.1.0"
-api = "0.2"
+api = "0.3"
 wasm = "plugin.wasm"
 
 [permissions]

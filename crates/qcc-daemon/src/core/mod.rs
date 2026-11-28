@@ -218,8 +218,9 @@ pub(crate) enum Command {
         result: Result<Vec<ModelInfo>, String>,
         responder: Responder,
     },
+    /// A provider answered `list-skills`, about a working directory or none.
     SkillsListed {
-        provider: ProviderId,
+        key: (ProviderId, Option<String>),
         result: Result<Vec<AgentSkill>, String>,
         responder: Responder,
     },
@@ -365,8 +366,11 @@ pub(crate) struct Core {
     programs: ProgramPaths,
     /// What each provider said it offers, until asked to look again.
     models: HashMap<ProviderId, Vec<ModelInfo>>,
-    /// The skills each provider's agent said it finds by itself, until asked again.
-    agent_skills: HashMap<ProviderId, Vec<AgentSkill>>,
+    /// The skills each provider's agent said it finds by itself, until asked again,
+    /// by the working directory asked about (none: where the agent runs by default).
+    agent_skills: HashMap<(ProviderId, Option<String>), Vec<AgentSkill>>,
+    /// Recent scans of threads' working directories, for `thread.paths`.
+    paths: crate::paths::PathIndex,
     /// The latest usage limits each provider reported, saved in the store.
     limits: BTreeMap<ProviderId, ProviderLimits>,
     /// Where the `qcc` CLI lives, put first on agents' `PATH` so they can use it.
@@ -489,6 +493,7 @@ impl Core {
             skills,
             models: HashMap::new(),
             agent_skills: HashMap::new(),
+            paths: crate::paths::PathIndex::default(),
             limits,
             projects,
             automations,
@@ -588,8 +593,8 @@ impl Core {
             Command::ModelsListed { provider, result, responder } => {
                 self.models_listed(provider, result, responder);
             }
-            Command::SkillsListed { provider, result, responder } => {
-                self.skills_listed(provider, result, responder);
+            Command::SkillsListed { key, result, responder } => {
+                self.skills_listed(key, result, responder);
             }
             Command::LimitsRead { only, results, responder } => {
                 self.limits_read(only, results, responder);

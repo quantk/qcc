@@ -30,8 +30,9 @@ impl Core {
             Outcome::Models(models) => Ok(models),
             other => Err(other),
         };
+        let key = provider.clone();
         let done =
-            |provider, result, responder| Command::ModelsListed { provider, result, responder };
+            move |result, responder| Command::ModelsListed { provider: key, result, responder };
         self.list_from_provider(
             provider,
             ProviderRequest::ListModels,
@@ -43,8 +44,16 @@ impl Core {
     }
 
     pub(super) fn provider_skills(&mut self, p: ProviderSkillsParams, responder: Responder) {
-        let ProviderSkillsParams { provider, refresh } = p;
-        if !refresh && let Some(skills) = self.agent_skills.get(&provider) {
+        let ProviderSkillsParams { provider, refresh, thread } = p;
+        let cwd = match thread {
+            Some(id) => match self.supervisor.thread(&id) {
+                Some(thread) => Some(thread.cwd.clone()),
+                None => return responder.reply::<Empty>(Err(thread_not_found(&id))),
+            },
+            None => None,
+        };
+        let key = (provider.clone(), cwd.clone());
+        if !refresh && let Some(skills) = self.agent_skills.get(&key) {
             return responder.reply(Ok(ProviderSkillsResult { skills: skills.clone() }));
         }
         let pick = |outcome| match outcome {
@@ -54,11 +63,10 @@ impl Core {
             }
             other => Err(other),
         };
-        let done =
-            |provider, result, responder| Command::SkillsListed { provider, result, responder };
+        let done = move |result, responder| Command::SkillsListed { key, result, responder };
         self.list_from_provider(
             provider,
-            ProviderRequest::ListSkills,
+            ProviderRequest::ListSkills { cwd },
             "skills",
             pick,
             done,
@@ -74,7 +82,7 @@ impl Core {
         request: ProviderRequest,
         what: &'static str,
         pick: fn(Outcome) -> Result<Vec<T>, Outcome>,
-        done: fn(ProviderId, Result<Vec<T>, String>, Responder) -> Command,
+        done: impl FnOnce(Result<Vec<T>, String>, Responder) -> Command + Send + 'static,
         responder: Responder,
     ) {
         let plugin = match self.provider_of(&provider) {
@@ -94,17 +102,17 @@ impl Core {
                     MODELS_TIMEOUT.as_secs()
                 )),
             };
-            let _ = commands.send(done(provider, result, responder));
+            let _ = commands.send(done(result, responder));
         });
     }
 
     pub(super) fn skills_listed(
         &mut self,
-        provider: ProviderId,
+        key: (ProviderId, Option<String>),
         result: Result<Vec<AgentSkill>, String>,
         responder: Responder,
     ) {
-        let reply = listed(&mut self.agent_skills, provider, result);
+        let reply = listed(&mut self.agent_skills, key, result);
         responder.reply(reply.map(|skills| ProviderSkillsResult { skills }));
     }
 
@@ -544,12 +552,12 @@ impl Core {
 }
 
 /// Cache what a provider listed, or turn its failure into an RPC error.
-fn listed<T: Clone>(
-    cache: &mut std::collections::HashMap<ProviderId, Vec<T>>,
-    provider: ProviderId,
+fn listed<K: std::hash::Hash + Eq, T: Clone>(
+    cache: &mut std::collections::HashMap<K, Vec<T>>,
+    key: K,
     result: Result<Vec<T>, String>,
 ) -> Result<Vec<T>, RpcError> {
     let items = result.map_err(|message| RpcError::new(codes::PLUGIN_ERROR, message))?;
-    cache.insert(provider, items.clone());
+    cache.insert(key, items.clone());
     Ok(items)
 }

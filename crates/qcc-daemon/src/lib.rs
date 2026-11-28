@@ -7,6 +7,7 @@
 
 mod core;
 mod handover;
+mod paths;
 mod plugins;
 mod projects;
 mod schedule;

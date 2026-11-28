@@ -59,6 +59,7 @@ qcc thread diff <thread-id> src/a.rs src/b.rs   # only these files (paths as in 
 qcc thread diff <thread-id> --uncommitted        # only what is not committed yet
 qcc thread diff <thread-id> --from <commit> --to <commit>   # a run of the thread's commits
 qcc thread diff <thread-id> --full src/a.rs     # the whole file as context, not 3 lines around each change
+qcc thread paths <thread-id> cmpsr  # files and folders in its directory by a fuzzy query, best first
 qcc thread archive <thread-id>     # release the session, delete the worktree, remove the thread from the list
                                    # (and the threads started under it; --no-descendants: only this one)
 ```
@@ -79,6 +80,14 @@ qcc thread archive <thread-id>     # release the session, delete the worktree, r
   (edits, deletions, new files), with paths from the repository root. This is done by an
   environment plugin that declared `inspects-directories`. For a directory outside git the command
   answers with an error.
+- `thread paths` searches the thread's working directory (its worktree, for a thread in one) the
+  way the app's composer does after `@`: the query's characters in order, as fzf matches them,
+  ranked higher in the file's own name, at the start of a word or path segment and where they run
+  together; a folder ends in `/`. What git ignores (`.gitignore` even outside a repository,
+  `.git/info/exclude`, the global excludes) is skipped, and so are `.git`, `node_modules`,
+  `target` and a few other folders of the kind. At most 50 paths (`--limit`, up to 500). The
+  daemon keeps the list of a directory for 5 seconds; a large one (a scan stops at 200,000 entries
+  or 3 seconds) is rescanned in the background while the old list answers.
 - The whole patch is limited to 2 MB, and a large lockfile can push the other files out of it, so
   `thread diff` accepts paths: the app reads the diff a few files at a time, the ones that are
   visible. `--full` makes each file one hunk from its first line to its last; the 2 MB limit

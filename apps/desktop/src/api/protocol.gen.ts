@@ -824,6 +824,15 @@ export type NotificationShowNotification = {
 
 export type OptionKind = "allow" | "deny" | "other";
 
+export type PathMatch = {
+	/**  Relative to the working directory, `/`-separated, without a trailing `/`. */
+	path: string,
+	/**  A folder rather than a file. */
+	dir?: boolean,
+	/**  The positions of the matched characters in `path`, counted in characters. */
+	positions?: number[],
+};
+
 /**  An approval or a question the agent is waiting on. */
 export type PendingInteraction = {
 	id: InteractionId,
@@ -1115,6 +1124,11 @@ export type ProviderSettings = {
 export type ProviderSkillsParams = {
 	provider: ProviderId,
 	refresh?: boolean,
+	/**
+	 *  Ask about this thread's working directory, so the project's own skills
+	 *  (such as `.claude/skills` there) are among the answer.
+	 */
+	thread?: ThreadId | null,
 };
 
 export type ProviderSkillsResult = {
@@ -1581,6 +1595,21 @@ export type ThreadListParams = {
 export type ThreadListResult = {
 	/**  Oldest first. */
 	threads: Thread[],
+};
+
+export type ThreadPathsParams = {
+	thread_id: ThreadId,
+	/**  Matched against each relative path; every path, shortest first, when empty. */
+	query?: string,
+	/**  At most this many matches; 50 when absent, never more than 500. */
+	limit?: number | null,
+};
+
+export type ThreadPathsResult = {
+	/**  Best first. */
+	paths: PathMatch[],
+	/**  The folder was too large to scan whole: some paths are missing. */
+	incomplete?: boolean,
 };
 
 export type ThreadRenameParams = {
@@ -2054,6 +2083,7 @@ export type Methods = {
 	"thread.get": { params: ThreadGetParams; result: ThreadResult },
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadArchiveResult },
 	"thread.changes": { params: ThreadChangesParams; result: ThreadChangesResult },
+	"thread.paths": { params: ThreadPathsParams; result: ThreadPathsResult },
 	"thread.diff": { params: ThreadDiffParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
 	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },

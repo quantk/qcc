@@ -12,12 +12,12 @@ use qcc_protocol::methods::{
     ProjectListResult, ProjectUpdate, ProviderModels, ProviderRateLimits, ProviderSkills,
     SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges,
     ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadFork, ThreadGet, ThreadGetParams,
-    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadRename, ThreadReset,
-    ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent, ThreadSetProject,
-    ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadTurns, ThreadUnqueue, ThreadUnsubscribe,
-    ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams, UiAction, UiActionParams,
-    UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender, UiRenderItem,
-    UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
+    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadPaths, ThreadRename,
+    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
+    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadTurns, ThreadUnqueue,
+    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
+    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
+    UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
     UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
@@ -237,6 +237,10 @@ impl Core {
             },
             ThreadChanges::NAME => match params::<ThreadChanges>(raw) {
                 Ok(p) => self.environment_query(&p.thread_id, p.scope, None, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ThreadPaths::NAME => match params::<ThreadPaths>(raw) {
+                Ok(p) => self.thread_paths(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ThreadDiff::NAME => match params::<ThreadDiff>(raw) {

@@ -12,12 +12,13 @@ use qcc_client::protocol::methods::{
     ThreadArchiveParams, ThreadChanges, ThreadChangesParams, ThreadCompact, ThreadCompactParams,
     ThreadDeliver, ThreadDeliverParams, ThreadDiff, ThreadDiffParams, ThreadFork, ThreadForkParams,
     ThreadGet, ThreadGetParams, ThreadIsolate, ThreadIsolateParams, ThreadList, ThreadListParams,
-    ThreadRename, ThreadRenameParams, ThreadReset, ThreadResetParams, ThreadSend, ThreadSendParams,
-    ThreadSetAgent, ThreadSetAgentParams, ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode,
-    ThreadSetModeParams, ThreadSetParent, ThreadSetParentParams, ThreadSetProject,
-    ThreadSetProjectParams, ThreadSetSkill, ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams,
-    ThreadStop, ThreadStopParams, ThreadTurns, ThreadTurnsParams, ThreadUnqueue,
-    ThreadUnqueueParams, ThreadWait, ThreadWaitParams,
+    ThreadPaths, ThreadPathsParams, ThreadRename, ThreadRenameParams, ThreadReset,
+    ThreadResetParams, ThreadSend, ThreadSendParams, ThreadSetAgent, ThreadSetAgentParams,
+    ThreadSetMcp, ThreadSetMcpParams, ThreadSetMode, ThreadSetModeParams, ThreadSetParent,
+    ThreadSetParentParams, ThreadSetProject, ThreadSetProjectParams, ThreadSetSkill,
+    ThreadSetSkillParams, ThreadSpawn, ThreadSpawnParams, ThreadStop, ThreadStopParams,
+    ThreadTurns, ThreadTurnsParams, ThreadUnqueue, ThreadUnqueueParams, ThreadWait,
+    ThreadWaitParams,
 };
 use qcc_client::protocol::paths;
 use qcc_client::{Client, EventStream};
@@ -321,6 +322,18 @@ pub(crate) enum ThreadCommand {
         thread: String,
         #[command(flatten)]
         scope: Scope,
+    },
+    /// Find files and folders in a thread's working directory by a fuzzy query, as
+    /// the app's composer does after `@`: best first, one path a line, a folder
+    /// with `/` at its end.
+    Paths {
+        thread: String,
+        /// Characters of the path, in order; every path, shortest first, without it.
+        #[arg(default_value = "")]
+        query: String,
+        /// At most this many paths.
+        #[arg(long)]
+        limit: Option<u32>,
     },
     /// Print everything a thread changed in its environment as a unified diff.
     Diff {
@@ -838,6 +851,21 @@ pub(crate) async fn run(
                 print_json(&result)?;
             } else {
                 out(render::changes(&result.changes));
+            }
+        }
+
+        ThreadCommand::Paths { thread, query, limit } => {
+            let params = ThreadPathsParams { thread_id: ThreadId::new(thread), query, limit };
+            let result = client.call::<ThreadPaths>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else {
+                for found in &result.paths {
+                    out(format!("{}{}", found.path, if found.dir { "/" } else { "" }));
+                }
+                if result.incomplete {
+                    out("(the folder is too large to search whole; some paths are missing)");
+                }
             }
         }
 

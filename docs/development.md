@@ -33,7 +33,7 @@ How `./dev desktop` differs from `./dev app` is described in
 ## Architecture
 
 ```
-wit/plugin.wit            plugin contract (qcc:plugin@0.2.0)
+wit/plugin.wit            plugin contract (qcc:plugin@0.3.0)
 crates/qcc-domain         types without IO: the delta grammar and the canonical timeline
 crates/qcc-runtime        delta assembler, thread state machine, recovery after restart
 crates/qcc-store          SQLite: event journal and projections

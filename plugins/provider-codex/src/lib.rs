@@ -127,8 +127,9 @@ impl Provider for Codex {
         self.probe(models::requests(), models::probe())
     }
 
-    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
-        self.probe(skills::requests(), skills::probe())
+    fn skills(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
+        let requests = skills::requests(cwd.as_deref());
+        self.probe_in(cwd, requests, skills::probe())
     }
 
     fn rate_limits(&mut self) -> Result<Reply<RateLimits>, String> {
@@ -143,11 +144,21 @@ impl Codex {
         stdin: Vec<String>,
         parser: probe::ListProbe,
     ) -> Result<Reply<T>, String> {
+        self.probe_in(None, stdin, parser)
+    }
+
+    /// Ask the question of a server started in `cwd`, when given.
+    fn probe_in<T>(
+        &mut self,
+        cwd: Option<String>,
+        stdin: Vec<String>,
+        parser: probe::ListProbe,
+    ) -> Result<Reply<T>, String> {
         let options = process::SpawnOptions {
             program: PROGRAM.into(),
             args: vec!["app-server".into()],
             env: Vec::new(),
-            cwd: None,
+            cwd,
         };
         Ok(Reply::Later(self.probes.start(&options, &stdin, Box::new(parser))?))
     }

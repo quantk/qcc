@@ -219,8 +219,8 @@ impl Provider for ClaudeCode {
         self.probe(&[models::request()], models::probe())
     }
 
-    fn skills(&mut self) -> Result<Reply<Vec<AgentSkill>>, String> {
-        self.probe(&skills::requests(), skills::probe())
+    fn skills(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
+        self.probe_in(cwd, &skills::requests(), skills::probe())
     }
 
     fn rate_limits(&mut self) -> Result<Reply<RateLimits>, String> {
@@ -235,11 +235,22 @@ impl ClaudeCode {
         stdin: &[String],
         parser: probe::ControlProbe,
     ) -> Result<Reply<T>, String> {
+        self.probe_in(None, stdin, parser)
+    }
+
+    /// Ask the question of a process started in `cwd`, when given: Claude Code
+    /// finds a project's own skills (`.claude/skills`) where it runs.
+    fn probe_in<T>(
+        &mut self,
+        cwd: Option<String>,
+        stdin: &[String],
+        parser: probe::ControlProbe,
+    ) -> Result<Reply<T>, String> {
         let options = process::SpawnOptions {
             program: PROGRAM.into(),
             args: probe::ARGS.iter().map(|arg| (*arg).to_owned()).collect(),
             env: Vec::new(),
-            cwd: None,
+            cwd,
         };
         Ok(Reply::Later(self.probes.start(&options, stdin, Box::new(parser))?))
     }

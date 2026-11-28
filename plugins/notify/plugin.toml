@@ -2,7 +2,7 @@ id = "notify"
 name = "Notifications"
 description = "Desktop notifications when an agent finishes its turn, fails or waits for an answer."
 version = "0.1.0"
-api = "0.2"
+api = "0.3"
 wasm = "plugin.wasm"
 
 [permissions]

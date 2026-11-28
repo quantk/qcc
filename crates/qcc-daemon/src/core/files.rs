@@ -5,13 +5,35 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 use qcc_plugin_host::FileRoot;
+use qcc_protocol::methods::{ThreadPathsParams, ThreadPathsResult};
 
-use super::Core;
+use super::{Core, Responder, thread_not_found};
+use crate::paths::{DEFAULT_LIMIT, MAX_LIMIT};
 
 /// The largest file a plugin reads whole.
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 
 impl Core {
+    /// `thread.paths`: matched off the core task, since a scan can take a while.
+    /// A working directory that is not there yet (its environment is being
+    /// prepared) has no paths.
+    pub(super) fn thread_paths(&self, p: ThreadPathsParams, responder: Responder) {
+        let Some(thread) = self.supervisor.thread(&p.thread_id) else {
+            return responder.reply::<ThreadPathsResult>(Err(thread_not_found(&p.thread_id)));
+        };
+        let root = PathBuf::from(&thread.cwd);
+        let limit = p.limit.map_or(DEFAULT_LIMIT, |limit| (limit as usize).min(MAX_LIMIT));
+        let index = self.paths.clone();
+        tokio::task::spawn_blocking(move || {
+            let (paths, incomplete) = if root.is_dir() {
+                index.search(&root, &p.query, limit)
+            } else {
+                (Vec::new(), false)
+            };
+            responder.reply(Ok(ThreadPathsResult { paths, incomplete }));
+        });
+    }
+
     /// The folder a plugin's `files` call counts from.
     fn file_root(&self, plugin: &str, root: &FileRoot) -> Result<PathBuf, String> {
         match root {

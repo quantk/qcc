@@ -174,7 +174,7 @@ impl Core {
             self.watches.retain(|watch| watch.plugin != id);
             for provider in &owned.providers {
                 self.models.remove(provider);
-                self.agent_skills.remove(provider);
+                self.agent_skills.retain(|(owner, _), _| owner != provider);
             }
             if let Some(plugin) = self.host.unload(&id) {
                 // The last handle waits for the plugin's thread to end, which takes

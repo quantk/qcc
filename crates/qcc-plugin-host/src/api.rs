@@ -72,7 +72,11 @@ pub enum ProviderRequest {
         resolution: InteractionResolution,
     },
     ListModels,
-    ListSkills,
+    /// The skills the agent finds by itself; in a thread's working directory, when
+    /// one is given, so that the project's own skills are among them.
+    ListSkills {
+        cwd: Option<String>,
+    },
     /// The account's usage limits now. Only for providers that declared `rate_limits`.
     ReadRateLimits,
     /// Only for providers that declared `compact`, while no turn runs.

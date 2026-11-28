@@ -177,6 +177,10 @@ enum ProviderCommand {
         /// Ask the agent again instead of using what the daemon remembers.
         #[arg(long)]
         refresh: bool,
+        /// Ask about this thread's working directory: the project's own skills
+        /// are found there.
+        #[arg(long)]
+        thread: Option<String>,
     },
     /// How much of the subscription's usage limits each provider's account has
     /// spent (the 5-hour and weekly windows) and when they start over, as the agents
@@ -399,8 +403,12 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
 
-        Command::Provider(ProviderCommand::Skills { provider, refresh }) => {
-            let params = ProviderSkillsParams { provider: ProviderId::new(provider), refresh };
+        Command::Provider(ProviderCommand::Skills { provider, refresh, thread }) => {
+            let params = ProviderSkillsParams {
+                provider: ProviderId::new(provider),
+                refresh,
+                thread: thread.map(ThreadId::new),
+            };
             let result = client.call::<ProviderSkills>(params).await?;
             if json {
                 print_json(&result)?;

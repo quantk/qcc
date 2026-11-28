@@ -2,7 +2,7 @@ id = "provider-echo"
 name = "Echo provider"
 description = "The test agent that repeats what it is sent, and the example of the plugin API."
 version = "0.1.0"
-api = "0.2"
+api = "0.3"
 wasm = "plugin.wasm"
 web = "web"
 # The test provider and the example of the plugin API; the app hides it by default.

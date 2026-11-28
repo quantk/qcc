@@ -72,6 +72,7 @@ fn generate() -> String {
         .method::<ThreadGet>()
         .method::<ThreadArchive>()
         .method::<ThreadChanges>()
+        .method::<ThreadPaths>()
         .method::<ThreadDiff>()
         .method::<ThreadDeliver>()
         .method::<ThreadIsolate>()

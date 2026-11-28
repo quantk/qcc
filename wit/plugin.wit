@@ -10,7 +10,7 @@
 /// Every import but `log`, `completions` and `views` is gated by a permission the
 /// plugin requests in its manifest, and so are the events about every thread
 /// (`turn-ended`: `turn-events`; `thread-changed`: `thread-events`).
-package qcc:plugin@0.2.0;
+package qcc:plugin@0.3.0;
 
 /// The vocabulary shared by imports and exports.
 interface types {
@@ -753,8 +753,10 @@ interface types {
     /// means running it.
     list-models,
     /// The skills the agent finds by itself (its own folders, its plugins), as it
-    /// reports them. Answered with `skills`, usually `deferred`.
-    list-skills,
+    /// reports them. Answered with `skills`, usually `deferred`. The working
+    /// directory, when given, is a thread's: the agent's skills there include the
+    /// project's own (such as `.claude/skills` or `.agents/skills` in it).
+    list-skills(option<string>),
     /// Change the qcc MCP servers of the running session, even mid-turn. Sent only
     /// to a provider that declared `mcp-live`.
     set-mcp-servers(mcp-servers-update),

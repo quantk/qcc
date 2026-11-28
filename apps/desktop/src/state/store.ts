@@ -49,6 +49,7 @@ import { limitProviders, mergeLimits, wantsRefresh } from "./limits";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { groupKeys, pruneFolded, withFolded } from "./groups";
+import { AgentCatalogs } from "./agentCatalog";
 import { findProvider, projectGroupKey, visiblePlugins, withPlugin } from "./selectors";
 import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
@@ -230,8 +231,6 @@ export class AppStore {
   private archiveRuns = new Map<number, ThreadId>();
   /** Attachments read to be shown, by path: they never change. */
   private attachmentUrls = new Map<string, Promise<string | null>>();
-  /** The skills a thread's agent finds in its working directory, by agent and thread. */
-  private threadAgentSkills = new Map<string, Promise<readonly AgentSkill[]>>();
 
   constructor(
     readonly api: Api,
@@ -280,7 +279,7 @@ export class AppStore {
       this.watch = null;
       for (const entry of this.followed.values()) entry.live = null;
       this.set({ models: {}, agentSkills: {} });
-      this.threadAgentSkills.clear();
+      this.agentCatalogs.clear();
     }
   }
 
@@ -514,28 +513,23 @@ export class AppStore {
     );
 
   /**
-   * The skills the thread's agent finds by itself in the thread's working directory
-   * (its own folders, its plugins and the project's), asked once per thread and
-   * agent; none when the agent cannot tell or the asking fails.
+   * What the thread's agent finds by itself in the thread's working directory:
+   * skills (its own folders, its plugins and the project's) and slash commands,
+   * none of either when the agent cannot tell. Kept and looked at again in the
+   * background (`agentCatalogs.revalidate`), see `agentCatalog.ts`.
    */
-  agentSkillsOf = (thread: Thread): Promise<readonly AgentSkill[]> => {
-    const provider = thread.provider;
-    const key = `${provider}\n${thread.id}`;
-    const known = this.threadAgentSkills.get(key);
-    if (known) return known;
-    const can = findProvider(this.state.allPlugins, provider)?.capabilities.list_skills ?? false;
-    const asked: Promise<readonly AgentSkill[]> = can
-      ? this.api.call("provider.skills", { provider, refresh: false, thread: thread.id }).then(
-          (result) => result.skills,
-          () => {
-            this.threadAgentSkills.delete(key);
-            return [];
-          },
-        )
-      : Promise.resolve([]);
-    this.threadAgentSkills.set(key, asked);
-    return asked;
-  };
+  readonly agentCatalogs = new AgentCatalogs(async (provider, thread, refresh) => {
+    const capabilities = findProvider(this.state.allPlugins, provider)?.capabilities;
+    const [skills, commands] = await Promise.all([
+      capabilities?.list_skills
+        ? this.api.call("provider.skills", { provider, refresh, thread }).then((r) => r.skills, () => [])
+        : [],
+      capabilities?.list_commands
+        ? this.api.call("provider.commands", { provider, refresh, thread }).then((r) => r.commands, () => [])
+        : [],
+    ]);
+    return { skills, commands };
+  });
 
   /** Files and folders in a thread's working directory that match `query`, best first. */
   findPaths = (thread: ThreadId, query: string, limit = 50) =>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SkillStatus, Thread } from "../api/protocol.gen";
-import { offeredSkills, skillOff, threadSkills, visibleSkills, withSkillOff } from "./skills";
+import { offeredCommands, offeredSkills, skillOff, threadSkills, visibleSkills, withSkillOff } from "./skills";
 
 const skills: SkillStatus[] = [
   { name: "plan", description: "Planning", plugin: "orchestration", path: "/s/plan" },
@@ -50,5 +50,15 @@ describe("skills", () => {
       { name: "plan", description: "The agent's plan", source: null },
       { name: "tdd", description: "Test first", source: "project" },
     ]);
+  });
+
+  it("offers an agent's commands that are not its skills", () => {
+    const offered = [{ name: "tdd", description: "", source: "project" }];
+    const commands = [
+      { name: "tdd", description: "the skill again" },
+      { name: "review", description: "Review", source: "built-in" },
+      { name: "hello", description: "Hello", source: "project" },
+    ];
+    expect(offeredCommands(commands, offered).map((command) => command.name)).toEqual(["hello", "review"]);
   });
 });

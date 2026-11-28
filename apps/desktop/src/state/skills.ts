@@ -2,7 +2,7 @@
 // off for every thread (a part of the daemon's settings), and which one thread
 // takes or leaves out.
 
-import type { AgentSkill, PluginInfo, Settings, SkillStatus, Thread } from "../api/protocol.gen";
+import type { AgentCommand, AgentSkill, PluginInfo, Settings, SkillStatus, Thread } from "../api/protocol.gen";
 
 /** Off for every thread. */
 export function skillOff(settings: Settings | undefined, name: string): boolean {
@@ -70,4 +70,13 @@ export function offeredSkills(
     }
   }
   return [...offered.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The commands the composer offers after `/`, by name: an agent lists its skills
+ * among its commands too (Claude Code does), and those are offered as skills.
+ */
+export function offeredCommands(commands: readonly AgentCommand[], skills: readonly OfferedSkill[]): AgentCommand[] {
+  const taken = new Set(skills.map((skill) => skill.name));
+  return commands.filter((command) => !taken.has(command.name)).sort((a, b) => a.name.localeCompare(b.name));
 }

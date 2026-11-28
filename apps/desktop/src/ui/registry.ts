@@ -214,6 +214,16 @@ export type ComposerCompletion = {
    * user types; an answer that comes after a newer question is dropped.
    */
   complete: (query: string, context: CompletionContext) => readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+  /**
+   * Called once each time the list opens for a new word (not on every key): the
+   * moment to look again for what may have changed since, in the background.
+   */
+  opened?: (context: CompletionContext) => void;
+  /**
+   * Listen for the source's entries changing while the list is open (a look in
+   * the background found more); the list then asks `complete` again.
+   */
+  subscribe?: (listener: () => void) => () => void;
 };
 
 /** A modal the shell shows on a contribution's behalf. */

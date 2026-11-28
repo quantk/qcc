@@ -62,10 +62,38 @@ export function useCompletion(options: {
   latest.current = context;
   const threadId = context.thread.id;
   const providerId = context.provider?.id;
+  const start = token?.start;
+
+  // A new word for a trigger: its sources may look again for what changed.
+  useEffect(() => {
+    if (trigger === undefined || start === undefined) return;
+    for (const source of sources) if (source.trigger === trigger) source.opened?.(latest.current);
+  }, [trigger, start, sources, threadId, providerId]);
+
+  // While a word is being completed, a source that found more is asked again.
+  const [changes, setChanges] = useState(0);
+  const changed = useRef(false);
+  useEffect(() => {
+    if (trigger === undefined) return;
+    const stops = sources
+      .filter((source) => source.trigger === trigger && source.subscribe)
+      .map((source) =>
+        source.subscribe!(() => {
+          changed.current = true;
+          setChanges((count) => count + 1);
+        }),
+      );
+    return () => stops.forEach((stop) => stop());
+  }, [trigger, sources]);
+
   const asked = useRef(0);
   useEffect(() => {
     const context = latest.current;
     const question = ++asked.current;
+    // Asked again because a source changed, not because the user typed: the
+    // chosen entry stays chosen if it is still there.
+    const keep = changed.current;
+    changed.current = false;
     if (trigger === undefined || query === undefined) {
       setSections([]);
       return;
@@ -85,9 +113,15 @@ export function useCompletion(options: {
       setSections(found);
       const first = found[0];
       const item = first?.items[0];
-      setActive(first && item ? entryValue(first.source, item) : null);
+      const firstValue = first && item ? entryValue(first.source, item) : null;
+      setActive((current) => {
+        const still = found.some((section) =>
+          section.items.some((entry) => entryValue(section.source, entry) === current),
+        );
+        return keep && still ? current : firstValue;
+      });
     });
-  }, [trigger, query, sources, threadId, providerId]);
+  }, [trigger, query, sources, threadId, providerId, changes]);
 
   useEffect(() => {
     if (token === null || token.start !== dismissed) setDismissed(null);

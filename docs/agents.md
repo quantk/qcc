@@ -411,10 +411,30 @@ shown by qcc: `qcc provider skills claude-code [--refresh]` and the "The agents'
 "Skills" screen. With `--thread <id>` the agent is asked in that thread's working directory, so the
 project's own skills (`.claude/skills`, `.agents/skills` there) are among them; the app's composer
 asks this way for the skills it offers after `/`. The list is requested from the agent itself, without a model request: Claude Code
-answers `reload_skills` in stream-json, Codex answers `skills/list` in app-server. opencode does
-not return the list reliably (in ACP skills are mixed with commands, and `opencode debug skill`
-loses its output in a pipe), so for it the app says "does not say". Turning these skills on and off
-is up to the agent's own configuration.
+answers `reload_skills` in stream-json, Codex answers `skills/list` in app-server. opencode tells
+its skills only inside a session, so qcc reads its folders the way its documentation says it does:
+`.opencode/skills`, `.agents/skills`, `.claude/skills` in the working directory (not in the folders
+above it, which opencode also reads) and `~/.config/opencode/skills`, `~/.agents/skills`,
+`~/.claude/skills`. Turning these skills on and off is up to the agent's own configuration.
+
+**Slash commands.** `qcc provider commands <provider> [--thread <id>] [--refresh]` lists what an
+agent runs when a message starts with `/name`, and the app's composer offers them after `/` next to
+the skills:
+
+- **Claude Code**: the commands its `initialize` answer lists: the built-in ones, `.claude/commands`
+  of the user and the project, and its plugins'. Left out are the ones qcc does itself (`/model`,
+  `/effort`, `/clear`, `/rename`, `/fast`) and the ones that need its terminal UI or a confirmation
+  (`/color`, `/focus`, `/design`, `/ultrareview`, …). Claude Code runs a command only from a
+  message that is a plain string starting with it, so such a message goes exactly as written; what
+  qcc would add to it (notes, the paths of attached files) comes with the next message.
+- **opencode**: its built-in `/init` and `/review`, and the commands in `.opencode/commands` (and
+  `command/`), `~/.config/opencode/commands` and the `commands` table of `opencode.json`, read from
+  disk like its skills. In ACP it runs a prompt that starts with a command or a skill's name as
+  that command or with that skill, so the message goes first in the prompt.
+- **Codex** runs no commands from a message (its own are part of its terminal UI), so none are
+  listed. A skill is still written `/name`: the bridge sends a message that starts with the name of
+  one of Codex's skills as Codex's own skill mention, `$name` with the skill's file, and asks Codex
+  for its skills again when it says they changed.
 
 A running session learns about a skill turned on in its thread right away, as a note on the next
 message. A skill turned off disappears with the thread's next session: what the agent has already

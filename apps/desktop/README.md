@@ -185,10 +185,16 @@ asks the sources and takes the keys (↑/↓, Enter, Tab, Escape) before the com
 own Enter, and the list, a cmdk `Command` whose selection the hook controls while the
 focus stays in the textarea. The word and its replacement are `state/completion.ts`;
 `state/fuzzy.ts` ranks what the window holds (skills) the way the daemon ranks paths
-(`thread.paths`, in `crates/qcc-daemon/src/paths.rs`). The `/` list offers the thread's
-qcc skills that are on and its agent's own, asked with `provider.skills` in the
-thread's directory once per thread (`store.agentSkillsOf`); the `@` list asks the
-daemon on each keystroke and lets it keep the directory's scan.
+(`thread.paths`, in `crates/qcc-daemon/src/paths.rs`). The `/` list has two sources in
+`modules/skills`: the thread's qcc skills that are on with its agent's own, and the
+agent's commands (minus the names that are skills). Both come from
+`store.agentCatalogs` (`state/agentCatalog.ts`), which asks `provider.skills` and
+`provider.commands` about the thread's directory and keeps the answer. A source's
+`opened` runs once each time the list opens for a word: there the catalog looks again
+with `refresh` in the background, throttled per thread, since asking may run the
+agent. A source's `subscribe` tells the hook that it found something new, and the
+hook asks `complete` again, keeping the chosen entry. The `@` list asks the daemon on
+each keystroke and lets it keep the directory's scan.
 
 The timeline reaches its composer through `modules/timeline/composerInput.ts`: a
 thread's composer listens while it is drawn and takes the caret and the focus, and

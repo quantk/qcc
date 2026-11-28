@@ -39,5 +39,6 @@ describe("fuzzy", () => {
 
   it("keeps the order for an empty query", () => {
     expect(rank("", ["b", "a"])).toEqual(["b", "a"]);
+    expect(rank("", ["long-name", "x"])).toEqual(["long-name", "x"]);
   });
 });

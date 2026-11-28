@@ -55,8 +55,10 @@ describe("agent catalogs", () => {
     catalogs.revalidate("claude", "a");
     await settle();
     expect(heard).toBe(0);
+    // The first look at a thread shows what the daemon kept, then asks the agent.
     catalogs.revalidate("claude", "b");
-    expect(asked).toEqual([false, true, false]);
+    await settle();
+    expect(asked).toEqual([false, true, false, true]);
   });
 
   it("asks again after a failure", async () => {

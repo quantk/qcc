@@ -55,7 +55,12 @@ export class AgentCatalogs {
     const key = `${provider}\n${thread}`;
     const entry = this.entries.get(key);
     if (!entry) {
-      void this.get(provider, thread);
+      // What the daemon kept may be old: once it is shown, the agent is asked.
+      void this.get(provider, thread).then(() => {
+        const fresh = this.entries.get(key);
+        if (fresh) fresh.asked = -Infinity;
+        this.revalidate(provider, thread);
+      });
       return;
     }
     if (entry.refreshing || this.now() - entry.asked < this.interval) return;

@@ -105,9 +105,21 @@ is `plugins/reviewers`, see [Reviewers](reviewers.md)):
   (with the name, severity, reviewer thread and stale mark the plugin gives); the app shows it, and
   the note that hands comments to an agent says whose each one is.
 - **Files** (permission `files`): `files::read` and `files::list` read text files in a thread's
-  working directory (`Root::Thread`) or in the plugin's own folder `<data>/plugin-data/<id>`
-  (`Root::Own`); paths are relative and cannot leave the root, through `..` or a link. Files are
-  read up to 1 MiB.
+  working directory (`Root::Thread`, or `Root::WorkingDir(path)` for a request about a working
+  directory rather than a thread, such as `list-skills`; a folder no thread works in is refused) or
+  in the plugin's own folder `<data>/plugin-data/<id>` (`Root::Own`); paths are relative and cannot
+  leave the root, through `..` or a link. Files are read up to 1 MiB. `Root::Home` reads the
+  user's home folder, but only inside the folders the manifest names in
+  `home-files = [".config/opencode", …]` (relative to the home; a link inside may lead elsewhere in
+  the home, not out of it). The app and `qcc plugin list` show those folders among the plugin's
+  permissions.
+- **An agent's skills and commands** (provider capabilities `list-skills`, `list-commands`):
+  `Provider::skills` and `Provider::commands` answer what the agent finds by itself, in a thread's
+  working directory when `cwd` is given. Commands are the ones the agent runs when a message sent
+  through qcc starts with `/name`; leave out those that only work in the agent's own terminal UI or
+  that qcc does itself (choosing the model, starting over). A message that starts with a command
+  must reach the agent the way it runs one: `qcc_plugin_sdk::slash_command` recognises it, and
+  `with_notes` puts qcc's notes after such a message instead of before it.
 
 ## Following every thread and notifying the user
 

@@ -122,6 +122,7 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
  * then the earlier item. An empty query keeps every item in its order.
  */
 export function fuzzyRank<T>(items: readonly T[], query: string, text: (item: T) => string): { item: T; match: FuzzyMatch }[] {
+  if (query.trim() === "") return items.map((item) => ({ item, match: { score: 0, positions: [] } }));
   const ranked: { item: T; match: FuzzyMatch; index: number; length: number }[] = [];
   items.forEach((item, index) => {
     const value = text(item);

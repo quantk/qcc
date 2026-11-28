@@ -49,7 +49,7 @@ import { limitProviders, mergeLimits, wantsRefresh } from "./limits";
 import { SIDEBAR, SIDE_PANEL_WIDTH, clampWidth } from "./layout";
 import { type Seen, markSeen, markUnseen, seenEverything } from "./reads";
 import { groupKeys, pruneFolded, withFolded } from "./groups";
-import { projectGroupKey, visiblePlugins, withPlugin } from "./selectors";
+import { findProvider, projectGroupKey, visiblePlugins, withPlugin } from "./selectors";
 import { errorMessage } from "../util/format";
 import { readJson, readText, saveJson, saveText } from "../util/storage";
 import { type Timeline, applyEvents, emptyTimeline } from "./timeline";
@@ -230,6 +230,8 @@ export class AppStore {
   private archiveRuns = new Map<number, ThreadId>();
   /** Attachments read to be shown, by path: they never change. */
   private attachmentUrls = new Map<string, Promise<string | null>>();
+  /** The skills a thread's agent finds in its working directory, by agent and thread. */
+  private threadAgentSkills = new Map<string, Promise<readonly AgentSkill[]>>();
 
   constructor(
     readonly api: Api,
@@ -278,6 +280,7 @@ export class AppStore {
       this.watch = null;
       for (const entry of this.followed.values()) entry.live = null;
       this.set({ models: {}, agentSkills: {} });
+      this.threadAgentSkills.clear();
     }
   }
 
@@ -509,6 +512,34 @@ export class AppStore {
       refresh,
       async () => (await this.api.call("provider.skills", { provider, refresh })).skills,
     );
+
+  /**
+   * The skills the thread's agent finds by itself in the thread's working directory
+   * (its own folders, its plugins and the project's), asked once per thread and
+   * agent; none when the agent cannot tell or the asking fails.
+   */
+  agentSkillsOf = (thread: Thread): Promise<readonly AgentSkill[]> => {
+    const provider = thread.provider;
+    const key = `${provider}\n${thread.id}`;
+    const known = this.threadAgentSkills.get(key);
+    if (known) return known;
+    const can = findProvider(this.state.allPlugins, provider)?.capabilities.list_skills ?? false;
+    const asked: Promise<readonly AgentSkill[]> = can
+      ? this.api.call("provider.skills", { provider, refresh: false, thread: thread.id }).then(
+          (result) => result.skills,
+          () => {
+            this.threadAgentSkills.delete(key);
+            return [];
+          },
+        )
+      : Promise.resolve([]);
+    this.threadAgentSkills.set(key, asked);
+    return asked;
+  };
+
+  /** Files and folders in a thread's working directory that match `query`, best first. */
+  findPaths = (thread: ThreadId, query: string, limit = 50) =>
+    this.api.call("thread.paths", { thread_id: thread, query, limit });
 
   /**
    * Ask the agents how much of their accounts' usage limits is spent: each runs for a

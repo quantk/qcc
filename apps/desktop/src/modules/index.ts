@@ -11,6 +11,7 @@ import { lineageModule } from "./lineage";
 import { limitsModule } from "./limits";
 import { liveModule } from "./live";
 import { mcpModule } from "./mcp";
+import { mentionsModule } from "./mentions";
 import { metricsModule } from "./metrics";
 import { navigationModule } from "./navigation";
 import { newThreadModule } from "./new-thread";
@@ -44,6 +45,7 @@ export const builtinModules: UiModule[] = [
   mcpModule,
   automationsModule,
   skillsModule,
+  mentionsModule,
   contextModule,
   insightsModule,
   metricsModule,

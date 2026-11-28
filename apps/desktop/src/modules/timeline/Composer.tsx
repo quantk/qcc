@@ -1,12 +1,13 @@
 import { ArrowUpIcon, CornerDownRightIcon, PaperclipIcon, PencilIcon, SquareIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import type { ProviderInfo, SendMode, Thread } from "../../api/protocol.gen";
 import { store } from "../../state/store";
 import { contextUsed } from "../../state/stats";
 import { type QueuedMessage, type Timeline, queuedMessages } from "../../state/timeline";
 import { BlockChips } from "../../ui/blocks";
-import type { ThreadContext } from "../../ui/registry";
+import { CompletionList, useCompletion } from "../../ui/kit/Completion";
+import { type ThreadContext, useUi } from "../../ui/registry";
 import { compactNumber } from "../../util/format";
 import { fromAttachment, toNewAttachment } from "../../state/attachments";
 import { ComposerAttachmentList, useComposerAttachments } from "./ComposerAttachments";
@@ -51,6 +52,11 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
   const files = useComposerAttachments(thread.id);
   const pictures = provider?.capabilities.images ?? false;
   const canSend = (text.trim() !== "" || files.attachments.length > 0) && files.ready && !sending;
+  // Skills after `/`, files after `@`: whatever modules offer for a trigger.
+  const sources = useUi((snapshot) => snapshot.completions);
+  const completionContext = useMemo(() => ({ thread, provider }), [thread, provider]);
+  const completion = useCompletion({ text, setText, input, sources, context: completionContext });
+  const completionId = useId();
 
   useEffect(() => {
     saveDraft(thread.id, text);
@@ -147,108 +153,126 @@ export function Composer(props: { thread: Thread; timeline: Timeline; provider?:
             remove={(message) => void store().unqueue(thread.id, message.queueId)}
           />
         )}
-        <InputGroup className={cn("bg-card", files.dragging && "border-primary ring-3 ring-primary/30")}>
-          {files.attachments.length > 0 && (
-            <InputGroupAddon align="block-start">
-              <ComposerAttachmentList state={files} />
-            </InputGroupAddon>
-          )}
-          <InputGroupTextarea
-            ref={input}
-            rows={1}
-            className="max-h-60 min-h-0 px-3 pt-2.5"
-            value={text}
-            placeholder={
-              !busy
-                ? "Message the agent…"
-                : delivery === "steer"
-                  ? "Add to what the agent is doing now…"
-                  : "Queue a message for when this turn ends…"
-            }
-            onChange={(event) => setText(event.target.value)}
-            onPaste={(event) => {
-              if (files.paste(event.clipboardData)) event.preventDefault();
-            }}
-            onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-              event.preventDefault();
-              void send(event.altKey && canSteer ? other : delivery);
-            }}
+        <div className="relative">
+          <CompletionList
+            completion={completion}
+            id={completionId}
+            className="absolute inset-x-0 bottom-full z-50 mb-1.5"
           />
-          <InputGroupAddon align="block-end" className="flex-wrap gap-x-3 gap-y-1.5">
-            <InputGroupButton
-              size="icon-xs"
-              variant="ghost"
-              onClick={() => void files.pick().then(() => input.current?.focus())}
-              aria-label="Attach files"
-              title={
-                pictures
-                  ? "Attach files · or paste or drop them here"
-                  : "Attach files · or paste or drop them here. This agent is told where they are saved; it does not see images as pictures"
+          <InputGroup className={cn("bg-card", files.dragging && "border-primary ring-3 ring-primary/30")}>
+            {files.attachments.length > 0 && (
+              <InputGroupAddon align="block-start">
+                <ComposerAttachmentList state={files} />
+              </InputGroupAddon>
+            )}
+            <InputGroupTextarea
+              ref={input}
+              rows={1}
+              className="max-h-60 min-h-0 px-3 pt-2.5"
+              value={text}
+              placeholder={
+                !busy
+                  ? "Message the agent…"
+                  : delivery === "steer"
+                    ? "Add to what the agent is doing now…"
+                    : "Queue a message for when this turn ends…"
               }
-            >
-              <PaperclipIcon />
-            </InputGroupButton>
-            {files.dragging && <span className="text-primary">Drop to attach</span>}
-            {/* Blocks the layout puts beside the composer, as chips (`thread.composer`). */}
-            <BlockChips slot="thread.composer" context={props.context} />
-            <span className={busy ? "status-working" : undefined}>{status}</span>
-            {busy && !steerable && (
-              <span title="This agent cannot take a message in the middle of a turn, so messages wait for it to end">
-                Queue only
-              </span>
-            )}
-            <span className="ml-auto" />
-            {used !== null && <ContextUsage used={used} limit={usage?.model_context_window ?? null} />}
-            {busy && (
+              role="combobox"
+              aria-autocomplete="list"
+              aria-expanded={completion.open}
+              aria-controls={completion.open ? completionId : undefined}
+              onChange={(event) => {
+                setText(event.target.value);
+                completion.onCaret();
+              }}
+              onSelect={completion.onCaret}
+              onFocus={completion.onCaret}
+              onBlur={completion.onBlur}
+              onPaste={(event) => {
+                if (files.paste(event.clipboardData)) event.preventDefault();
+              }}
+              onKeyDown={(event) => {
+                if (completion.onKeyDown(event)) return;
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                void send(event.altKey && canSteer ? other : delivery);
+              }}
+            />
+            <InputGroupAddon align="block-end" className="flex-wrap gap-x-3 gap-y-1.5">
               <InputGroupButton
-                variant="destructive"
-                size="sm"
-                onClick={() => void store().stop(thread.id)}
-                title="Interrupt the running turn"
+                size="icon-xs"
+                variant="ghost"
+                onClick={() => void files.pick().then(() => input.current?.focus())}
+                aria-label="Attach files"
+                title={
+                  pictures
+                    ? "Attach files · or paste or drop them here"
+                    : "Attach files · or paste or drop them here. This agent is told where they are saved; it does not see images as pictures"
+                }
               >
-                <SquareIcon /> Stop
+                <PaperclipIcon />
               </InputGroupButton>
-            )}
-            {canSteer && (
-              <ToggleGroup
+              {files.dragging && <span className="text-primary">Drop to attach</span>}
+              {/* Blocks the layout puts beside the composer, as chips (`thread.composer`). */}
+              <BlockChips slot="thread.composer" context={props.context} />
+              <span className={busy ? "status-working" : undefined}>{status}</span>
+              {busy && !steerable && (
+                <span title="This agent cannot take a message in the middle of a turn, so messages wait for it to end">
+                  Queue only
+                </span>
+              )}
+              <span className="ml-auto" />
+              {used !== null && <ContextUsage used={used} limit={usage?.model_context_window ?? null} />}
+              {busy && (
+                <InputGroupButton
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => void store().stop(thread.id)}
+                  title="Interrupt the running turn"
+                >
+                  <SquareIcon /> Stop
+                </InputGroupButton>
+              )}
+              {canSteer && (
+                <ToggleGroup
+                  size="sm"
+                  variant="outline"
+                  spacing={0}
+                  aria-label="What Enter does while the agent works"
+                  value={[delivery]}
+                  onValueChange={(values: unknown[]) => {
+                    const next = values[0];
+                    if (next === "queue" || next === "steer") choose(next);
+                  }}
+                >
+                  <ToggleGroupItem
+                    value="queue"
+                    className="data-pressed:bg-accent data-pressed:text-foreground"
+                    title="Send it as its own turn once this one ends"
+                  >
+                    Queue
+                  </ToggleGroupItem>
+                  <ToggleGroupItem
+                    value="steer"
+                    className="data-pressed:bg-accent data-pressed:text-foreground"
+                    title="Feed it into the turn that is running now"
+                  >
+                    Steer
+                  </ToggleGroupItem>
+                </ToggleGroup>
+              )}
+              <InputGroupButton
+                type="submit"
+                variant="default"
                 size="sm"
-                variant="outline"
-                spacing={0}
-                aria-label="What Enter does while the agent works"
-                value={[delivery]}
-                onValueChange={(values: unknown[]) => {
-                  const next = values[0];
-                  if (next === "queue" || next === "steer") choose(next);
-                }}
+                disabled={!canSend}
+                title={canSteer ? `Enter · Alt+Enter to ${other} instead` : "Enter"}
               >
-                <ToggleGroupItem
-                  value="queue"
-                  className="data-pressed:bg-accent data-pressed:text-foreground"
-                  title="Send it as its own turn once this one ends"
-                >
-                  Queue
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="steer"
-                  className="data-pressed:bg-accent data-pressed:text-foreground"
-                  title="Feed it into the turn that is running now"
-                >
-                  Steer
-                </ToggleGroupItem>
-              </ToggleGroup>
-            )}
-            <InputGroupButton
-              type="submit"
-              variant="default"
-              size="sm"
-              disabled={!canSend}
-              title={canSteer ? `Enter · Alt+Enter to ${other} instead` : "Enter"}
-            >
-              {!busy ? "Send" : delivery === "steer" ? "Steer" : "Queue"} <ArrowUpIcon />
-            </InputGroupButton>
-          </InputGroupAddon>
-        </InputGroup>
+                {!busy ? "Send" : delivery === "steer" ? "Steer" : "Queue"} <ArrowUpIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          </InputGroup>
+        </div>
       </form>
     </div>
   );

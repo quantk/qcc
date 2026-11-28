@@ -171,6 +171,51 @@ export type GroupAction = {
   run: (group: ThreadGroup) => void;
 };
 
+/** One entry of a composer completion list. */
+export type CompletionItem = {
+  /** Unique within its list. */
+  key: string;
+  /** What the entry shows, such as `/plan` or `src/lib.rs`. */
+  label: string;
+  /** Where in `label` the query matched, to stress those characters. */
+  positions?: readonly number[];
+  /** A line under or beside the label, such as a skill's description. */
+  detail?: string;
+  /** A short tag at the end, such as where a skill is from. */
+  badge?: string;
+  icon?: ComponentType<{ className?: string }>;
+  /** What replaces the typed token, trigger included: `/plan `, `@src/lib.rs `. */
+  insert: string;
+  /**
+   * What Tab puts in instead, leaving the list open to go on: a folder's path
+   * without the space after it. Absent: Tab does what Enter does.
+   */
+  descend?: string;
+};
+
+/** What a completion source is given. */
+export type CompletionContext = { thread: Thread; provider: ProviderInfo | undefined };
+
+/**
+ * A list the composer offers while a word starting with `trigger` is typed at the
+ * start of the message or after whitespace: `/` for skills, `@` for paths. Several
+ * sources of one trigger are shown one after another, in `order`.
+ */
+export type ComposerCompletion = {
+  id: string;
+  trigger: string;
+  order: number;
+  /** The heading of its part of the list. */
+  title: string;
+  /** Absent: offered in every thread. */
+  when?: (context: CompletionContext) => boolean;
+  /**
+   * The entries for what is typed after the trigger, best first. Called as the
+   * user types; an answer that comes after a newer question is dropped.
+   */
+  complete: (query: string, context: CompletionContext) => readonly CompletionItem[] | Promise<readonly CompletionItem[]>;
+};
+
 /** A modal the shell shows on a contribution's behalf. */
 export type DialogRenderer = ComponentType<{ close: () => void }>;
 
@@ -193,6 +238,7 @@ type Snapshot = {
   menu: readonly ThreadMenuItem[];
   itemMenu: readonly ItemMenuItem[];
   groupActions: readonly GroupAction[];
+  completions: readonly ComposerCompletion[];
   items: ReadonlyMap<string, ItemRenderer>;
   dialog: DialogRenderer | null;
 };
@@ -208,6 +254,7 @@ export class UiRegistry {
     menu: [],
     itemMenu: [],
     groupActions: [],
+    completions: [],
     items: new Map(),
     dialog: null,
   };
@@ -289,6 +336,15 @@ export class UiRegistry {
       actions: [...this.snapshot.actions.filter((other) => other.id !== action.id), action].sort(byOrder),
     });
     return this.track(() => this.update({ actions: this.snapshot.actions.filter((other) => other !== action) }));
+  }
+
+  composerCompletion(source: ComposerCompletion): () => void {
+    this.update({
+      completions: [...this.snapshot.completions.filter((other) => other.id !== source.id), source].sort(byOrder),
+    });
+    return this.track(() =>
+      this.update({ completions: this.snapshot.completions.filter((other) => other !== source) }),
+    );
   }
 
   command(command: Command): () => void {

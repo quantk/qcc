@@ -1,11 +1,12 @@
 // Skills: a screen with the skills plugins offer agents and a switch for all
-// threads, and a tab that switches them in one thread.
+// threads, a tab that switches them in one thread, and the composer's `/` list.
 
 import { SparklesIcon } from "lucide-react";
 
 import { visibleSkills } from "../../state/skills";
 import { store } from "../../state/store";
 import type { UiModule } from "../../ui/registry";
+import { skillCompletion } from "./completion";
 import { SKILLS_VIEW, SkillsView } from "./SkillsView";
 import { ThreadSkills } from "./ThreadSkills";
 
@@ -32,6 +33,7 @@ export const skillsModule: UiModule = {
       },
       render: ({ thread }) => <ThreadSkills thread={thread} />,
     });
+    registry.composerCompletion(skillCompletion);
     registry.command({ id: "skills.open", title: "Skills", run: () => store().openView(SKILLS_VIEW) });
   },
 };

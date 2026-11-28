@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SkillStatus, Thread } from "../api/protocol.gen";
-import { skillOff, threadSkills, visibleSkills, withSkillOff } from "./skills";
+import { offeredSkills, skillOff, threadSkills, visibleSkills, withSkillOff } from "./skills";
 
 const skills: SkillStatus[] = [
   { name: "plan", description: "Planning", plugin: "orchestration", path: "/s/plan" },
@@ -37,5 +37,18 @@ describe("skills", () => {
   it("leaves out the skills of hidden plugins", () => {
     const plugins = [{ id: "orchestration" }] as never[];
     expect(visibleSkills(skills, plugins).map((skill) => skill.name)).toEqual(["plan"]);
+  });
+
+  it("offers the thread's qcc skills and the agent's own, each name once", () => {
+    const own = [
+      { name: "tdd", description: "Test first", source: "project" },
+      { name: "plan", description: "The agent's plan" },
+    ];
+    const offered = offeredSkills(thread({ skills_enabled: ["demo"] }), skills, { skills: { plan: { disabled: true } } }, own);
+    expect(offered).toEqual([
+      { name: "demo", description: "Demo", source: "qcc" },
+      { name: "plan", description: "The agent's plan", source: null },
+      { name: "tdd", description: "Test first", source: "project" },
+    ]);
   });
 });

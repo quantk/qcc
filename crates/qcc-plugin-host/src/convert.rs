@@ -1,7 +1,9 @@
 //! Translation between the WIT types and the domain. The only place that knows both.
 
 use qcc_domain::plausible_icon;
-use qcc_domain::{AgentSkill, Attachment, Compaction, ForkSupport, SettingField, SettingKind};
+use qcc_domain::{
+    AgentCommand, AgentSkill, Attachment, Compaction, ForkSupport, SettingField, SettingKind,
+};
 use qcc_domain::{
     ChangeKind, ChangeScope, ChangedFile, CommandInfo, CommandParam, DeliverMode, Delta,
     EnvironmentChanges, EnvironmentInfo, InteractionOption, InteractionRequest,
@@ -270,6 +272,7 @@ pub(crate) fn contribution(contribution: wit::Contribution) -> Contribution {
                 mcp_live: p.capabilities.mcp_live,
                 compact: p.capabilities.compact,
                 list_skills: p.capabilities.list_skills,
+                list_commands: p.capabilities.list_commands,
                 context_usage: p.capabilities.context_usage,
                 images: p.capabilities.images,
                 rate_limits: p.capabilities.rate_limits,
@@ -471,6 +474,7 @@ pub(crate) fn provider_info(info: ProviderInfo) -> wit::ProviderInfo {
             mcp_live: c.mcp_live,
             compact: c.compact,
             list_skills: c.list_skills,
+            list_commands: c.list_commands,
             context_usage: c.context_usage,
             images: c.images,
             rate_limits: c.rate_limits,
@@ -591,6 +595,17 @@ pub(crate) fn outcome(outcome: wit::Outcome) -> Outcome {
                     description: s.description,
                     source: s.source,
                     path: s.path,
+                })
+                .collect(),
+        ),
+        wit::Outcome::Commands(commands) => Outcome::Commands(
+            commands
+                .into_iter()
+                .map(|c| AgentCommand {
+                    name: c.name,
+                    description: c.description,
+                    argument_hint: c.argument_hint,
+                    source: c.source,
                 })
                 .collect(),
         ),
@@ -764,6 +779,7 @@ pub(crate) fn event(request: PluginRequest, images: impl Fn(&str) -> bool) -> wi
                 }
                 ProviderRequest::ListModels => wit::ProviderRequest::ListModels,
                 ProviderRequest::ListSkills { cwd } => wit::ProviderRequest::ListSkills(cwd),
+                ProviderRequest::ListCommands { cwd } => wit::ProviderRequest::ListCommands(cwd),
                 ProviderRequest::ReadRateLimits => wit::ProviderRequest::ReadRateLimits,
             },
             provider: provider.0,

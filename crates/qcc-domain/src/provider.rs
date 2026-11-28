@@ -84,6 +84,9 @@ pub struct ProviderCapabilities {
     /// The provider can tell which skills its agent finds by itself.
     #[serde(default)]
     pub list_skills: bool,
+    /// The provider can tell which slash commands its agent runs from a message.
+    #[serde(default)]
+    pub list_commands: bool,
     /// The provider reports what its agent's context window holds, part by part
     /// (`context.usage` deltas). Without it, only how full the window is is known.
     #[serde(default)]
@@ -224,6 +227,21 @@ pub struct AgentSkill {
     /// Its `SKILL.md`, when the agent says.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
+}
+
+/// A slash command an agent runs when a message sent through qcc starts with
+/// `/name`, as its provider reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct AgentCommand {
+    /// Without the slash.
+    pub name: String,
+    pub description: String,
+    /// What goes after the name, as the agent describes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub argument_hint: Option<String>,
+    /// Where it is from, in the agent's own words (`built-in`, `user`, `project`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 /// How the work of an environment goes back to the directory it was made from.

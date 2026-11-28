@@ -43,6 +43,26 @@ impl Core {
                 .thread(id)
                 .map(|thread| PathBuf::from(&thread.cwd))
                 .ok_or_else(|| format!("thread {id} does not exist")),
+            FileRoot::WorkingDir(dir) => {
+                let wanted = Path::new(dir);
+                let wanted_real = wanted.canonicalize().ok();
+                let known = self.supervisor.threads().any(|thread| {
+                    let cwd = Path::new(&thread.cwd);
+                    cwd == wanted
+                        || (wanted_real.is_some() && cwd.canonicalize().ok() == wanted_real)
+                });
+                if known {
+                    Ok(wanted.to_path_buf())
+                } else {
+                    Err(format!("{dir:?} is not a folder a thread works in"))
+                }
+            }
+            // Which folders under it may be read, the host checked against the
+            // plugin's `home-files` permission.
+            FileRoot::Home => std::env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .map(PathBuf::from)
+                .ok_or_else(|| "the home folder is not known".to_owned()),
         }
     }
 

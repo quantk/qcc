@@ -6,9 +6,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
 use qcc_domain::{
-    AgentSkill, Automation, Delta, EventPayload, ModelInfo, Project, ProviderId, ProviderInfo,
-    ProviderLimits, RateLimits, ThreadEnvironment, ThreadEvent, ThreadId, ThreadStatus, TurnStatus,
-    UserInput,
+    AgentCommand, AgentSkill, Automation, Delta, EventPayload, ModelInfo, Project, ProviderId,
+    ProviderInfo, ProviderLimits, RateLimits, ThreadEnvironment, ThreadEvent, ThreadId,
+    ThreadStatus, TurnStatus, UserInput,
 };
 use qcc_plugin_host::{
     EnvironmentRequest, Notification, Outcome, PluginError, PluginHandle, PluginHost,
@@ -218,6 +218,12 @@ pub(crate) enum Command {
         result: Result<Vec<ModelInfo>, String>,
         responder: Responder,
     },
+    /// A provider answered `list-commands`, about a working directory or none.
+    CommandsListed {
+        key: (ProviderId, Option<String>),
+        result: Result<Vec<AgentCommand>, String>,
+        responder: Responder,
+    },
     /// A provider answered `list-skills`, about a working directory or none.
     SkillsListed {
         key: (ProviderId, Option<String>),
@@ -369,6 +375,9 @@ pub(crate) struct Core {
     /// The skills each provider's agent said it finds by itself, until asked again,
     /// by the working directory asked about (none: where the agent runs by default).
     agent_skills: HashMap<(ProviderId, Option<String>), Vec<AgentSkill>>,
+    /// The slash commands each provider's agent runs, by working directory, like
+    /// `agent_skills`.
+    agent_commands: HashMap<(ProviderId, Option<String>), Vec<AgentCommand>>,
     /// Recent scans of threads' working directories, for `thread.paths`.
     paths: crate::paths::PathIndex,
     /// The latest usage limits each provider reported, saved in the store.
@@ -493,6 +502,7 @@ impl Core {
             skills,
             models: HashMap::new(),
             agent_skills: HashMap::new(),
+            agent_commands: HashMap::new(),
             paths: crate::paths::PathIndex::default(),
             limits,
             projects,
@@ -592,6 +602,9 @@ impl Core {
             }
             Command::ModelsListed { provider, result, responder } => {
                 self.models_listed(provider, result, responder);
+            }
+            Command::CommandsListed { key, result, responder } => {
+                self.commands_listed(key, result, responder);
             }
             Command::SkillsListed { key, result, responder } => {
                 self.skills_listed(key, result, responder);

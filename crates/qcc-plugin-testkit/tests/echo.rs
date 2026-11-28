@@ -52,6 +52,7 @@ fn declares_its_provider_and_its_ui() {
             mcp_live: true,
             compact: true,
             list_skills: true,
+            list_commands: true,
             context_usage: true,
             images: true,
             rate_limits: true,

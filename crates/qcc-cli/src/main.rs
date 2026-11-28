@@ -24,8 +24,9 @@ use qcc_client::Client;
 use qcc_client::protocol::methods::{
     CommandList, CommandRun, CommandRunParams, DaemonStatus, Empty, InteractionResolve,
     InteractionResolveParams, PluginDisable, PluginDisableParams, PluginEnable, PluginEnableParams,
-    PluginList, ProviderLimitsParams, ProviderModels, ProviderModelsParams, ProviderRateLimits,
-    ProviderSkills, ProviderSkillsParams, SettingsGet, SettingsSet, SettingsSetParams,
+    PluginList, ProviderCommands, ProviderCommandsParams, ProviderLimitsParams, ProviderModels,
+    ProviderModelsParams, ProviderRateLimits, ProviderSkills, ProviderSkillsParams, SettingsGet,
+    SettingsSet, SettingsSetParams,
 };
 use qcc_client::protocol::paths;
 use qcc_domain::{InteractionId, InteractionResolution, ProviderId, ThreadId};
@@ -178,6 +179,18 @@ enum ProviderCommand {
         #[arg(long)]
         refresh: bool,
         /// Ask about this thread's working directory: the project's own skills
+        /// are found there.
+        #[arg(long)]
+        thread: Option<String>,
+    },
+    /// The slash commands a provider's agent runs when a message sent through qcc
+    /// starts with `/name`: built-in, the user's and the project's.
+    Commands {
+        provider: String,
+        /// Ask the agent again instead of using what the daemon remembers.
+        #[arg(long)]
+        refresh: bool,
+        /// Ask about this thread's working directory: the project's own commands
         /// are found there.
         #[arg(long)]
         thread: Option<String>,
@@ -421,6 +434,35 @@ async fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                     out(format!("{}{source}", skill.name));
                     let about = skill.path.as_deref().unwrap_or(&skill.description);
                     out(format!("    {about}"));
+                }
+            }
+        }
+
+        Command::Provider(ProviderCommand::Commands { provider, refresh, thread }) => {
+            let params = ProviderCommandsParams {
+                provider: ProviderId::new(provider),
+                refresh,
+                thread: thread.map(ThreadId::new),
+            };
+            let result = client.call::<ProviderCommands>(params).await?;
+            if json {
+                print_json(&result)?;
+            } else if result.commands.is_empty() {
+                out("the agent reports no slash commands");
+            } else {
+                for command in &result.commands {
+                    let hint = command
+                        .argument_hint
+                        .as_deref()
+                        .filter(|hint| !hint.is_empty())
+                        .map(|hint| format!(" {hint}"))
+                        .unwrap_or_default();
+                    let source =
+                        command.source.as_deref().map(|s| format!("  ({s})")).unwrap_or_default();
+                    out(format!("/{}{hint}{source}", command.name));
+                    if !command.description.is_empty() {
+                        out(format!("    {}", command.description));
+                    }
                 }
             }
         }

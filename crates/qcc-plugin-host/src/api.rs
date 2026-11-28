@@ -2,10 +2,10 @@
 //! crate.
 
 use qcc_domain::{
-    AgentSkill, ChangeScope, CommandInfo, CommentAuthor, CommentId, DeliverMode, DiffSide,
-    EnvironmentChanges, EnvironmentInfo, InteractionResolution, LineComment, McpServer, ModelInfo,
-    PermissionMode, ProviderId, ProviderInfo, RateLimits, SettingField, SkillInfo, SkillRef,
-    Thread, ThreadId, ThreadState, TranscriptEntry, TurnStatus, UiViewInfo, UserInput,
+    AgentCommand, AgentSkill, ChangeScope, CommandInfo, CommentAuthor, CommentId, DeliverMode,
+    DiffSide, EnvironmentChanges, EnvironmentInfo, InteractionResolution, LineComment, McpServer,
+    ModelInfo, PermissionMode, ProviderId, ProviderInfo, RateLimits, SettingField, SkillInfo,
+    SkillRef, Thread, ThreadId, ThreadState, TranscriptEntry, TurnStatus, UiViewInfo, UserInput,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,6 +75,11 @@ pub enum ProviderRequest {
     /// The skills the agent finds by itself; in a thread's working directory, when
     /// one is given, so that the project's own skills are among them.
     ListSkills {
+        cwd: Option<String>,
+    },
+    /// The slash commands the agent runs from a message; in a thread's working
+    /// directory, when one is given. Only for providers that declared `list_commands`.
+    ListCommands {
         cwd: Option<String>,
     },
     /// The account's usage limits now. Only for providers that declared `rate_limits`.
@@ -329,6 +334,11 @@ pub enum FileRoot {
     Thread(ThreadId),
     /// The plugin's own data folder.
     Own,
+    /// A folder some thread works in, by its path; any other is refused.
+    WorkingDir(String),
+    /// The user's home folder. The host lets only the folders the plugin's
+    /// `home-files` permission names through.
+    Home,
 }
 
 /// A comment a plugin leaves. Its author's `plugin` is the caller, whatever the
@@ -382,6 +392,7 @@ pub enum Outcome {
     },
     Models(Vec<ModelInfo>),
     Skills(Vec<AgentSkill>),
+    Commands(Vec<AgentCommand>),
     RateLimits(RateLimits),
     EnvironmentReady {
         cwd: String,

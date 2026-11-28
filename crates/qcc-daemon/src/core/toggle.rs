@@ -32,6 +32,7 @@ fn permissions_info(permissions: &Permissions) -> PluginPermissions {
         thread_events: permissions.thread_events,
         notifications: permissions.notifications,
         process: permissions.process.clone(),
+        home_files: permissions.home_files.clone(),
     }
 }
 
@@ -175,6 +176,7 @@ impl Core {
             for provider in &owned.providers {
                 self.models.remove(provider);
                 self.agent_skills.retain(|(owner, _), _| owner != provider);
+                self.agent_commands.retain(|(owner, _), _| owner != provider);
             }
             if let Some(plugin) = self.host.unload(&id) {
                 // The last handle waits for the plugin's thread to end, which takes

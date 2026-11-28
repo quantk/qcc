@@ -10,3 +10,7 @@ deltas = true
 # Probes that ask the agents for their models are cut off after a while.
 timers = true
 process = ["opencode"]
+# Read the agents' skills and commands to list them without a session: the
+# project's where a thread works, and the user's in these folders of the home.
+files = true
+home-files = [".config/opencode", ".agents/skills", ".claude/skills"]

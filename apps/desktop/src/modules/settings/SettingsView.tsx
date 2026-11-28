@@ -376,6 +376,8 @@ function PluginCard(props: {
     permissions.thread_events && "follows all threads",
     permissions.notifications && "notifications",
     permissions.process.length > 0 && `runs ${permissions.process.join(", ")}`,
+    (permissions.home_files ?? []).length > 0 &&
+      `reads ${(permissions.home_files ?? []).map((dir) => `~/${dir}`).join(", ")}`,
   ].filter(Boolean);
   const adds = [
     ...plugin.providers.map((provider) => `agent ${provider.name}`),

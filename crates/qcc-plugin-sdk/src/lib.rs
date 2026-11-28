@@ -21,6 +21,7 @@
 //!                 mcp_live: false,
 //!                 compact: false,
 //!                 list_skills: false,
+//!                 list_commands: false,
 //!                 context_usage: false,
 //!                 rate_limits: false,
 //!                 fork: ForkSupport::None,
@@ -93,13 +94,14 @@ pub use bindings::qcc::plugin::{
 };
 
 use types::{
-    AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution, Delta,
-    EnvironmentChanges, EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo, EnvironmentPrepare,
-    EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event, InteractionAnswer,
-    InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome, ProviderInfo,
-    ProviderModels, ProviderRequest, SessionStart, SessionStarted, SettingField, SettledThread,
-    SkillInfo, SkillRef, ThreadChange, ThreadChanges, ThreadDiff, ThreadInput, TokenUsage,
-    TurnBoundary, TurnEnded, TurnStatus, UiAction, UiItem, UiRender, UiRequest, UiViewInfo,
+    AgentCommand, AgentSkill, Attachment, CommandCall, CommandInfo, CommandResult, Contribution,
+    Delta, EnvironmentChanges, EnvironmentDeliver, EnvironmentDiff, EnvironmentInfo,
+    EnvironmentPrepare, EnvironmentQuery, EnvironmentRemove, EnvironmentRequest, Event,
+    InteractionAnswer, InteractionOption, McpServersUpdate, ModelInfo, OptionKind, Outcome,
+    ProviderInfo, ProviderModels, ProviderRequest, SessionStart, SessionStarted, SettingField,
+    SettledThread, SkillInfo, SkillRef, ThreadChange, ThreadChanges, ThreadDiff, ThreadInput,
+    TokenUsage, TurnBoundary, TurnEnded, TurnStatus, UiAction, UiItem, UiRender, UiRequest,
+    UiViewInfo,
 };
 
 /// Everything a plugin usually needs.
@@ -108,8 +110,8 @@ pub mod prelude {
     pub use crate::{
         Commands, Environment, Plugin, ProcessEvent, Provider, Reply, Ui, add_usage,
         attachments_note, boundary, boundary_at, comments, completions, deltas, files, kv, log,
-        message, notifications, option, process, session_context, skills_prompt, threads, timers,
-        views, with_notes,
+        message, notifications, option, process, session_context, skills_prompt, slash_command,
+        threads, timers, views, with_notes,
     };
 }
 
@@ -198,6 +200,14 @@ pub trait Provider {
     /// `cwd` is a thread's working directory when the user asks about one thread:
     /// ask the agent there, so the project's own skills are among those it finds.
     fn skills(&mut self, _cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
+        Ok(Reply::Now(Vec::new()))
+    }
+
+    /// The slash commands the agent runs when a message starts with `/name`, in
+    /// `cwd` when given. Called only if the provider declared `list_commands`. Only
+    /// commands that work in a qcc session belong here. Like [`Provider::skills`],
+    /// usually answered later, with [`Outcome::Commands`].
+    fn commands(&mut self, _cwd: Option<String>) -> Result<Reply<Vec<AgentCommand>>, String> {
         Ok(Reply::Now(Vec::new()))
     }
 
@@ -342,23 +352,45 @@ pub fn skills_prompt(skills: &[SkillRef]) -> Option<String> {
     Some(text)
 }
 
+/// The slash command a message starts with, and what follows it: `/review src`
+/// is `("review", "src")`. The name runs up to whitespace and holds letters,
+/// digits and `-_.:/` (`opsx:apply`, `team/review`), but not a second `/` right
+/// after the first or a trailing one, so a path such as `/usr/bin/` or `//x` is
+/// not a command. `None` when the message does not start with one.
+pub fn slash_command(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('/')?;
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let name = &rest[..end];
+    let valid = !name.is_empty()
+        && name.chars().all(|c| c.is_alphanumeric() || "-_.:/".contains(c))
+        && !name.starts_with('/')
+        && !name.ends_with('/')
+        && name.chars().next().is_some_and(char::is_alphanumeric);
+    valid.then(|| (name, rest[end..].trim_start()))
+}
+
 /// A user message with what qcc tells the agent along with it (`thread-input.notes`)
 /// put in front, marked as qcc's so the agent does not take it for the user's words.
-/// The text alone when there are no notes. For bridges whose agent has no other
-/// place for such facts.
+/// A message that starts with a slash command ([`slash_command`]) keeps it in front,
+/// so the agent still sees the command, and gets the notes after it. The text alone
+/// when there are no notes. For bridges whose agent has no other place for such
+/// facts.
 pub fn with_notes(notes: &[String], text: &str) -> String {
     if notes.is_empty() {
         return text.to_owned();
     }
-    let mut message = String::from(
+    let mut block = String::from(
         "<qcc-notes>\nqcc, which runs this session, adds (the user did not write this):\n",
     );
     for note in notes {
-        message.push_str(&format!("- {note}\n"));
+        block.push_str(&format!("- {note}\n"));
     }
-    message.push_str("</qcc-notes>\n\n");
-    message.push_str(text);
-    message
+    block.push_str("</qcc-notes>");
+    if slash_command(text).is_some() {
+        format!("{text}\n\n{block}")
+    } else {
+        format!("{block}\n\n{text}")
+    }
 }
 
 /// A user message as a bridge hands it to its agent: the text, with qcc's notes in
@@ -639,6 +671,9 @@ pub mod __private {
                     ProviderRequest::ListSkills(cwd) => {
                         provider.skills(cwd).map(|r| reply(r, Outcome::Skills))
                     }
+                    ProviderRequest::ListCommands(cwd) => {
+                        provider.commands(cwd).map(|r| reply(r, Outcome::Commands))
+                    }
                     ProviderRequest::ReadRateLimits => {
                         provider.rate_limits().map(|r| reply(r, Outcome::RateLimits))
                     }
@@ -751,5 +786,31 @@ pub mod __private {
             Reply::Now(value) => now(value),
             Reply::Later(token) => Outcome::Deferred(token),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_message_starts_with_a_command_or_not() {
+        assert_eq!(slash_command("/review src/a.rs"), Some(("review", "src/a.rs")));
+        assert_eq!(slash_command("/opsx:apply"), Some(("opsx:apply", "")));
+        assert_eq!(slash_command("/team/review now"), Some(("team/review", "now")));
+        assert_eq!(slash_command("/compact\nkeep the plan"), Some(("compact", "keep the plan")));
+        for text in ["/usr/bin/", "//x", "/", "/ x", "see /review", "/-x", "/a!"] {
+            assert_eq!(slash_command(text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn notes_go_after_a_command_and_before_anything_else() {
+        let notes = ["a file is attached".to_owned()];
+        let plain = with_notes(&notes, "look");
+        assert!(plain.starts_with("<qcc-notes>") && plain.ends_with("\n\nlook"), "{plain}");
+        let command = with_notes(&notes, "/review now");
+        assert!(command.starts_with("/review now\n\n<qcc-notes>"), "{command}");
+        assert_eq!(with_notes(&[], "/review"), "/review");
     }
 }

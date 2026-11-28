@@ -39,6 +39,9 @@
 //! (`mcp-live`): a new one or one set up anew is reported again, one dropped is
 //! removed.
 //!
+//! Asked for its slash commands, it lists the prompts above as built-in ones and,
+//! in a working directory, a project's own `/echo-project-command`.
+//!
 //! It offers a skill on request, `echo-demo`, for tests of skill switching, and
 //! compacts a session's context when asked, at once. Asked for its account's usage
 //! limits without a session, it reports a 5-hour window 10% spent and a weekly one
@@ -598,6 +601,7 @@ impl Provider for Echo {
                 mcp_live: true,
                 compact: true,
                 list_skills: true,
+                list_commands: true,
                 context_usage: true,
                 images: true,
                 rate_limits: true,
@@ -773,6 +777,34 @@ impl Provider for Echo {
             ],
             complete: true,
         }))
+    }
+
+    /// The prompts of the table at the top as slash commands, and one of the
+    /// project's when asked about a working directory.
+    fn commands(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentCommand>>, String> {
+        let builtin = |name: &str, description: &str, hint: Option<&str>| AgentCommand {
+            name: name.into(),
+            description: description.into(),
+            argument_hint: hint.map(Into::into),
+            source: Some("built-in".into()),
+        };
+        let mut commands = vec![
+            builtin("slow", "Stream the text one word per tick", Some("<text>")),
+            builtin("tool", "Make a tool call", Some("<name>")),
+            builtin("ask", "Ask the user a question", Some("<question>")),
+            builtin("fail", "Fail the turn", Some("<message>")),
+            builtin("notes", "Say what qcc told it along with the message", None),
+            builtin("skills", "Say what the session was told", None),
+        ];
+        if cwd.is_some() {
+            commands.push(AgentCommand {
+                name: "echo-project-command".into(),
+                description: "A command of the project the thread works in".into(),
+                argument_hint: None,
+                source: Some("project".into()),
+            });
+        }
+        Ok(Reply::Now(commands))
     }
 
     /// One skill of its "own", as a real agent finds them in its folders, and,

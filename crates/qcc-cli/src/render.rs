@@ -382,6 +382,11 @@ pub fn plugin(plugin: &PluginInfo) -> String {
     if !permissions.process.is_empty() {
         granted.push(format!("process({})", permissions.process.join(", ")));
     }
+    if !permissions.home_files.is_empty() {
+        let dirs: Vec<String> =
+            permissions.home_files.iter().map(|dir| format!("~/{dir}")).collect();
+        granted.push(format!("home-files({})", dirs.join(", ")));
+    }
     let granted = if granted.is_empty() { "none".to_owned() } else { granted.join(", ") };
     lines.push(format!("  permissions  {granted}"));
     lines.join("\n")

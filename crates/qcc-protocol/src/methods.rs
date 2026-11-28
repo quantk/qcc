@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 
 use qcc_domain::{
-    AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec, ChangeScope,
-    CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges, EnvironmentInfo,
-    InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo, PermissionMode,
-    Project, ProjectIcon, ProjectId, ProviderId, ProviderInfo, ProviderLimits, SettingField,
-    Thread, ThreadEvent, ThreadId, ThreadState, ToolBucket, TurnId, TurnStatus, UiViewInfo,
-    UsageBucket,
+    AgentCommand, AgentSkill, Attachment, Automation, AutomationId, AutomationRun, AutomationSpec,
+    ChangeScope, CommandInfo, CommentId, DeliverMode, DiffSide, EnvironmentChanges,
+    EnvironmentInfo, InteractionId, InteractionResolution, LineComment, McpTransport, ModelInfo,
+    PermissionMode, Project, ProjectIcon, ProjectId, ProviderId, ProviderInfo, ProviderLimits,
+    SettingField, Thread, ThreadEvent, ThreadId, ThreadState, ToolBucket, TurnId, TurnStatus,
+    UiViewInfo, UsageBucket,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1269,6 +1269,9 @@ pub struct PluginPermissions {
     pub notifications: bool,
     /// Executables the plugin may run.
     pub process: Vec<String>,
+    /// Folders of the user's home whose files it reads, relative to the home.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub home_files: Vec<String>,
 }
 
 // ----- skills -----------------------------------------------------------------------
@@ -1338,6 +1341,31 @@ pub struct ProviderSkillsParams {
 pub struct ProviderSkillsResult {
     /// By name. Empty when the agent cannot tell.
     pub skills: Vec<AgentSkill>,
+}
+
+method!(
+    /// The slash commands a provider's agent runs when a message sent through qcc
+    /// starts with `/name`: its built-in ones that work there and the user's and
+    /// the project's (with `thread`, those of the thread's working directory).
+    /// Empty for an agent whose provider cannot tell. The first call asks the agent;
+    /// the answer is kept, for each working directory, until `refresh` asks again.
+    ProviderCommands, "provider.commands", ProviderCommandsParams => ProviderCommandsResult
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderCommandsParams {
+    pub provider: ProviderId,
+    #[serde(default)]
+    pub refresh: bool,
+    /// Ask about this thread's working directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<ThreadId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct ProviderCommandsResult {
+    /// By name.
+    pub commands: Vec<AgentCommand>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]

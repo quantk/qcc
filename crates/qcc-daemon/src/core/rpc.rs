@@ -9,16 +9,16 @@ use qcc_protocol::methods::{
     AutomationSetEnabled, AutomationUpdate, CommandList, CommandRun, CommentAdd, CommentDelete,
     CommentList, CommentResolve, DaemonStatus, DaemonStatusResult, Empty, InteractionResolve,
     PluginDisable, PluginEnable, PluginList, ProjectCreate, ProjectDelete, ProjectList,
-    ProjectListResult, ProjectUpdate, ProviderModels, ProviderRateLimits, ProviderSkills,
-    SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment, ThreadChanges,
-    ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadFork, ThreadGet, ThreadGetParams,
-    ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadPaths, ThreadRename,
-    ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode, ThreadSetParent,
-    ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadTurns, ThreadUnqueue,
-    ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch, ThreadWatchParams,
-    UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult, UiContributions, UiRender,
-    UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory, UsageHistoryResult, UsageTools,
-    UsageToolsResult,
+    ProjectListResult, ProjectUpdate, ProviderCommands, ProviderModels, ProviderRateLimits,
+    ProviderSkills, SettingsGet, SettingsSet, SkillList, ThreadArchive, ThreadAttachment,
+    ThreadChanges, ThreadCompact, ThreadDeliver, ThreadDiff, ThreadEvents, ThreadFork, ThreadGet,
+    ThreadGetParams, ThreadIsolate, ThreadList, ThreadListParams, ThreadListResult, ThreadPaths,
+    ThreadRename, ThreadReset, ThreadSend, ThreadSetAgent, ThreadSetMcp, ThreadSetMode,
+    ThreadSetParent, ThreadSetProject, ThreadSetSkill, ThreadSpawn, ThreadStop, ThreadTurns,
+    ThreadUnqueue, ThreadUnsubscribe, ThreadUnsubscribeParams, ThreadWait, ThreadWatch,
+    ThreadWatchParams, UiAction, UiActionParams, UiAsset, UiAssetParams, UiAssetResult,
+    UiContributions, UiRender, UiRenderItem, UiRenderItemParams, UiRenderParams, UsageHistory,
+    UsageHistoryResult, UsageTools, UsageToolsResult,
 };
 use qcc_protocol::{Method, PROTOCOL_VERSION};
 use serde_json::Value;
@@ -301,6 +301,10 @@ impl Core {
             },
             ProviderSkills::NAME => match params::<ProviderSkills>(raw) {
                 Ok(p) => self.provider_skills(p, responder),
+                Err(error) => responder.reply::<Empty>(Err(error)),
+            },
+            ProviderCommands::NAME => match params::<ProviderCommands>(raw) {
+                Ok(p) => self.provider_commands(p, responder),
                 Err(error) => responder.reply::<Empty>(Err(error)),
             },
             ProviderRateLimits::NAME => match params::<ProviderRateLimits>(raw) {

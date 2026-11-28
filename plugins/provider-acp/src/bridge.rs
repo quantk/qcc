@@ -20,7 +20,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{add_usage, base64, boundary_at};
+use qcc_plugin_sdk::{add_usage, base64, boundary_at, slash_command};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -318,7 +318,14 @@ impl Bridge {
             let Some(data) = &image.data else { continue };
             prompt.push(json!({"type": "image", "mimeType": image.mime, "data": base64(data)}));
         }
-        prompt.push(json!({"type": "text", "text": message.text}));
+        let text = json!({"type": "text", "text": message.text});
+        // An agent runs a slash command only from a prompt that starts with it
+        // (opencode looks at the first block), so the command goes first.
+        if slash_command(&next.text).is_some() {
+            prompt.insert(0, text);
+        } else {
+            prompt.push(text);
+        }
         output.writes.push(self.peer.request(
             "session/prompt",
             json!({"sessionId": session, "prompt": prompt}),
@@ -1156,5 +1163,22 @@ mod tests {
             "{text}"
         );
         assert!(text.ends_with("look"), "{text}");
+    }
+
+    #[test]
+    fn a_command_goes_first_before_the_session_context() {
+        let (mut bridge, _) =
+            Bridge::new(Config { context: Some("qcc context".into()), ..config() });
+        bridge.prompt_with(Prompt {
+            text: "/review src".into(),
+            notes: vec!["a note".into()],
+            attachments: Vec::new(),
+        });
+        bridge.on_line(INIT_BARE);
+        let sent =
+            prompt_of(&bridge.on_line(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s"}}"#));
+        let first = sent[0]["text"].as_str().unwrap();
+        assert!(first.starts_with("/review src\n\n<qcc-notes>"), "{first}");
+        assert_eq!(sent[1]["text"], "qcc context");
     }
 }

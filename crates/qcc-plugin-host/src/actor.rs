@@ -779,6 +779,19 @@ impl State {
         if !self.permissions.files {
             return Err(self.denied("files"));
         }
+        let home_path = match &call {
+            ThreadsCall::ReadFile { root: FileRoot::Home, path } => Some(path),
+            ThreadsCall::ListFiles { root: FileRoot::Home, dir } => Some(dir),
+            _ => None,
+        };
+        if let Some(path) = home_path
+            && !self.permissions.allows_home_path(path)
+        {
+            return Err(format!(
+                "plugin {} may not read {path:?} in the home folder: its home-files permission does not name it",
+                self.plugin_id
+            ));
+        }
         (self.services.threads)(&self.plugin_id, call)
     }
 }
@@ -787,6 +800,8 @@ fn file_root(root: imports::files::Root) -> FileRoot {
     match root {
         imports::files::Root::Thread(thread) => FileRoot::Thread(ThreadId(thread)),
         imports::files::Root::Own => FileRoot::Own,
+        imports::files::Root::WorkingDir(dir) => FileRoot::WorkingDir(dir),
+        imports::files::Root::Home => FileRoot::Home,
     }
 }
 

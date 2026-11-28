@@ -27,7 +27,9 @@ use qcc_plugin_sdk::json::str_field;
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{Message, add_usage, base64, boundary_at, option};
+use qcc_plugin_sdk::{
+    Message, add_usage, attachments_note, base64, boundary_at, message, option, slash_command,
+};
 use serde_json::{Value, json};
 
 /// The prefix of our MCP status requests' ids.
@@ -162,6 +164,9 @@ pub struct Bridge {
     /// the session's transcript a fork from the turn keeps up to
     /// (`--resume-session-at`).
     last_message: Option<String>,
+    /// What qcc had to say along with a slash command, held for the next message
+    /// that is not one (see [`Bridge::compose`]).
+    held_notes: Vec<String>,
 }
 
 fn stream(channel: &str, parent: Option<&str>) -> ItemKey {
@@ -301,7 +306,30 @@ impl Bridge {
             context_queries: 0,
             usage_queries: 0,
             last_message: None,
+            held_notes: Vec::new(),
         }
+    }
+
+    /// The message Claude Code gets for what the user sent. One that starts with a
+    /// slash command goes as exactly the text the user wrote: Claude Code runs a
+    /// command only from a message that is a plain string starting with it, and
+    /// takes the rest of the string as the command's arguments, so qcc's notes (and
+    /// attachments, which a command cannot take, as notes saying where they are) wait
+    /// for the next message.
+    pub fn compose<'a>(
+        &mut self,
+        text: &str,
+        notes: &[String],
+        attachments: &'a [Attachment],
+    ) -> Message<'a> {
+        if slash_command(text).is_some() {
+            self.held_notes.extend(notes.iter().cloned());
+            self.held_notes.extend(attachments_note(&attachments.iter().collect::<Vec<_>>()));
+            return Message { text: text.to_owned(), images: Vec::new() };
+        }
+        let mut all = std::mem::take(&mut self.held_notes);
+        all.extend(notes.iter().cloned());
+        message(text, &all, attachments, true)
     }
 
     /// A read-only session. Claude's own `dontAsk` mode refuses what is not allowed
@@ -1764,5 +1792,23 @@ mod tests {
         assert!(text.contains("a.txt (text/plain, 3 bytes): /data/attachments/a.txt"), "{text}");
         assert!(!text.contains("shot.png"), "{text}");
         assert!(text.ends_with("look"), "{text}");
+    }
+
+    #[test]
+    fn a_command_goes_as_written_and_its_notes_with_the_next_message() {
+        let mut bridge = Bridge::new(None);
+        let attachments = [attachment("shot.png", "image/png", Some(b"abc"))];
+        let notes = ["The user is looking at src/a.rs".to_owned()];
+        let command = bridge.compose("/model haiku", &notes, &attachments);
+        let written: Value =
+            serde_json::from_str(&bridge.prompt_message(&command).writes[0]).unwrap();
+        assert_eq!(written["message"]["content"], "/model haiku");
+
+        let next = bridge.compose("go on", &[], &[]);
+        assert!(next.text.contains("looking at src/a.rs"), "{}", next.text);
+        assert!(next.text.contains("/data/attachments/shot.png"), "{}", next.text);
+        assert!(next.text.ends_with("go on"), "{}", next.text);
+        // Said once.
+        assert_eq!(bridge.compose("again", &[], &[]).text, "again");
     }
 }

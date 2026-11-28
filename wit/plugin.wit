@@ -364,6 +364,9 @@ interface types {
     compact: bool,
     /// The provider can tell which skills its agent finds by itself (`list-skills`).
     list-skills: bool,
+    /// The provider can tell which slash commands its agent runs when a message
+    /// starts with `/name` (`list-commands`).
+    list-commands: bool,
     /// The provider reports what its agent's context window holds, part by part
     /// (`context-usage` deltas).
     context-usage: bool,
@@ -757,6 +760,13 @@ interface types {
     /// directory, when given, is a thread's: the agent's skills there include the
     /// project's own (such as `.claude/skills` or `.agents/skills` in it).
     list-skills(option<string>),
+    /// The slash commands the agent runs when a message sent through qcc starts
+    /// with `/name`: its built-in ones and the user's and the project's, in the
+    /// working directory when one is given. Only commands that work in a qcc
+    /// session; a provider leaves out the ones that only make sense in the agent's
+    /// own terminal UI or that qcc does itself. Answered with `commands`, usually
+    /// `deferred`.
+    list-commands(option<string>),
     /// Change the qcc MCP servers of the running session, even mid-turn. Sent only
     /// to a provider that declared `mcp-live`.
     set-mcp-servers(mcp-servers-update),
@@ -1033,11 +1043,23 @@ interface types {
     path: option<string>,
   }
 
+  /// A slash command an agent runs when a message starts with `/name`.
+  record agent-command {
+    /// Without the slash.
+    name: string,
+    description: string,
+    /// What goes after the name, as the agent describes it (`<file>`, `[name]`).
+    argument-hint: option<string>,
+    /// Where it is from, in the agent's own words (`built-in`, `user`, `project`).
+    source: option<string>,
+  }
+
   variant outcome {
     done,
     session-started(session-started),
     models(list<model-info>),
     skills(list<agent-skill>),
+    commands(list<agent-command>),
     rate-limits(rate-limits),
     /// The working directory prepared for the thread.
     environment-ready(string),
@@ -1252,7 +1274,8 @@ interface comments {
 }
 
 /// Permission `files`. Read text files where a thread works and in the plugin's
-/// own data folder; nothing else. For settings and instructions people keep next to
+/// own data folder, and in the folders of the user's home that `home-files` names;
+/// nothing else. For settings and instructions people keep next to
 /// their code, such as `.qcc/<something>/*.md`.
 interface files {
   use types.{thread-id};
@@ -1262,6 +1285,14 @@ interface files {
     thread(thread-id),
     /// The plugin's own folder in qcc's data: `<data>/plugin-data/<plugin-id>`.
     %own,
+    /// A folder some thread works in, named by its path: for a request about a
+    /// working directory rather than a thread (`list-skills`, `list-commands`).
+    /// Any other folder is refused.
+    working-dir(string),
+    /// The user's home folder, but only the folders under it that the plugin's
+    /// `home-files` permission names (`.config/opencode`, …), and what is inside
+    /// them. A link in them may lead elsewhere under the home folder, not out of it.
+    home,
   }
 
   /// The text of a file, up to 1 MiB; none when there is no such file. `path` is

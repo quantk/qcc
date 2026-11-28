@@ -22,7 +22,7 @@ use qcc_plugin_sdk::jsonrpc::{Incoming, Peer, RpcError};
 pub use qcc_plugin_sdk::stdio::Output;
 use qcc_plugin_sdk::stdio::{self, LineBridge};
 use qcc_plugin_sdk::types::*;
-use qcc_plugin_sdk::{Message, boundary_at, option};
+use qcc_plugin_sdk::{Message, boundary_at, option, slash_command};
 use serde_json::{Value, json};
 
 /// What a pending request of ours is for.
@@ -38,22 +38,59 @@ enum Call {
     Interrupt,
 }
 
-/// What waits for the agent to take it: a prompt, or a request to compact.
+/// The id of our `skills/list`, outside the peer's numbering (like the limits'
+/// read), so the requests of a session keep their numbers.
+const SKILLS_ID: &str = "qcc-skills";
+
+/// A user message as the bridge keeps it until it goes out: its `input` depends on
+/// the skills Codex has, which may not be known yet.
+struct Prompt {
+    text: String,
+    /// Paths of the images Codex is to look at.
+    images: Vec<String>,
+}
+
+impl Prompt {
+    fn of(message: &Message) -> Self {
+        let images = message.images.iter().map(|image| image.path.clone()).collect();
+        Self { text: message.text.clone(), images }
+    }
+}
+
 /// The `input` of a turn: the images, which Codex reads from their files, then the
-/// text.
-fn input(message: &Message) -> Value {
-    let mut input: Vec<Value> = message
-        .images
-        .iter()
-        .map(|image| json!({"type": "localImage", "path": image.path}))
-        .collect();
-    input.push(json!({"type": "text", "text": message.text, "text_elements": []}));
+/// text. A message that starts with `/name` of one of Codex's skills is how qcc
+/// writes using a skill, which Codex spells `$name`: the text says `$name` and a
+/// `skill` item names the skill's file, as Codex's own UI sends it. Any other
+/// `/name` goes as written.
+fn input(prompt: &Prompt, skills: &HashMap<String, String>) -> Value {
+    let mut input: Vec<Value> =
+        prompt.images.iter().map(|image| json!({"type": "localImage", "path": image})).collect();
+    let mut text = prompt.text.clone();
+    if let Some((name, _)) = slash_command(&prompt.text)
+        && let Some(path) = skills.get(name)
+    {
+        input.push(json!({"type": "skill", "name": name, "path": path}));
+        text.replace_range(..1, "$");
+    }
+    input.push(json!({"type": "text", "text": text, "text_elements": []}));
     Value::Array(input)
 }
 
+/// The skills of a `skills/list` answer that are on, by name: where each one's
+/// `SKILL.md` is.
+fn skill_paths(result: &Value) -> HashMap<String, String> {
+    let entries = result["data"].as_array().into_iter().flatten();
+    entries
+        .flat_map(|entry| entry["skills"].as_array().into_iter().flatten())
+        .filter(|skill| skill["enabled"] != false)
+        .filter_map(|skill| {
+            Some((skill["name"].as_str()?.to_owned(), skill["path"].as_str()?.to_owned()))
+        })
+        .collect()
+}
+
 enum Waiting {
-    /// The `input` of a `turn/start`.
-    Prompt(Value),
+    Prompt(Prompt),
     Compact,
 }
 
@@ -118,6 +155,10 @@ pub struct Bridge {
     effort: Option<String>,
     writable_roots: Vec<String>,
     mcp_servers: Vec<McpServer>,
+    /// Codex's skills by name, with the path of each one's file, once it answered
+    /// `skills/list`. A prompt sent before goes as written; Codex's model still
+    /// finds a skill named `/name`, only less surely.
+    skills: HashMap<String, String>,
 }
 
 /// How qcc introduces itself in `initialize`.
@@ -225,6 +266,7 @@ impl Bridge {
             effort,
             writable_roots,
             mcp_servers,
+            skills: HashMap::new(),
         };
         let initialize = bridge.peer.request(
             "initialize",
@@ -241,7 +283,7 @@ impl Bridge {
 
     /// [`Bridge::prompt`] with images to look at.
     pub fn prompt_message(&mut self, message: &Message) -> Output {
-        self.waiting.push_back(Waiting::Prompt(input(message)));
+        self.waiting.push_back(Waiting::Prompt(Prompt::of(message)));
         let mut output = Output::default();
         self.send_next_prompt(&mut output);
         output
@@ -264,9 +306,12 @@ impl Bridge {
             return;
         };
         let request = match next {
-            Waiting::Prompt(input) => self.peer.request(
+            Waiting::Prompt(prompt) => self.peer.request(
                 "turn/start",
-                json!({"threadId": thread, "input": input}),
+                json!({
+                    "threadId": thread,
+                    "input": input(&prompt, &self.skills),
+                }),
                 Call::TurnStart,
             ),
             Waiting::Compact => {
@@ -296,7 +341,7 @@ impl Bridge {
             return self.prompt_message(message);
         }
         let mut output = Output::default();
-        self.steers_pending.push(input(message));
+        self.steers_pending.push(input(&Prompt::of(message), &self.skills));
         self.send_steers(&mut output);
         output
     }
@@ -388,6 +433,8 @@ impl Bridge {
                            "method": crate::limits::READ, "params": {}})
                     .to_string(),
                 );
+                // Which `/name` is one of Codex's skills.
+                output.writes.push(self.skills_request());
             }
             (Call::Thread, Ok(result)) => {
                 let thread = str_field(&result["thread"], "id").to_owned();
@@ -445,6 +492,12 @@ impl Bridge {
             // The turn's own `turn/completed` is what counts.
             (Call::Interrupt, _) => {}
         }
+    }
+
+    fn skills_request(&self) -> String {
+        json!({"jsonrpc": "2.0", "id": SKILLS_ID, "method": "skills/list",
+               "params": {"cwds": [self.cwd]}})
+        .to_string()
     }
 
     fn thread_request(&mut self) -> String {
@@ -534,6 +587,11 @@ impl Bridge {
         // The account's, whatever the turn is doing.
         if method == "account/rateLimits/updated" {
             output.deltas.extend(crate::limits::from_update(params).map(Delta::RateLimits));
+            return;
+        }
+        // A skill added or changed on disk: ask again, keeping the old list meanwhile.
+        if method == "skills/changed" {
+            output.writes.push(self.skills_request());
             return;
         }
         // MCP servers start with the thread, before any turn, and report one by one.
@@ -733,6 +791,16 @@ impl LineBridge for Bridge {
             }
             return output;
         }
+        // The answer to our own `skills/list`. An error leaves the list as it was.
+        if line.contains(SKILLS_ID)
+            && let Ok(message) = serde_json::from_str::<Value>(line)
+            && message["id"] == SKILLS_ID
+        {
+            if let Some(result) = message.get("result") {
+                self.skills = skill_paths(result);
+            }
+            return output;
+        }
         match self.peer.classify(line) {
             Incoming::Response { tag, result } => self.response(tag, result, &mut output),
             Incoming::Notification { method, params } => {
@@ -795,7 +863,7 @@ mod tests {
                 let value: Value = serde_json::from_str(line).unwrap();
                 value["method"].as_str().unwrap_or("response").to_owned()
             })
-            .filter(|method| method != crate::limits::READ)
+            .filter(|method| method != crate::limits::READ && method != "skills/list")
             .collect()
     }
 
@@ -1208,5 +1276,41 @@ mod tests {
                 {"type": "text", "text": "look", "text_elements": []},
             ])
         );
+    }
+
+    #[test]
+    fn a_skill_named_with_a_slash_goes_as_codex_s_own() {
+        let mut bridge = started();
+        bridge.on_line(&notify("turn/completed", json!({"turn": {"id": "t1"}})));
+        bridge.on_line(
+            &json!({"id": SKILLS_ID, "result": {"data": [{"cwd": "/w", "skills": [
+                {"name": "tdd", "path": "/w/.agents/skills/tdd/SKILL.md", "enabled": true},
+                {"name": "off", "path": "/o/SKILL.md", "enabled": false},
+            ]}]}})
+            .to_string(),
+        );
+        let sent = |bridge: &mut Bridge, text: &str| -> Value {
+            let output = bridge.prompt(text);
+            let request: Value = serde_json::from_str(&output.writes[0]).unwrap();
+            bridge.on_line(&notify("turn/completed", json!({"turn": {"id": "t"}})));
+            request["params"]["input"].clone()
+        };
+        assert_eq!(
+            sent(&mut bridge, "/tdd the parser"),
+            json!([
+                {"type": "skill", "name": "tdd", "path": "/w/.agents/skills/tdd/SKILL.md"},
+                {"type": "text", "text": "$tdd the parser", "text_elements": []},
+            ])
+        );
+        for plain in ["/off now", "/usr/bin/env", "use /tdd later"] {
+            assert_eq!(
+                sent(&mut bridge, plain),
+                json!([{"type": "text", "text": plain, "text_elements": []}]),
+                "{plain}"
+            );
+        }
+        // A skill added on disk: Codex says so and the list is asked for again.
+        let changed = bridge.on_line(&notify("skills/changed", json!({})));
+        assert!(changed.writes[0].contains("skills/list"), "{:?}", changed.writes);
     }
 }

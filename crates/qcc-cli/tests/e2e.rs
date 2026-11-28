@@ -2944,6 +2944,28 @@ fn the_composer_finds_a_threads_paths_and_its_agents_skills_there() {
     let there = daemon.qcc(&["provider", "skills", "echo", "--thread", &thread, "--json"]).json();
     assert_eq!(names(&there), ["echo-own", "echo-project"]);
     assert!(there["skills"][1]["path"].as_str().unwrap().starts_with(work));
+
+    // Its slash commands, by name, the project's among them when asked about the
+    // thread; a command sent reaches the agent as one.
+    let commands = |args: &[&str]| -> Vec<String> {
+        let mut all = vec!["provider", "commands", "echo", "--json"];
+        all.extend(args);
+        let listed = daemon.qcc(&all).json();
+        listed["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    assert_eq!(commands(&[]), ["ask", "fail", "notes", "skills", "slow", "tool"]);
+    assert!(commands(&["--thread", &thread]).contains(&"echo-project-command".to_owned()));
+    assert!(
+        daemon.qcc(&["provider", "commands", "echo"]).stdout.contains("/slow <text>  (built-in)")
+    );
+    assert!(daemon.qcc(&["thread", "send", &thread, "/tool probe"]).ok);
+    let told = daemon.qcc(&["thread", "wait", &thread, "--json"]).json();
+    assert!(told["threads"][0]["status"] != "failed", "{told}");
 }
 
 #[test]

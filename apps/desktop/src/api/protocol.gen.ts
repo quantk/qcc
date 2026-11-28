@@ -3,6 +3,20 @@
 /**  What kind of thing an agent last did. Mirrors the item shapes. */
 export type ActivityKind = "agentMessage" | "reasoning" | "plan" | "command" | "fileChange" | "fileRead" | "search" | "tool" | "extension";
 
+/**
+ *  A slash command an agent runs when a message sent through qcc starts with
+ *  `/name`, as its provider reports it.
+ */
+export type AgentCommand = {
+	/**  Without the slash. */
+	name: string,
+	description: string,
+	/**  What goes after the name, as the agent describes it. */
+	argument_hint?: string | null,
+	/**  Where it is from, in the agent's own words (`built-in`, `user`, `project`). */
+	source?: string | null,
+};
+
 /**  A skill an agent finds by itself (its own folders, its plugins), as it reports it. */
 export type AgentSkill = {
 	name: string,
@@ -924,6 +938,8 @@ export type PluginPermissions = {
 	notifications?: boolean,
 	/**  Executables the plugin may run. */
 	process: string[],
+	/**  Folders of the user's home whose files it reads, relative to the home. */
+	home_files?: string[],
 };
 
 export type PluginResult = {
@@ -1031,6 +1047,8 @@ export type ProviderCapabilities = {
 	compact?: boolean,
 	/**  The provider can tell which skills its agent finds by itself. */
 	list_skills?: boolean,
+	/**  The provider can tell which slash commands its agent runs from a message. */
+	list_commands?: boolean,
 	/**
 	 *  The provider reports what its agent's context window holds, part by part
 	 *  (`context.usage` deltas). Without it, only how full the window is is known.
@@ -1051,6 +1069,18 @@ export type ProviderCapabilities = {
 	 *  holds the conversation up to there, leaving the first one as it was.
 	 */
 	fork?: ForkSupport,
+};
+
+export type ProviderCommandsParams = {
+	provider: ProviderId,
+	refresh?: boolean,
+	/**  Ask about this thread's working directory. */
+	thread?: ThreadId | null,
+};
+
+export type ProviderCommandsResult = {
+	/**  By name. */
+	commands: AgentCommand[],
 };
 
 /**  Declared by the plugin that contributes the provider. */
@@ -2084,6 +2114,7 @@ export type Methods = {
 	"thread.archive": { params: ThreadArchiveParams; result: ThreadArchiveResult },
 	"thread.changes": { params: ThreadChangesParams; result: ThreadChangesResult },
 	"thread.paths": { params: ThreadPathsParams; result: ThreadPathsResult },
+	"provider.commands": { params: ProviderCommandsParams; result: ProviderCommandsResult },
 	"thread.diff": { params: ThreadDiffParams; result: ThreadDiffResult },
 	"thread.deliver": { params: ThreadDeliverParams; result: ThreadDeliverResult },
 	"thread.isolate": { params: ThreadIsolateParams; result: ThreadResult },

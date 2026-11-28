@@ -70,7 +70,14 @@ fn basic_turn() {
     );
     assert_eq!(
         sent_methods(&processes),
-        ["initialize", "initialized", "thread/start", "account/rateLimits/read", "turn/start"]
+        [
+            "initialize",
+            "initialized",
+            "thread/start",
+            "account/rateLimits/read",
+            "skills/list",
+            "turn/start"
+        ]
     );
     let thread_start = &processes.stdin_messages()[2]["params"];
     assert_eq!(thread_start["cwd"], "/work");

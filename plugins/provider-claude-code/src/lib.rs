@@ -5,6 +5,7 @@
 //! process and the bridge.
 
 pub mod bridge;
+pub mod commands;
 pub mod limits;
 pub mod models;
 mod probe;
@@ -72,6 +73,7 @@ impl Provider for ClaudeCode {
                 mcp_live: true,
                 compact: true,
                 list_skills: true,
+                list_commands: true,
                 context_usage: true,
                 images: true,
                 rate_limits: true,
@@ -154,8 +156,10 @@ impl Provider for ClaudeCode {
         self.sessions.insert(&start.thread, process, bridge);
         deltas::emit(&start.thread, &[Delta::SessionReset])?;
         if let Some(prompt) = &start.prompt {
-            let prompt = message(prompt, &start.prompt_notes, &start.prompt_attachments, true);
-            self.sessions.run(&start.thread, |bridge| bridge.prompt_message(&prompt))?;
+            self.sessions.run(&start.thread, |bridge| {
+                let prompt = bridge.compose(prompt, &start.prompt_notes, &start.prompt_attachments);
+                bridge.prompt_message(&prompt)
+            })?;
         }
         // After the prompt, which must not wait on it; the agent answers either way.
         // Only a status: an agent already gone is reported by its exit, not here.
@@ -175,8 +179,10 @@ impl Provider for ClaudeCode {
     }
 
     fn input(&mut self, input: ThreadInput) -> Result<(), String> {
-        let message = message(&input.text, &input.notes, &input.attachments, true);
-        self.sessions.run(&input.thread, |bridge| bridge.prompt_message(&message))
+        self.sessions.run(&input.thread, |bridge| {
+            let message = bridge.compose(&input.text, &input.notes, &input.attachments);
+            bridge.prompt_message(&message)
+        })
     }
 
     fn compact(&mut self, thread: String) -> Result<(), String> {
@@ -184,8 +190,10 @@ impl Provider for ClaudeCode {
     }
 
     fn steer(&mut self, input: ThreadInput) -> Result<(), String> {
-        let message = message(&input.text, &input.notes, &input.attachments, true);
-        self.sessions.run(&input.thread, |bridge| bridge.steer_message(&message))
+        self.sessions.run(&input.thread, |bridge| {
+            let message = bridge.compose(&input.text, &input.notes, &input.attachments);
+            bridge.steer_message(&message)
+        })
     }
 
     fn interrupt(&mut self, thread: String) -> Result<(), String> {
@@ -217,6 +225,10 @@ impl Provider for ClaudeCode {
 
     fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {
         self.probe(&[models::request()], models::probe())
+    }
+
+    fn commands(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentCommand>>, String> {
+        self.probe_in(cwd, &commands::requests(), commands::probe())
     }
 
     fn skills(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {

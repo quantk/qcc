@@ -1,6 +1,6 @@
 //! What plugins offer besides sessions: models, the `threads` import, commands and UI.
 
-use qcc_domain::{AgentSkill, ChangeScope, ModelInfo, ProviderId, ThreadId};
+use qcc_domain::{AgentCommand, AgentSkill, ChangeScope, ModelInfo, ProviderId, ThreadId};
 use qcc_plugin_host::{
     Contribution, NewComment, Outcome, PluginRequest, ProviderRequest, ThreadsAnswer, ThreadsCall,
     UiRequest,
@@ -8,10 +8,11 @@ use qcc_plugin_host::{
 use qcc_protocol::jsonrpc::{RpcError, codes};
 use qcc_protocol::methods::{
     CommandContribution, CommandListResult, CommandRunParams, CommandRunResult, CommentAddParams,
-    Empty, MessageContext, ProviderModelsParams, ProviderModelsResult, ProviderSkillsParams,
-    ProviderSkillsResult, SendMode, ThreadChangesResult, ThreadDiffResult, ThreadSendParams,
-    ThreadSetSkillParams, ThreadSpawnParams, UI_CHANGED, UiChangedNotification,
-    UiContributionsResult, UiItemContribution, UiTreeResult, UiViewContribution,
+    Empty, MessageContext, ProviderCommandsParams, ProviderCommandsResult, ProviderModelsParams,
+    ProviderModelsResult, ProviderSkillsParams, ProviderSkillsResult, SendMode,
+    ThreadChangesResult, ThreadDiffResult, ThreadSendParams, ThreadSetSkillParams,
+    ThreadSpawnParams, UI_CHANGED, UiChangedNotification, UiContributionsResult,
+    UiItemContribution, UiTreeResult, UiViewContribution,
 };
 use serde_json::Value;
 
@@ -45,12 +46,9 @@ impl Core {
 
     pub(super) fn provider_skills(&mut self, p: ProviderSkillsParams, responder: Responder) {
         let ProviderSkillsParams { provider, refresh, thread } = p;
-        let cwd = match thread {
-            Some(id) => match self.supervisor.thread(&id) {
-                Some(thread) => Some(thread.cwd.clone()),
-                None => return responder.reply::<Empty>(Err(thread_not_found(&id))),
-            },
-            None => None,
+        let cwd = match self.cwd_of(thread) {
+            Ok(cwd) => cwd,
+            Err(error) => return responder.reply::<Empty>(Err(error)),
         };
         let key = (provider.clone(), cwd.clone());
         if !refresh && let Some(skills) = self.agent_skills.get(&key) {
@@ -72,6 +70,62 @@ impl Core {
             done,
             responder,
         );
+    }
+
+    pub(super) fn provider_commands(&mut self, p: ProviderCommandsParams, responder: Responder) {
+        let ProviderCommandsParams { provider, refresh, thread } = p;
+        let cwd = match self.cwd_of(thread) {
+            Ok(cwd) => cwd,
+            Err(error) => return responder.reply::<Empty>(Err(error)),
+        };
+        let can = match self.provider_of(&provider) {
+            Ok((_, info)) => info.capabilities.list_commands,
+            Err(error) => return responder.reply::<Empty>(Err(error)),
+        };
+        if !can {
+            return responder.reply(Ok(ProviderCommandsResult { commands: Vec::new() }));
+        }
+        let key = (provider.clone(), cwd.clone());
+        if !refresh && let Some(commands) = self.agent_commands.get(&key) {
+            return responder.reply(Ok(ProviderCommandsResult { commands: commands.clone() }));
+        }
+        let pick = |outcome| match outcome {
+            Outcome::Commands(mut commands) => {
+                commands.sort_by(|a: &AgentCommand, b| a.name.cmp(&b.name));
+                Ok(commands)
+            }
+            other => Err(other),
+        };
+        let done = move |result, responder| Command::CommandsListed { key, result, responder };
+        self.list_from_provider(
+            provider,
+            ProviderRequest::ListCommands { cwd },
+            "commands",
+            pick,
+            done,
+            responder,
+        );
+    }
+
+    /// The working directory of the thread a question is about, if it is about one.
+    fn cwd_of(&self, thread: Option<ThreadId>) -> Result<Option<String>, RpcError> {
+        match thread {
+            Some(id) => match self.supervisor.thread(&id) {
+                Some(thread) => Ok(Some(thread.cwd.clone())),
+                None => Err(thread_not_found(&id)),
+            },
+            None => Ok(None),
+        }
+    }
+
+    pub(super) fn commands_listed(
+        &mut self,
+        key: (ProviderId, Option<String>),
+        result: Result<Vec<AgentCommand>, String>,
+        responder: Responder,
+    ) {
+        let reply = listed(&mut self.agent_commands, key, result);
+        responder.reply(reply.map(|commands| ProviderCommandsResult { commands }));
     }
 
     /// Ask a provider for a list in the background; `done` brings the answer back

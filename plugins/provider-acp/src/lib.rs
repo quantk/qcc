@@ -5,12 +5,14 @@
 //! The dialect lives in [`bridge`], which is pure.
 
 pub mod bridge;
+pub mod catalog;
 pub mod models;
 
 use qcc_plugin_sdk::prelude::*;
 use qcc_plugin_sdk::stdio::{Probes, Sessions};
 
 use bridge::{Bridge, Config, Prompt};
+use catalog::{Catalog, Fs, Location, Place};
 
 /// An agent this plugin can run.
 struct Agent {
@@ -28,6 +30,74 @@ struct Agent {
     fork: bool,
     /// Its mark as an SVG document, with where it comes from noted inside.
     icon: Option<&'static str>,
+    /// Where it keeps its skills and commands on disk, for listing them without a
+    /// session. `None`: it cannot be told.
+    catalog: Option<&'static Catalog>,
+}
+
+/// opencode's skills and commands, as its documentation (opencode.ai/docs/skills,
+/// /docs/commands) says it finds them, what wins first. opencode also looks in the
+/// folders above the working directory; qcc reads only the directory itself. The
+/// user's folders must be named in `home-files` in `plugin.toml`.
+const OPENCODE_CATALOG: Catalog = Catalog {
+    skills: &[
+        Location { place: Place::Project, path: ".opencode/skills" },
+        Location { place: Place::Home, path: ".config/opencode/skills" },
+        Location { place: Place::Project, path: ".agents/skills" },
+        Location { place: Place::Home, path: ".agents/skills" },
+        Location { place: Place::Project, path: ".claude/skills" },
+        Location { place: Place::Home, path: ".claude/skills" },
+    ],
+    commands: &[
+        Location { place: Place::Project, path: ".opencode/commands" },
+        Location { place: Place::Project, path: ".opencode/command" },
+        Location { place: Place::Home, path: ".config/opencode/commands" },
+        Location { place: Place::Home, path: ".config/opencode/command" },
+    ],
+    configs: &[
+        Location { place: Place::Project, path: "opencode.json" },
+        Location { place: Place::Project, path: "opencode.jsonc" },
+        Location { place: Place::Home, path: ".config/opencode/opencode.json" },
+        Location { place: Place::Home, path: ".config/opencode/opencode.jsonc" },
+    ],
+    // What `available_commands_update` lists besides the files (opencode 1.19).
+    builtin: &[
+        ("init", "guided AGENTS.md setup", None),
+        (
+            "review",
+            "review changes [commit|branch|pr], defaults to uncommitted",
+            Some("[commit|branch|pr]"),
+        ),
+    ],
+};
+
+/// The host's files: the user's home folders and a thread's working directory.
+struct HostFs {
+    cwd: Option<String>,
+}
+
+impl HostFs {
+    fn root(&self, place: Place) -> Option<files::Root> {
+        match place {
+            Place::Home => Some(files::Root::Home),
+            Place::Project => self.cwd.clone().map(files::Root::WorkingDir),
+        }
+    }
+}
+
+impl Fs for HostFs {
+    fn list(&self, place: Place, dir: &str) -> Vec<String> {
+        let Some(root) = self.root(place) else { return Vec::new() };
+        files::list(&root, dir).unwrap_or_else(|error| {
+            log::debug(format!("cannot list {dir}: {error}"));
+            Vec::new()
+        })
+    }
+
+    fn read(&self, place: Place, path: &str) -> Option<String> {
+        let root = self.root(place)?;
+        files::read(&root, path).ok().flatten()
+    }
 }
 
 /// opencode's permission rules for a read-only session: everything refused but the
@@ -45,6 +115,7 @@ const AGENTS: &[Agent] = &[Agent {
     read_only_env: Some(("OPENCODE_PERMISSION", OPENCODE_READ_ONLY)),
     fork: true,
     icon: Some(include_str!("../icons/opencode.svg")),
+    catalog: Some(&OPENCODE_CATALOG),
 }];
 
 #[derive(Default)]
@@ -81,9 +152,9 @@ impl Provider for AcpProvider {
                 mcp_live: false,
                 // ACP has no way to ask for it.
                 compact: false,
-                // The protocol's command list mixes skills with commands, and
-                // `opencode debug skill` loses output written into a pipe.
-                list_skills: false,
+                // Read from the agent's folders: ACP tells them only in a session.
+                list_skills: self.agent.catalog.is_some(),
+                list_commands: self.agent.catalog.is_some(),
                 context_usage: false,
                 // As images when the agent says it takes them, by path otherwise.
                 images: true,
@@ -159,6 +230,18 @@ impl Provider for AcpProvider {
         let bridge = self.sessions.bridge(&answer.thread)?;
         let output = bridge.resolve(&answer.request_id, &answer.resolution)?;
         self.sessions.apply(&answer.thread, output)
+    }
+
+    fn skills(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentSkill>>, String> {
+        let Some(catalog) = self.agent.catalog else { return Ok(Reply::Now(Vec::new())) };
+        let project = cwd.is_some();
+        Ok(Reply::Now(catalog.skills(&HostFs { cwd }, project)))
+    }
+
+    fn commands(&mut self, cwd: Option<String>) -> Result<Reply<Vec<AgentCommand>>, String> {
+        let Some(catalog) = self.agent.catalog else { return Ok(Reply::Now(Vec::new())) };
+        let project = cwd.is_some();
+        Ok(Reply::Now(catalog.commands(&HostFs { cwd }, project)))
     }
 
     fn models(&mut self) -> Result<Reply<Vec<ModelInfo>>, String> {

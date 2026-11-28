@@ -45,6 +45,7 @@ impl Provider for Codex {
                 mcp_live: false,
                 compact: true,
                 list_skills: true,
+                list_commands: false,
                 context_usage: false,
                 // Codex reads images from their files (`localImage`); the bytes it
                 // is given go unused.

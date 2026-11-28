@@ -118,6 +118,19 @@ agent, removing its worktree, archived, not archived, kept) and how many are don
 dialog lets the archive go on. A quick archive shows nothing extra. If a thread still refuses, the
 app says which ones stayed and offers to archive them anyway.
 
+Typing `/` at the start of a message or after a space opens a list of skills over the composer:
+the qcc skills this thread's sessions get, marked `qcc`, and the ones its agent finds by itself,
+asked in the thread's working directory so the project's own (`.claude/skills`, `.agents/skills`)
+are there too, marked by where the agent has them from. Typing `@` the same way lists the files
+and folders of the thread's working directory (its worktree, for a thread in one): what git
+ignores, `.git`, `node_modules`, `target` and the like are left out. Both lists narrow as you type,
+fuzzily (`cmpsr` finds `src/Composer.tsx`; a letter in a file's name, at the start of a word or
+right after the previous one counts more), at most 50 entries. ↑ and ↓ move, Enter or a click
+puts the entry in (`/name ` or `@path `) instead of sending, Tab does the same except that on a
+folder it puts in `@folder/` and goes on listing what is inside, and Escape closes the list until
+the next word. A path with spaces is written in quotes. opencode does not say which skills it has,
+so for its threads the list holds only qcc's.
+
 A command's or tool's output unfolds to its first 12 lines with "Show all N lines" under them;
 it has no scrolling of its own, so the wheel always scrolls the timeline. What you open or close
 stays where it is on the screen: the timeline stops following the end until you scroll.

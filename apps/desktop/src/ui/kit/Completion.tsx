@@ -167,9 +167,24 @@ export function useCompletion(options: {
 /** The open list, meant to sit over the field it completes. */
 export function CompletionList({ completion, id, className }: { completion: Completion; id: string; className?: string }) {
   const list = useRef<HTMLDivElement>(null);
+  // Only the list scrolls to the chosen entry: `scrollIntoView` would move the
+  // timeline behind it as well.
   useEffect(() => {
-    list.current?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [completion.active]);
+    const box = list.current;
+    // By value: cmdk marks the entry selected only after this runs.
+    const entry = [...(box?.querySelectorAll<HTMLElement>("[cmdk-item]") ?? [])].find(
+      (element) => element.dataset.value === completion.active,
+    );
+    if (!box || !entry) return;
+    // The first entry of a group brings its heading into view with it.
+    const group = entry.closest<HTMLElement>("[cmdk-group]");
+    const first = group?.querySelector("[cmdk-item]") === entry;
+    const top = (first && group ? group : entry).getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop;
+    if (top < box.scrollTop) box.scrollTop = top;
+    else if (top + entry.offsetHeight > box.scrollTop + box.clientHeight) {
+      box.scrollTop = top + entry.offsetHeight - box.clientHeight;
+    }
+  }, [completion.active, completion.open]);
   if (!completion.open) return null;
   return (
     <Command
@@ -181,7 +196,7 @@ export function CompletionList({ completion, id, className }: { completion: Comp
       onMouseDown={(event) => event.preventDefault()}
       className={cn("h-auto rounded-lg! border shadow-md", className)}
     >
-      <CommandList ref={list} id={id} role="listbox" className="max-h-72">
+      <CommandList ref={list} id={id} role="listbox" className="max-h-[min(18rem,40vh)]">
         {completion.sections.map(({ source, items }) => (
           <CommandGroup key={source.id} heading={source.title}>
             {items.map((item) => {

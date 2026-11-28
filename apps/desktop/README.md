@@ -89,6 +89,7 @@ works as a screen, a tab or a panel tab.
 | A button on a project or folder in the sidebar | `ui.groupAction` | `modules/new-thread`, `modules/projects` |
 | How a timeline item is drawn | `ui.itemRenderer` | `modules/timeline/items.tsx` |
 | An entry of the "…" menu under a reply, disabled with a reason when it cannot run | `ui.itemMenuItem` | `modules/fork` |
+| A completion list in the composer, opened by a trigger character (`/`, `@`) | `ui.composerCompletion` | `modules/skills`, `modules/mentions` |
 | A command (palette, shortcut, sidebar buttons) | `ui.command` | `modules/new-thread`, `modules/projects`, `modules/settings` |
 | A modal dialog | `ui.showDialog` | `modules/new-thread` |
 
@@ -174,6 +175,20 @@ their bytes. Thumbnails of picked pictures are read by the backend command
 under a sent message, whose pictures are read back with `thread.attachment`. Whether
 the agent looks at images is its provider's `images` capability; the paperclip's hint
 says when it does not.
+
+The composer completes a word that starts with a trigger character at the start of
+the message or after whitespace: `/` for skills, `@` for paths. The lists come from
+`ui.composerCompletion` sources, each with its trigger, a heading and an (often async)
+`complete(query, { thread, provider })`; an answer that arrives after a newer question
+is dropped. `ui/kit/Completion.tsx` holds the hook that finds the word under the caret,
+asks the sources and takes the keys (↑/↓, Enter, Tab, Escape) before the composer's
+own Enter, and the list, a cmdk `Command` whose selection the hook controls while the
+focus stays in the textarea. The word and its replacement are `state/completion.ts`;
+`state/fuzzy.ts` ranks what the window holds (skills) the way the daemon ranks paths
+(`thread.paths`, in `crates/qcc-daemon/src/paths.rs`). The `/` list offers the thread's
+qcc skills that are on and its agent's own, asked with `provider.skills` in the
+thread's directory once per thread (`store.agentSkillsOf`); the `@` list asks the
+daemon on each keystroke and lets it keep the directory's scan.
 
 The timeline reaches its composer through `modules/timeline/composerInput.ts`: a
 thread's composer listens while it is drawn and takes the caret and the focus, and
